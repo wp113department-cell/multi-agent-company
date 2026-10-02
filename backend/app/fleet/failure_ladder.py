@@ -102,7 +102,7 @@ def escalate(agent_name: str, reason: str, trace_id: str = "") -> None:
             )
         )
     except Exception:
-        pass
+        logger.warning("escalate: best-effort step failed", exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -184,7 +184,7 @@ def abort(
             )
         )
     except Exception:
-        pass
+        logger.warning("abort: best-effort step failed", exc_info=True)
     return transitioned
 
 
@@ -218,7 +218,7 @@ def request_human_review(
             )
         )
     except Exception:
-        pass
+        logger.warning("request_human_review: best-effort step failed", exc_info=True)
     return transitioned
 
 

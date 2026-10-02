@@ -11,10 +11,14 @@ Day 14's git-push approval gate registers into this same table/API.
 
 from __future__ import annotations
 
+import asyncio
+
 import logging
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+
+from app.api.budget_gate import require_daily_budget
 from pydantic import BaseModel
 
 from app.fleet.approval_gate import (
@@ -211,7 +215,7 @@ async def dispatch_git_push_decision(task_id: int, approved: bool) -> None:
             try:
                 from app.repo_tools.worktree import remove_worktree
 
-                remove_worktree(task_id, task.repo.local_path)
+                await asyncio.to_thread(remove_worktree, task_id, task.repo.local_path)
             except Exception:
                 logger.debug(
                     "Could not remove worktree for task %d after push (non-fatal)",
@@ -257,7 +261,7 @@ async def _decide_or_409(thread_id: str, approved: bool) -> PendingApprovalRecor
     return row
 
 
-@router.post("/{thread_id}/approve")
+@router.post("/{thread_id}/approve", dependencies=[Depends(require_daily_budget)])
 async def approve_approval(
     thread_id: str,
     background_tasks: BackgroundTasks,

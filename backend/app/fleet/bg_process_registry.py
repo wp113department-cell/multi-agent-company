@@ -408,7 +408,10 @@ async def start_bg_process_liveness_loop() -> None:
                         )
                     )
                 except Exception:
-                    pass
+                    logger.warning(
+                        "start_bg_process_liveness_loop: best-effort step failed",
+                        exc_info=True,
+                    )
 
             hung = await asyncio.to_thread(_sweep_hung_registry_entries)
             if hung:
@@ -435,7 +438,10 @@ async def start_bg_process_liveness_loop() -> None:
                         )
                     )
                 except Exception:
-                    pass
+                    logger.warning(
+                        "start_bg_process_liveness_loop: best-effort step failed",
+                        exc_info=True,
+                    )
         except Exception as exc:
             logger.warning("Background-process liveness sweep error: %s", exc)
 

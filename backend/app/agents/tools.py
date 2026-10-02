@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 import sys
@@ -961,6 +962,8 @@ from app.tools.refactor.batch_edit import (
     BATCH_EDIT_TOOL as _BATCH_EDIT_TOOL,
     batch_edit_handler,
 )
+
+logger = logging.getLogger(__name__)
 
 # mypy --strict flags a renaming `as` import (`X as _X`) as not
 # "explicitly exported" when another module imports the name directly
@@ -5359,7 +5362,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
 
                         set_repo_active_branch_by_path_sync(repo_path, real_branch)
                 except Exception:
-                    pass  # best-effort — the checkout itself already succeeded
+                    logger.warning(
+                        "git_checkout: best-effort step failed", exc_info=True
+                    )  # best-effort — the checkout itself already succeeded
             return out or f"Checked out {target}"
         except Exception as e:
             return f"[ERROR] {e}"

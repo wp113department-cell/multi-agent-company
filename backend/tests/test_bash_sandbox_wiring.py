@@ -64,8 +64,13 @@ def test_coder_bash_extra_env_reaches_the_sandboxed_container(tmp_path: Path) ->
     handlers = make_coder_handlers(
         str(tmp_path), str(tmp_path), extra_env={"CODER_TEST_SECRET": "abc-123"}
     )
-    out = handlers["bash"]({"command": "echo $CODER_TEST_SECRET"})
-    assert "abc-123" in out
+    out = handlers["bash"](
+        {
+            "command": '[ "$CODER_TEST_SECRET" = "abc-123" ] && echo SECRET-SEEN; echo $CODER_TEST_SECRET'
+        }
+    )
+    assert "SECRET-SEEN" in out  # the value reached the container
+    assert "abc-123" not in out  # audit 11: and is masked in tool output
 
 
 def test_scoped_bash_handler_runs_a_real_command_through_the_sandbox(

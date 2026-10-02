@@ -212,7 +212,7 @@ async def rollback_checkpoint(
             )
         )
     except Exception:
-        pass
+        logger.warning("rollback_checkpoint: best-effort step failed", exc_info=True)
 
     return {
         "checkpointId": checkpoint_id,
@@ -310,7 +310,7 @@ async def rollback_prompt(
             )
         )
     except Exception:
-        pass
+        logger.warning("rollback_prompt: best-effort step failed", exc_info=True)
 
     return {
         "roleName": record.role_name,

@@ -74,6 +74,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -97,7 +98,37 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-def _run_bash_command(
+_SECRET_ENV_NAME_RE = re.compile(
+    r"(KEY|SECRET|TOKEN|PASSWORD|PASSWD|CREDENTIAL|DSN|DATABASE_URL|REDIS_URL)",
+    re.IGNORECASE,
+)
+
+
+def _host_env(extra_env: dict[str, str] | None) -> dict[str, str]:
+    """Environment for a host-mode (BASH_SANDBOX_ENABLED=false) command.
+
+    Production audit 11: host mode used to inherit the backend's whole
+    os.environ, so any agent bash command (`env`, `echo $ANTHROPIC_API_KEY`)
+    could read the server's own API keys and database URL. Secret-looking
+    variables are dropped; the task's own extra_env is added back on top.
+    """
+    env = {k: v for k, v in os.environ.items() if not _SECRET_ENV_NAME_RE.search(k)}
+    env.update(extra_env or {})
+    return env
+
+
+def _redact_values(text: str, extra_env: dict[str, str] | None) -> str:
+    """Mask extra_env secret values in command output (production audit 11):
+    the credential vault promised values never reach tool output, but an
+    agent running `env` or `echo $KEY` printed them into the LLM context,
+    task logs and the activity stream."""
+    for value in (extra_env or {}).values():
+        if value and len(value) >= 4:
+            text = text.replace(value, "[REDACTED]")
+    return text
+
+
+def _run_bash_command_raw(
     command: str,
     cwd: str,
     *,
@@ -162,7 +193,7 @@ def _run_bash_command(
         except SandboxUnavailableError as exc:
             return "", f"[SANDBOX UNAVAILABLE] {exc}", -1, False
 
-    env = {**os.environ, **extra_env} if extra_env else None
+    env = _host_env(extra_env)
     if on_output is not None:
         return _run_host_streaming(
             command, cwd, timeout=timeout, env=env, on_output=on_output
@@ -180,6 +211,43 @@ def _run_bash_command(
         return proc.stdout, proc.stderr, proc.returncode, False
     except subprocess.TimeoutExpired:
         return "", f"Command timed out after {timeout}s", -1, True
+
+
+def _run_bash_command(
+    command: str,
+    cwd: str,
+    *,
+    timeout: int,
+    extra_env: dict[str, str] | None = None,
+    image: str | None = None,
+    network: str | None = None,
+    read_only: bool = False,
+    on_output: Callable[[str, str], None] | None = None,
+) -> tuple[str, str, int, bool]:
+    """See _run_bash_command_raw. Adds extra_env value redaction to the
+    returned and streamed output."""
+    if on_output is not None and extra_env:
+        inner = on_output
+
+        def on_output(stream: str, chunk: str) -> None:
+            inner(stream, _redact_values(chunk, extra_env))
+
+    stdout, stderr, code, timed_out = _run_bash_command_raw(
+        command,
+        cwd,
+        timeout=timeout,
+        extra_env=extra_env,
+        image=image,
+        network=network,
+        read_only=read_only,
+        on_output=on_output,
+    )
+    return (
+        _redact_values(stdout, extra_env),
+        _redact_values(stderr, extra_env),
+        code,
+        timed_out,
+    )
 
 
 def _run_host_streaming(

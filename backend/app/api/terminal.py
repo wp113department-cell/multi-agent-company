@@ -226,7 +226,14 @@ async def terminal_websocket(websocket: WebSocket, chat_session_id: str) -> None
             await pump_task
         except (asyncio.CancelledError, Exception):
             pass
-        pty.close()
+        # Off the event loop (docker kill + wait can take seconds), shielded
+        # so a cancelled handler (client gone) still finishes the kill.
+        close_task = asyncio.ensure_future(asyncio.to_thread(pty.close))
+        try:
+            await asyncio.shield(close_task)
+        except asyncio.CancelledError:
+            await asyncio.wait({close_task}, timeout=20)
+            raise
         get_audit_log().append(
             action_type="pty_terminal_close",
             agent_name=user_id,

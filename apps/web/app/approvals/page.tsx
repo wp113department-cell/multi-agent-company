@@ -46,7 +46,9 @@ async function apiFetch<T>(path: string, method = "GET"): Promise<T> {
 }
 
 function DetailsPreview({ details }: { details: Record<string, unknown> }) {
-  const entries = Object.entries(details).filter(([, v]) => v !== null && v !== undefined && v !== "");
+  const entries = Object.entries(details).filter(
+    ([, v]) => v !== null && v !== undefined && v !== "",
+  );
   if (entries.length === 0) return null;
   return (
     <dl className="mt-2 grid grid-cols-1 gap-x-4 gap-y-1 text-xs text-slate-600 dark:text-slate-400 sm:grid-cols-2">
@@ -133,7 +135,10 @@ function ApprovalCard({
             {approval.decidedBy ? ` by ${approval.decidedBy}` : ""}
           </span>
           {approval.taskId && (
-            <a href={`/tasks/${approval.taskId}`} className="text-blue-600 hover:underline dark:text-blue-400">
+            <a
+              href={`/tasks/${approval.taskId}`}
+              className="text-blue-600 hover:underline dark:text-blue-400"
+            >
               View task →
             </a>
           )}
@@ -163,30 +168,33 @@ export default function ApprovalsPage() {
 
   useEffect(() => {
     void refresh();
-    const interval = setInterval(() => void refresh(), 5000);
+    // Skip polls while the tab is hidden (audit 09); refresh resumes when it's visible.
+    const interval = setInterval(() => {
+      if (!document.hidden) void refresh();
+    }, 5000);
     return () => clearInterval(interval);
   }, [refresh]);
 
   const decide = useCallback(
     async (threadId: string, action: "approve" | "reject") => {
-      setBusyThreads(prev => new Set(prev).add(threadId));
+      setBusyThreads((prev) => new Set(prev).add(threadId));
       try {
         await apiFetch(`/api/approvals/${threadId}/${action}`, "POST");
         await refresh();
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       } finally {
-        setBusyThreads(prev => {
+        setBusyThreads((prev) => {
           const next = new Set(prev);
           next.delete(threadId);
           return next;
         });
       }
     },
-    [refresh]
+    [refresh],
   );
 
-  const pending = approvals.filter(a => a.status === "pending");
+  const pending = approvals.filter((a) => a.status === "pending");
 
   return (
     <div className="space-y-10">
@@ -212,12 +220,12 @@ export default function ApprovalsPage() {
         </p>
       ) : (
         <div className="space-y-3">
-          {pending.map(a => (
+          {pending.map((a) => (
             <ApprovalCard
               key={a.threadId}
               approval={a}
-              onApprove={tid => void decide(tid, "approve")}
-              onReject={tid => void decide(tid, "reject")}
+              onApprove={(tid) => void decide(tid, "approve")}
+              onReject={(tid) => void decide(tid, "reject")}
               busy={busyThreads.has(a.threadId)}
             />
           ))}

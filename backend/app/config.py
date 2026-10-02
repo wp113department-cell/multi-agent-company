@@ -837,9 +837,13 @@ class Settings(BaseSettings):
     # while waiting on another subtask that can't acquire one because the
     # epic's own concurrency cap is exhausted) fails loudly instead of
     # hanging a task in "running" state forever.
+    worktree_retention_days: int = Field(
+        default=7,
+        description="The daily retention loop removes the git worktree of a task that has been completed/failed/cancelled for this many days (blocked or review-waiting tasks keep theirs). Before production audit 09 only reject/complete/push-approval removed worktrees, so failed and cancelled tasks kept theirs forever. 0 disables.",
+    )
     slot_acquisition_timeout_seconds: float = Field(
-        default=300.0,
-        description="Max seconds to wait for an agent_run_slot()/subtask_slot() before raising SlotAcquisitionTimeout.",
+        default=2100.0,
+        description="Max seconds to wait for an agent_run_slot()/subtask_slot() before raising SlotAcquisitionTimeout. Must exceed MAX_RUN_TIME_SECONDS: a slot held by a healthy run frees within that time, so a shorter wait failed queued work under normal load instead of letting it wait its turn (production audit 09; was 300).",
     )
 
     # Phase 7 — Executive Agent
@@ -1320,7 +1324,11 @@ class Settings(BaseSettings):
     )
     cost_budget_daily_usd: float = Field(
         default=25.0,
-        description="Max cumulative agent spend (USD) per calendar day before BudgetExceeded is raised.",
+        description="Fleet-wide hard cap on LLM spend (USD) per UTC day, across every agent and every LLM call. Checked BEFORE each call (fleet/spend_guard.py) and before new work is dispatched; 0 disables.",
+    )
+    spend_guard_redis: bool = Field(
+        default=True,
+        description="Keep the daily LLM spend ledger (fleet/spend_guard.py) in Redis (REDIS_URL) so every worker process shares one total that survives restarts. False = in-process counter only (tests).",
     )
     max_run_time_seconds: int = Field(
         default=1800,

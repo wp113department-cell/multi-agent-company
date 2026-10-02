@@ -74,6 +74,9 @@ os.environ["USE_GROQ"] = "false"
 # tests/pending/) keep the real key.
 if os.environ.get("RUN_PENDING_TESTS") != "1":
     os.environ["VOYAGE_API_KEY"] = ""
+    # Production audit 09: the daily spend ledger lives in the real dev Redis;
+    # unit tests keep an in-process counter so they never touch the real total.
+    os.environ["SPEND_GUARD_REDIS"] = "false"
 
 # COST_MODE defaults to "economy" in production (2026-09-29), which turns the
 # optional reflection/critique/planner/lesson calls and the LLM quality gates
@@ -83,6 +86,9 @@ os.environ.setdefault("COST_MODE", "quality")
 # Same for PIPELINE_MODE: production default is now "auto" (smart router);
 # the existing suite was written against "full". Router tests set "auto".
 os.environ.setdefault("PIPELINE_MODE", "full")
+# The owner's .env caps real spend at $1/day; the suite was written against
+# the $25 default and must not depend on the local cap.
+os.environ.setdefault("COST_BUDGET_DAILY_USD", "25")
 
 import pytest  # noqa: E402 — must come after env vars are set
 

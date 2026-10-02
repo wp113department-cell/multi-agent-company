@@ -23,6 +23,8 @@ import logging
 from typing import Any, Callable
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+
+from app.api.budget_gate import require_daily_budget
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -650,7 +652,11 @@ async def dispatch_specialized_agent(
     return {"status": "queued", "agent": agent_name, "task_id": str(body.task_id)}
 
 
-@router.post("/{agent_name}/run", response_model=dict[str, str])
+@router.post(
+    "/{agent_name}/run",
+    response_model=dict[str, str],
+    dependencies=[Depends(require_daily_budget)],
+)
 @limiter.limit(get_settings().rate_limit_agents)
 async def run_specialized_agent(
     request: Request,
@@ -705,7 +711,11 @@ async def run_specialized_agent(
     return {"status": "queued", "agent": agent_name, "task_id": str(body.task_id)}
 
 
-@router.post("/{agent_name}/run-sync", response_model=RunAgentResponse)
+@router.post(
+    "/{agent_name}/run-sync",
+    response_model=RunAgentResponse,
+    dependencies=[Depends(require_daily_budget)],
+)
 @limiter.limit(get_settings().rate_limit_agents)
 async def run_specialized_agent_sync(
     request: Request,

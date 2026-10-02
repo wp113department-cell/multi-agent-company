@@ -271,7 +271,10 @@ async def check_and_handle_quality_decline(
                 )
             )
         except Exception:
-            pass
+            logger.warning(
+                "check_and_handle_quality_decline: best-effort step failed",
+                exc_info=True,
+            )
         return {"request_id": request.id, "action": "rolled_back", "report": report}
 
     request.quality_check_status = "rollback_failed"

@@ -606,7 +606,10 @@ async def _run_prompt_auto_rollback_once() -> None:
                     )
                 )
             except Exception:
-                pass
+                logger.warning(
+                    "_run_prompt_auto_rollback_once: best-effort step failed",
+                    exc_info=True,
+                )
 
 
 async def _enhancement_quality_monitor_loop() -> None:
@@ -1389,14 +1392,39 @@ async def _run_as_leader(lock_name: str, run_loop: Any, engine: Any) -> None:
                             {"name": lock_name},
                         )
                     except Exception:
-                        pass
+                        logger.warning(
+                            "_run_as_leader: best-effort step failed", exc_info=True
+                        )
                 return
         await asyncio.sleep(retry_seconds)
+
+
+def _size_default_executor() -> None:
+    """Production audit 09: agent runs execute via asyncio.to_thread(), which
+    uses the loop's default thread pool — min(32, cpu_count + 4) threads, i.e.
+    10 on a 6-core host. With MAX_CONCURRENT_AGENT_RUNS=20 only 10 agents ever
+    ran, and every other to_thread call (chat tool file/git I/O, worktree
+    setup, spend checks) queued behind minutes-long agent runs. Size the pool
+    for the configured agent concurrency plus headroom for short calls."""
+    import concurrent.futures
+    import os
+
+    workers = get_settings().max_concurrent_agent_runs + max(
+        16, (os.cpu_count() or 1) + 4
+    )
+    asyncio.get_running_loop().set_default_executor(
+        concurrent.futures.ThreadPoolExecutor(
+            max_workers=workers, thread_name_prefix="gridiron-worker"
+        )
+    )
+    logger.info("Default thread pool sized to %d workers", workers)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from app.pipeline.graph import init_checkpointer, close_checkpointer
+
+    _size_default_executor()
     from app.agents.base_graph import (
         init_agent_checkpointer,
         close_agent_checkpointer,

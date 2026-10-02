@@ -1,0 +1,20 @@
+{
+  "audit_id": "11",
+  "audit_name": "Zero Policy",
+  "run_date": "2026-10-02",
+  "layer_score": 85,
+  "findings": [
+    {"id": "ZP-11-001", "severity": "High", "status": "FIXED", "file": "backend/app/tools/execution/bash.py", "location": "_run_bash_command_raw host path / _host_env", "finding": "Host-mode bash inherited the backend's full os.environ (API keys, DATABASE_URL).", "evidence": "env = {**os.environ, **extra_env}; tests/test_audit11_bash_secret_hygiene.py", "production_impact": "Server secrets readable by any agent command when sandbox disabled.", "confidence": "High", "recommendation": "Filter secret-looking env vars.", "effort": "Small"},
+    {"id": "ZP-11-002", "severity": "Medium", "status": "FIXED", "file": "backend/app/tools/execution/bash.py", "location": "_run_bash_command / _redact_values", "finding": "extra_env vault values printed in tool output.", "evidence": "echo $SECRET returned value; tests/test_audit11_bash_secret_hygiene.py", "production_impact": "Third-party secrets reach LLM context, logs, activity stream.", "confidence": "High", "recommendation": "Mask values in all output.", "effort": "Small"},
+    {"id": "ZP-11-003", "severity": "Medium", "status": "FIXED", "file": "backend/app (13 files)", "location": "evidence/silent_excepts.out.json", "finding": "29 silent except-pass around DB/event/subprocess/embedding ops.", "evidence": "AST scan: 29 -> 0 risky silent handlers", "production_impact": "Real failures invisible.", "confidence": "High", "recommendation": "logger.warning with exc_info.", "effort": "Small"},
+    {"id": "ZP-11-004", "severity": "Low", "status": "FIXED", "file": "backend/app/fleet/providers/base.py", "location": "whole module", "finding": "Dead module.", "evidence": "0 imports in app/tests/scripts", "production_impact": "Misleading docs.", "confidence": "High", "recommendation": "Remove.", "effort": "Small"},
+    {"id": "ZP-11-005", "severity": "Low", "status": "OPEN", "file": "backend/app/api/specialized_agents.py", "location": "532, 813; approvals.py:132; manager.py:597", "finding": "Agent-name special cases outside dispatcher.", "evidence": "grep agent_name ==", "production_impact": "Maintainability.", "confidence": "High", "recommendation": "Move to agent contract.", "effort": "Small"},
+    {"id": "ZP-11-006", "severity": "Low", "status": "OPEN", "file": "backend/app", "location": "evidence/unreferenced_functions.out.json", "finding": "~20 unused helpers.", "evidence": "AST name scan, hand-triaged", "production_impact": "None.", "confidence": "Medium", "recommendation": "Prune on next cleanup.", "effort": "Small"},
+    {"id": "ZP-11-007", "severity": "Low", "status": "OPEN", "file": "backend/app/agents/base_graph.py", "location": "LessonStore.retrieve", "finding": "Lessons not scoped per repo.", "evidence": "Lesson has no repo field", "production_impact": "Generic lessons cross repos.", "confidence": "High", "recommendation": "Add repo scope if multi-tenant.", "effort": "Medium"},
+    {"id": "ZP-11-008", "severity": "Low", "status": "KNOWN", "file": "backend/app/agents/tools.py", "location": "submit_* validation", "finding": "Schema mismatch is a soft warning.", "evidence": "audit 02", "production_impact": "Malformed output accepted with warning.", "confidence": "High", "recommendation": "Hard-fail for critical agents.", "effort": "Medium"}
+  ],
+  "counts": {"critical": 0, "high": 1, "medium": 2, "low": 5},
+  "open_counts": {"critical": 0, "high": 0, "medium": 0, "low": 4},
+  "production_blockers": [],
+  "verdict": "GREEN"
+}

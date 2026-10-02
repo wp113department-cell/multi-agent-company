@@ -43,9 +43,9 @@ A flag is never rounded up. A check that needs something not available here is m
 | 06 | Infrastructure | `06_INFRASTRUCTURE_AUDIT_REPORT.md` | ✅ 🟡 YELLOW (code fixed; owner: GitHub billing blocks CI, vercel.json placeholder domain) |
 | 07 | AI Evaluation | `07_AI_EVALUATION_AUDIT_REPORT.md` | ✅ 🟡 YELLOW (1 High fixed: cost undercount; live evals BLOCKED on LLM credit) |
 | 08 | Production Readiness | `08_PRODUCTION_READINESS_AUDIT_REPORT.md` | 🟡 YELLOW (2026-09-30): 5 fixed; owner: SENTRY_DSN + alert webhook; hard daily cost cap → audit 09 |
-| 09 | Performance & Scalability | `09_PERFORMANCE_SCALABILITY_AUDIT_REPORT.md` | pending |
+| 09 | Performance & Scalability | `09_PERFORMANCE_SCALABILITY_AUDIT_REPORT.md` | ✅ 🟢 GREEN (2026-10-02): 8 fixed incl. hard daily spend cap (closes PROD-08-007) + thread-pool starvation; full suite 8887 pass, 3 flaky pass on rerun |
 | 10 | Final Consolidation | `10_FINAL_CONSOLIDATION_AUDIT_REPORT.md` | pending (last) |
-| 11 | Zero Policy | `11_ZERO_POLICY_AUDIT_REPORT.md` | pending |
+| 11 | Zero Policy | `11_ZERO_POLICY_AUDIT_REPORT.md` | ✅ 🟢 GREEN (2026-10-02): 4 fixed incl. host-mode secret leak + vault redaction; 0 blockers |
 | 12 | End-to-End Feature Production | `12_E2E_FEATURE_PRODUCTION_AUDIT_REPORT.md` | pending |
 | 13 | Operations / DR / Lifecycle | `13_OPERATIONS_DR_LIFECYCLE_AUDIT_REPORT.md` | pending |
 | 14 | Reproducibility / Transfer | `14_REPRODUCIBILITY_TRANSFER_AUDIT_REPORT.md` | pending |

@@ -252,6 +252,7 @@ async def test_enforce_retention_disabled_returns_zero() -> None:
         # expired idempotency_keys rows now; 0 disables it, matching this
         # test's "everything disabled -> 0" intent for the other 3 knobs.
         mock_settings.return_value.idempotency_key_ttl_seconds = 0
+        mock_settings.return_value.worktree_retention_days = 0
         from app.services.retention import enforce_retention_policy
 
         count = await enforce_retention_policy()
@@ -290,6 +291,7 @@ async def test_enforce_retention_archives_across_all_three_tables() -> None:
         # assertion and the "every execute call is an UPDATE" assertion
         # below).
         mock_s.return_value.idempotency_key_ttl_seconds = 0
+        mock_s.return_value.worktree_retention_days = 0
         from app.services.retention import enforce_retention_policy
 
         count = await enforce_retention_policy()

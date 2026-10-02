@@ -15,6 +15,8 @@ Fallback routing (used when DB is unavailable or agent not found in registry):
 
 from __future__ import annotations
 
+import asyncio
+
 import logging
 from typing import Any
 
@@ -118,7 +120,8 @@ async def dispatch_subtask(
     if subtask_type == "frontend":
         from app.agents.frontend_dev import run_frontend_dev
 
-        files_changed, error, tokens_in, tokens_out = run_frontend_dev(
+        files_changed, error, tokens_in, tokens_out = await asyncio.to_thread(
+            run_frontend_dev,
             task_id=task_id,
             subtask_id=subtask_id,
             plan=subtask_plan,
@@ -128,7 +131,8 @@ async def dispatch_subtask(
     elif subtask_type == "test":
         from app.agents.qa import run_qa
 
-        qa_result = run_qa(
+        qa_result = await asyncio.to_thread(
+            run_qa,
             task_id=task_id,
             subtask_id=subtask_id,
             files_changed=[],
@@ -146,7 +150,8 @@ async def dispatch_subtask(
     else:
         from app.agents.backend_dev import run_backend_dev
 
-        files_changed, error, tokens_in, tokens_out = run_backend_dev(
+        files_changed, error, tokens_in, tokens_out = await asyncio.to_thread(
+            run_backend_dev,
             task_id=task_id,
             subtask_id=subtask_id,
             plan=subtask_plan,

@@ -18,6 +18,8 @@ text truncated, never paraphrased or invented.
 
 from __future__ import annotations
 
+import asyncio
+
 import logging
 import subprocess
 from dataclasses import dataclass, field
@@ -106,7 +108,9 @@ async def generate_release_retrospective(
 
     from app.db.models import DevTask, EnhancementRequest
 
-    period_start = _resolve_period_start(repo_path, from_sha, to_sha)
+    period_start = await asyncio.to_thread(
+        _resolve_period_start, repo_path, from_sha, to_sha
+    )
 
     task_q = select(DevTask).where(DevTask.updated_at >= period_start)
     if repo_id is not None:

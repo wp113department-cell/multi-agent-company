@@ -9,6 +9,8 @@ from decimal import Decimal
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+
+from app.api.budget_gate import require_daily_budget
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -174,7 +176,7 @@ async def get_epic(
     return _epic_to_response(epic, tasks)
 
 
-@router.post("/{epic_id}/approve")
+@router.post("/{epic_id}/approve", dependencies=[Depends(require_daily_budget)])
 async def approve_epic(
     epic_id: str,
     user_id: str = Depends(require_approver),
@@ -242,7 +244,7 @@ async def reject_epic(
     return {"epicId": epic_id, "status": "rejected", "rejectedBy": user_id}
 
 
-@router.post("/{epic_id}/approve-cost")
+@router.post("/{epic_id}/approve-cost", dependencies=[Depends(require_daily_budget)])
 async def approve_epic_cost(
     epic_id: str,
     user_id: str = Depends(require_approver),

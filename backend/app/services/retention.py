@@ -166,6 +166,59 @@ async def _cleanup_checkpoints(cutoff: datetime) -> int:
         return total_deleted
 
 
+async def _cleanup_worktrees(cutoff: datetime) -> int:
+    """Remove worktrees of tasks finished (no outgoing state transition)
+    before ``cutoff``. Production audit 09: only reject/complete/push-approval
+    removed a worktree, so every failed or cancelled task kept a full checkout
+    on disk for good. Directories with no matching finished task are left
+    alone (running, blocked and review-waiting tasks keep theirs)."""
+    import re
+    from pathlib import Path
+
+    from app.db.models import VALID_TRANSITIONS
+    from app.repo_tools.worktree import remove_worktree
+
+    base = Path(get_settings().worktrees_dir)
+    if not base.is_dir():
+        return 0
+    found: dict[int, str | None] = {}
+    for path in base.glob("task-*"):
+        m = re.fullmatch(r"task-(\d+)", path.name)
+        if m and path.is_dir():
+            found[int(m.group(1))] = None
+    for path in base.glob("epic-*/task-*"):
+        m = re.fullmatch(r"task-(\d+)", path.name)
+        if m and path.is_dir():
+            found[int(m.group(1))] = path.parent.name[len("epic-") :]
+    if not found:
+        return 0
+
+    terminal = [s for s, targets in VALID_TRANSITIONS.items() if not targets]
+    factory = get_session_factory()
+    async with factory() as db:
+        rows = await db.execute(
+            text(
+                "SELECT t.id, r.local_path FROM dev_tasks t "
+                "LEFT JOIN repos r ON r.id = t.repo_id "
+                "WHERE t.id = ANY(:ids) AND t.status = ANY(:terminal) "
+                "AND t.updated_at < :cutoff"
+            ),
+            {"ids": list(found), "terminal": terminal, "cutoff": cutoff},
+        )
+        targets = rows.fetchall()
+
+    removed = 0
+    for task_id, repo_path in targets:
+        try:
+            await asyncio.to_thread(remove_worktree, task_id, repo_path, found[task_id])
+            removed += 1
+        except Exception as exc:
+            logger.warning("Worktree retention: task %s not removed: %s", task_id, exc)
+    if removed:
+        logger.info("Worktree retention: removed %d finished task worktree(s)", removed)
+    return removed
+
+
 async def _run_cleanup() -> int:
     """Archive rows older than LOG_RETENTION_DAYS across task_logs,
     agent_runs, and artifacts, plus memory_embeddings on its own separate
@@ -198,6 +251,15 @@ async def _run_cleanup() -> int:
             total += await _cleanup_checkpoints(checkpoint_cutoff)
         except Exception as exc:
             logger.warning("Checkpoint retention cleanup error: %s", exc)
+
+    if settings.worktree_retention_days > 0:
+        try:
+            total += await _cleanup_worktrees(
+                datetime.now(timezone.utc)
+                - timedelta(days=settings.worktree_retention_days)
+            )
+        except Exception as exc:
+            logger.warning("Worktree retention cleanup error: %s", exc)
 
     # AUDIT_Q_BATCH08 §66 "Idempotency" — idempotency_keys rows are ephemeral
     # dedup records (not audit history like task_logs/agent_runs), so a hard

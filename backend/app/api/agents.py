@@ -106,7 +106,7 @@ async def launch_planning_pipeline(
             # to branch from and fails outright against a zero-commit repo.
             from app.pipeline.bootstrap import bootstrap, is_blank_repo
 
-            if is_blank_repo(effective_repo_path):
+            if await asyncio.to_thread(is_blank_repo, effective_repo_path):
                 from app.fleet.fleet_events import publish, task_started, task_completed
 
                 # Gap-closure (Days 0-18 audit): Gap 10's own exit criteria
@@ -493,7 +493,7 @@ async def launch_manager(
             # called with no repo_path, silently defaulting to
             # settings.target_repo_path instead of this task's actual assigned
             # repo — broken for any task not on the global default repo.
-            wt = create_worktree(task_id, effective_repo)
+            wt = await asyncio.to_thread(create_worktree, task_id, effective_repo)
             wt_path = str(wt)
             await append_log(db, task_id, "worktree", f"Worktree created: {wt_path}")
             await update_pipeline_state(db, task_id, "dev_running")
@@ -900,7 +900,7 @@ async def launch_coder(
             # zero-commit repo.
             from app.pipeline.bootstrap import bootstrap, is_blank_repo
 
-            if is_blank_repo(effective_repo):
+            if await asyncio.to_thread(is_blank_repo, effective_repo):
                 await append_log(
                     db,
                     task_id,
@@ -925,7 +925,7 @@ async def launch_coder(
                         f"Bootstrap skipped: {bootstrap_result.error}",
                     )
 
-            wt = create_worktree(task_id, effective_repo)
+            wt = await asyncio.to_thread(create_worktree, task_id, effective_repo)
             wt_path = str(wt)
             await append_log(db, task_id, "worktree", f"Worktree created: {wt_path}")
 

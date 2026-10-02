@@ -198,7 +198,9 @@ async def _clone_and_activate(
                 )
                 await db.commit()
             except Exception:
-                pass
+                logger.warning(
+                    "_clone_and_activate: best-effort step failed", exc_info=True
+                )
 
 
 # ---------------------------------------------------------------------------

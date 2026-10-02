@@ -8,6 +8,8 @@ import logging
 from typing import Any, AsyncGenerator
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+
+from app.api.budget_gate import require_daily_budget
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -154,7 +156,9 @@ async def create_chat_session(
     return CreateSessionResponse(session_id=session.session_id)
 
 
-@router.post("/sessions/{session_id}/messages")
+@router.post(
+    "/sessions/{session_id}/messages", dependencies=[Depends(require_daily_budget)]
+)
 @limiter.limit(get_settings().rate_limit_agents)
 async def send_message(
     request: Request,

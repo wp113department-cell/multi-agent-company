@@ -73,6 +73,9 @@ from __future__ import annotations
 
 import subprocess
 from typing import Any
+import logging
+
+logger = logging.getLogger(__name__)
 
 FIND_TEST_TOOL: dict[str, Any] = {
     "name": "find_test",
@@ -124,7 +127,7 @@ def find_test_handler(repo_path: str, inp: dict[str, Any]) -> str:
             if r.stdout.strip():
                 ftest_out.append(r.stdout[:2000])
         except Exception:
-            pass
+            logger.warning("find_test_handler: best-effort step failed", exc_info=True)
     return (
         "\n".join(ftest_out)[:5000] if ftest_out else f"No tests found for '{ftest_fn}'"
     )

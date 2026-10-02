@@ -1,0 +1,237 @@
+[
+ {
+  "file": "app/agents/agentic_ai_architect.py",
+  "line": 167,
+  "name": "run_agentic_ai_architect"
+ },
+ {
+  "file": "app/agents/mcp_developer_agent.py",
+  "line": 146,
+  "name": "run_mcp_developer_agent"
+ },
+ {
+  "file": "app/agents/mobile_dev.py",
+  "line": 183,
+  "name": "run_mobile_dev"
+ },
+ {
+  "file": "app/agents/prompt_engineer_agent.py",
+  "line": 165,
+  "name": "run_prompt_engineer_agent"
+ },
+ {
+  "file": "app/agents/roadmap_agent.py",
+  "line": 246,
+  "name": "run_roadmap_agent"
+ },
+ {
+  "file": "app/agents/temporary_agent.py",
+  "line": 494,
+  "name": "reset_temporary_agent_pool"
+ },
+ {
+  "file": "app/agents/ux_design_agent.py",
+  "line": 148,
+  "name": "run_ux_design_agent"
+ },
+ {
+  "file": "app/api/epics.py",
+  "line": 52,
+  "name": "EpicResponse"
+ },
+ {
+  "file": "app/api/registry.py",
+  "line": 24,
+  "name": "AgentResponse"
+ },
+ {
+  "file": "app/api/registry.py",
+  "line": 45,
+  "name": "MetricsResponse"
+ },
+ {
+  "file": "app/api/repo.py",
+  "line": 218,
+  "name": "RepoResponse"
+ },
+ {
+  "file": "app/artifacts/s3_store.py",
+  "line": 119,
+  "name": "list_artifacts_s3"
+ },
+ {
+  "file": "app/artifacts/s3_store.py",
+  "line": 136,
+  "name": "delete_artifact_s3"
+ },
+ {
+  "file": "app/db/models.py",
+  "line": 474,
+  "name": "FailedEvent"
+ },
+ {
+  "file": "app/event_bus/models.py",
+  "line": 176,
+  "name": "task_planned"
+ },
+ {
+  "file": "app/event_bus/models.py",
+  "line": 187,
+  "name": "architecture_ready"
+ },
+ {
+  "file": "app/event_bus/models.py",
+  "line": 198,
+  "name": "subtask_assigned"
+ },
+ {
+  "file": "app/event_bus/models.py",
+  "line": 218,
+  "name": "qa_failed"
+ },
+ {
+  "file": "app/event_bus/models.py",
+  "line": 229,
+  "name": "review_completed"
+ },
+ {
+  "file": "app/event_bus/models.py",
+  "line": 240,
+  "name": "task_blocked"
+ },
+ {
+  "file": "app/event_bus/redis_streams.py",
+  "line": 232,
+  "name": "stream_length"
+ },
+ {
+  "file": "app/fleet/approval_gate.py",
+  "line": 263,
+  "name": "get_pending"
+ },
+ {
+  "file": "app/fleet/approval_gate.py",
+  "line": 268,
+  "name": "record_decision"
+ },
+ {
+  "file": "app/fleet/architecture_score.py",
+  "line": 213,
+  "name": "get_architecture_score_trend"
+ },
+ {
+  "file": "app/fleet/fleet_events.py",
+  "line": 155,
+  "name": "memory_created"
+ },
+ {
+  "file": "app/fleet/fleet_events.py",
+  "line": 214,
+  "name": "translate_legacy_to_fleet"
+ },
+ {
+  "file": "app/fleet/fleet_events.py",
+  "line": 325,
+  "name": "get_fleet_bus"
+ },
+ {
+  "file": "app/fleet/metrics.py",
+  "line": 492,
+  "name": "configure_tracer_provider"
+ },
+ {
+  "file": "app/fleet/metrics.py",
+  "line": 501,
+  "name": "reset_tracer_provider_for_testing"
+ },
+ {
+  "file": "app/fleet/metrics.py",
+  "line": 663,
+  "name": "new_trace_id"
+ },
+ {
+  "file": "app/fleet/model_router.py",
+  "line": 311,
+  "name": "reset_model_router"
+ },
+ {
+  "file": "app/fleet/orchestration_analytics.py",
+  "line": 49,
+  "name": "reset_orchestration_time_stats"
+ },
+ {
+  "file": "app/fleet/scratchpad.py",
+  "line": 278,
+  "name": "expire_stale_entries"
+ },
+ {
+  "file": "app/fleet/security_score.py",
+  "line": 265,
+  "name": "get_security_score_trend"
+ },
+ {
+  "file": "app/fleet/spend_guard.py",
+  "line": 303,
+  "name": "reset_local_for_tests"
+ },
+ {
+  "file": "app/fleet/structural_diff.py",
+  "line": 36,
+  "name": "is_structural_file_change"
+ },
+ {
+  "file": "app/fleet/test_score.py",
+  "line": 167,
+  "name": "get_test_score_trend"
+ },
+ {
+  "file": "app/fleet/tool_manifest.py",
+  "line": 1920,
+  "name": "get_high_risk_tools"
+ },
+ {
+  "file": "app/pipeline/concurrency.py",
+  "line": 218,
+  "name": "reset_for_testing"
+ },
+ {
+  "file": "app/pipeline/dispatcher.py",
+  "line": 76,
+  "name": "dispatch_subtask"
+ },
+ {
+  "file": "app/policy/engine_v2.py",
+  "line": 59,
+  "name": "check_file_against_policies"
+ },
+ {
+  "file": "app/policy/engine_v2.py",
+  "line": 85,
+  "name": "check_files_against_policies"
+ },
+ {
+  "file": "app/policy/engine_v2.py",
+  "line": 112,
+  "name": "has_approval"
+ },
+ {
+  "file": "app/policy/engine_v2.py",
+  "line": 158,
+  "name": "match_pattern_sync"
+ },
+ {
+  "file": "app/policy/sandbox.py",
+  "line": 89,
+  "name": "reset_docker_probe_cache"
+ },
+ {
+  "file": "app/queue/rq_adapter.py",
+  "line": 148,
+  "name": "reset_rq_adapter"
+ },
+ {
+  "file": "app/services/retention.py",
+  "line": 287,
+  "name": "enforce_retention_policy"
+ }
+]

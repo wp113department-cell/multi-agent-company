@@ -70,6 +70,9 @@ import sys
 from typing import Any
 
 from app.tools.agents.known_issues_read import known_issues_path
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Advisory whole-file lock around the read-modify-write append below —
 # msvcrt.locking is stdlib and available on Windows; both are used
@@ -146,6 +149,8 @@ def known_issues_write_handler(repo_path: str, inp: dict[str, Any]) -> str:
             severity=severity.lower(),
         )
     except Exception:
-        pass
+        logger.warning(
+            "known_issues_write_handler: best-effort step failed", exc_info=True
+        )
 
     return f"Known issue appended (severity: {severity})"

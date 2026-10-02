@@ -29,6 +29,9 @@ from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel, Field
+import logging
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Fleet OS typed event protocol
@@ -311,7 +314,9 @@ class FleetBus:
                 return
             loop.create_task(publish_event_persisted(legacy))
         except Exception:
-            pass
+            logger.warning(
+                "_publish_to_existing_bus: best-effort step failed", exc_info=True
+            )
 
 
 _fleet_bus = FleetBus()

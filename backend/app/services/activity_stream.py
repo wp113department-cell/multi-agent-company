@@ -92,6 +92,15 @@ _SUBSCRIBER_QUEUE_MAXSIZE = 500
 # already-running worker: at most this many seconds after the API process
 # durably records it.
 _ABORT_DB_RECHECK_INTERVAL_SECONDS = 3.0
+# Production audit 09: the registry used to keep every TaskStream (with up to
+# _HISTORY_MAXLEN events of history each) for the life of the process — one
+# per task ever run or subscribed to. Above this many streams, finished or
+# long-idle streams with no live subscriber are evicted, oldest first. Safe:
+# the abort/resume flag is durable (task_control_flags), task logs live in the
+# DB, and get_or_create() rebuilds an evicted stream on demand.
+_MAX_STREAMS = 256
+_IDLE_EVICT_SECONDS = 3600.0
+_TERMINAL_EVENT_TYPES = ("done", "error", "stopped")
 
 
 class TaskStream:
@@ -110,6 +119,7 @@ class TaskStream:
         self._abort_event = threading.Event()
         self._resume_payload: dict[str, Any] | None = None
         self._started_at = time.time()
+        self.last_activity = time.monotonic()
         self.tokens_in: int = 0
         self.tokens_out: int = 0
         # T2-B2 (2026-09-22, GRIDIRON_PARTIAL #234) — durable=True (only ever
@@ -154,6 +164,16 @@ class TaskStream:
         # the way an unthrottled re-read would.
         self._abort_last_db_check: float = 0.0
 
+    def evictable(self, now: float) -> bool:
+        """No live subscriber, and finished or idle for a long time."""
+        with self._state_lock:
+            if self._subscriber_queues:
+                return False
+            finished = bool(self._history) and (
+                self._history[-1].get("type") in _TERMINAL_EVENT_TYPES
+            )
+            return finished or now - self.last_activity > _IDLE_EVICT_SECONDS
+
     def push(self, event: dict[str, Any]) -> None:
         """Thread-safe push. Called from sync agent code (base_graph.py).
         Broadcasts to every live subscriber queue; a queue that's full
@@ -165,6 +185,7 @@ class TaskStream:
         with self._state_lock:
             self._history.append(event)
             queues = list(self._subscriber_queues)
+            self.last_activity = time.monotonic()
         for queue in queues:
             try:
                 queue.put_nowait(event)
@@ -354,6 +375,7 @@ class ActivityStreamRegistry:
         stream = TaskStream(key, durable=True)
         with self._lock:
             self._streams[key] = stream
+            self._evict_locked()
         return stream
 
     def get(self, task_id: str | int) -> TaskStream | None:
@@ -364,7 +386,21 @@ class ActivityStreamRegistry:
         with self._lock:
             if key not in self._streams:
                 self._streams[key] = TaskStream(key, durable=True)
+                self._evict_locked()
             return self._streams[key]
+
+    def _evict_locked(self) -> None:
+        excess = len(self._streams) - _MAX_STREAMS
+        if excess <= 0:
+            return
+        now = time.monotonic()
+        newest = next(reversed(self._streams))
+        for key in [k for k in self._streams if k != newest]:
+            if excess <= 0:
+                break
+            if self._streams[key].evictable(now):
+                del self._streams[key]
+                excess -= 1
 
     def remove(self, task_id: str | int) -> None:
         self._streams.pop(str(task_id), None)

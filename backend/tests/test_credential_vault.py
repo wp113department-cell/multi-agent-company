@@ -317,8 +317,13 @@ class TestBashToolExtraEnv:
             str(tmp_path),
             extra_env={"MY_CUSTOM_SECRET": "injected-value-123"},
         )
-        result = handlers["bash"]({"command": "echo $MY_CUSTOM_SECRET"})
-        assert "injected-value-123" in result
+        result = handlers["bash"](
+            {
+                "command": '[ "$MY_CUSTOM_SECRET" = "injected-value-123" ] && echo SECRET-SEEN; echo $MY_CUSTOM_SECRET'
+            }
+        )
+        assert "SECRET-SEEN" in result  # the value reached the command
+        assert "injected-value-123" not in result  # audit 11: masked in output
 
     def test_bash_tool_without_extra_env_does_not_see_unset_var(
         self, tmp_path, monkeypatch

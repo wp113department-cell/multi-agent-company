@@ -441,7 +441,7 @@ async def _dispatch_one_subtask(
             )
         )
     except Exception:
-        pass
+        logger.warning("_dispatch_one_subtask: best-effort step failed", exc_info=True)
 
     if fleet_refusal_reason:
         logger.warning(
@@ -1928,7 +1928,7 @@ async def _resource_check_node(state: EpicManagerState) -> dict[str, Any]:
     settings = get_settings()
     repo_path = state.get("repo_path") or settings.target_repo_path
 
-    result = run_resource_check(path=repo_path)
+    result = await asyncio.to_thread(run_resource_check, path=repo_path)
     # Subtask count is unknown this early (planning hasn't run yet) — same
     # documented placeholder _cost_estimate_node already uses below.
     size_est = await estimate_project_size(repo_path, db=db, subtask_count=5)
@@ -2322,7 +2322,7 @@ async def _coding_node(state: EpicManagerState) -> dict[str, Any]:
     )
     await db.commit()
 
-    worktree_path = str(create_worktree(task_id, repo))
+    worktree_path = str(await asyncio.to_thread(create_worktree, task_id, repo))
 
     # Gap-closure Day 54 (Stage 2, answers.md Q8 "Orchestration speed": NO —
     # no dedicated orchestration-latency metric). run_manager() spans

@@ -1821,7 +1821,27 @@ def _make_call_llm_node(
                         )
                     )
                 except Exception:
-                    pass
+                    logger.warning("call_llm: best-effort step failed", exc_info=True)
+            return {"submitted": True, "status": "blocked"}
+
+        # Production audit 09: fleet-wide daily LLM spend cap, checked before
+        # this call is made (the SDK hook in fleet/spend_guard.py is the
+        # backstop for every other call site). Stops the run cleanly as
+        # "blocked" instead of letting the hook's exception fail it.
+        try:
+            from app.fleet import spend_guard
+
+            spend_guard.check()
+        except spend_guard.DailyBudgetExceeded as _exc:
+            logger.warning("Daily budget stop for %s: %s", role_name, _exc)
+            try:
+                from app.fleet.fleet_events import health_updated, publish
+
+                publish(
+                    health_updated(role_name, health="budget_exceeded", state=str(_exc))
+                )
+            except Exception:
+                logger.warning("call_llm: best-effort step failed", exc_info=True)
             return {"submitted": True, "status": "blocked"}
 
         client = _make_client()
@@ -1894,7 +1914,7 @@ def _make_call_llm_node(
                         )
                     )
                 except Exception:
-                    pass
+                    logger.warning("call_llm: best-effort step failed", exc_info=True)
             return {"submitted": True, "status": "blocked"}
 
         # Enrich system prompt with plan + memory context
@@ -2836,7 +2856,9 @@ def _make_execute_tools_node(
                             _err = None if _ok else result_content[:200]
                             _m.record_tool(tu_name, _ok, _duration_ms, _err)
                     except Exception:
-                        pass
+                        logger.warning(
+                            "execute_tools: best-effort step failed", exc_info=True
+                        )
 
                 if not result_content.startswith(
                     "[ERROR]"
@@ -3167,7 +3189,9 @@ def _extract_and_store_lesson(
                     )
                 )
             except Exception:
-                pass
+                logger.warning(
+                    "_extract_and_store_lesson: best-effort step failed", exc_info=True
+                )
             # Gap-closure (2026-07-21) — Day 11's versioned_memory.py was built and tested
             # but never actually received a real lesson: this was the exact call site
             # Day 11's own plan doc identified as the target, never wired until now.
@@ -3886,7 +3910,7 @@ def run_agent_graph(
             _reg.start_task(role_name, task_id=task_id)
         publish(task_started(task_id=task_id, agent_name=role_name, trace_id=tid))
     except Exception:
-        pass
+        logger.warning("run_agent_graph: best-effort step failed", exc_info=True)
 
     try:
         # ------------------------------------------------------------------
@@ -4161,7 +4185,9 @@ def run_agent_graph(
                     _metrics.reflection_unsatisfied,
                 )
             except Exception:
-                pass
+                logger.warning(
+                    "run_agent_graph: best-effort step failed", exc_info=True
+                )
 
         if _span is not None:
             _span.__exit__(None, None, None)
@@ -4178,13 +4204,19 @@ def run_agent_graph(
                 bm = get_budget_manager()
                 try:
                     bm.check_run(_metrics)
-                    bm.check_daily(agent_name=role_name)
-                    # Blocker (audit_v1.md 4.1 #4): the in-process check
-                    # above is a fast first pass but resets per-process;
-                    # this is the real, shared, restart-surviving check
-                    # (see check_daily_db's own docstring). Only reached
-                    # when the cheap in-memory check didn't already raise.
-                    bm.check_daily_db(agent_name=role_name)
+                    # Production audit 09: the daily cap is fleet-wide, not
+                    # per agent (agent_name=role_name let every agent spend
+                    # the whole budget), and is enforced before each call by
+                    # fleet/spend_guard.py. This post-run pass only marks a
+                    # run that ended at/over the cap as blocked.
+                    from app.fleet import spend_guard
+
+                    try:
+                        spend_guard.check()
+                    except spend_guard.DailyBudgetExceeded as daily_exc:
+                        raise BudgetExceeded(
+                            "cost", "daily", daily_exc.limit, daily_exc.spent
+                        ) from daily_exc
                 except BudgetExceeded as exc:
                     final_state["status"] = "blocked"
                     publish(
@@ -4196,7 +4228,9 @@ def run_agent_graph(
                         )
                     )
             except Exception:
-                pass
+                logger.warning(
+                    "run_agent_graph: best-effort step failed", exc_info=True
+                )
 
         # Day 12 — Failure Recovery Ladder: stall path. The router already
         # stops the graph naturally when n_stalls >= max_stalls (no exception
@@ -4290,7 +4324,7 @@ def run_agent_graph(
                 health_updated(role_name, health="healthy", state="sleep", trace_id=tid)
             )
         except Exception:
-            pass
+            logger.warning("run_agent_graph: best-effort step failed", exc_info=True)
 
         # Real AgentRun DB tracking (Stage 4 Cluster N) — mirrors the
         # existing "completed" vs "failed" classification `create_agent_run`/
@@ -4365,7 +4399,7 @@ def run_agent_graph(
                 )
             )
         except Exception:
-            pass
+            logger.warning("run_agent_graph: best-effort step failed", exc_info=True)
 
         # Day 12 Failure Recovery Ladder — Checkpoint rung. Gap-closure found
         # save_checkpoint()/rollback_to() had zero real callers anywhere

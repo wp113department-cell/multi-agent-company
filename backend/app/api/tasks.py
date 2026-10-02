@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from typing import TYPE_CHECKING, Any, Literal
 from fastapi import (
@@ -14,6 +15,7 @@ from fastapi import (
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.budget_gate import require_daily_budget
 from app.db import get_db
 from app.db.repository import (
     TransitionError,
@@ -314,7 +316,7 @@ async def get_logs(
     return {"logs": [_log_to_dict(lg) for lg in logs]}
 
 
-@router.post("/{task_id}/run")
+@router.post("/{task_id}/run", dependencies=[Depends(require_daily_budget)])
 @limiter.limit(get_settings().rate_limit_tasks)
 async def run_task(
     request: Request,
@@ -429,7 +431,7 @@ async def run_task(
     return {"triggered": True, "mode": mode}
 
 
-@router.post("/{task_id}/restart")
+@router.post("/{task_id}/restart", dependencies=[Depends(require_daily_budget)])
 @limiter.limit(get_settings().rate_limit_tasks)
 async def restart_task(
     request: Request,
@@ -642,7 +644,7 @@ async def repeat(
     }
 
 
-@router.post("/{task_id}/approve")
+@router.post("/{task_id}/approve", dependencies=[Depends(require_daily_budget)])
 async def approve_task(
     task_id: int,
     background_tasks: BackgroundTasks,
@@ -740,14 +742,16 @@ async def reject_task(
             repo_obj = result.scalar_one_or_none()
             if repo_obj:
                 repo_path = repo_obj.local_path
-        remove_worktree(task_id, repo_path)
+        await asyncio.to_thread(remove_worktree, task_id, repo_path)
     except Exception:
-        pass
+        logger.warning("reject_task: best-effort step failed", exc_info=True)
 
     return {"rejected": True, "task": _task_to_dict(task)}
 
 
-@router.post("/{task_id}/pipeline/approve")
+@router.post(
+    "/{task_id}/pipeline/approve", dependencies=[Depends(require_daily_budget)]
+)
 async def pipeline_approve(
     task_id: int,
     background_tasks: BackgroundTasks,
@@ -1034,9 +1038,9 @@ async def complete_task(
             repo_obj = result.scalar_one_or_none()
             if repo_obj:
                 repo_path = repo_obj.local_path
-        remove_worktree(task_id, repo_path)
+        await asyncio.to_thread(remove_worktree, task_id, repo_path)
     except Exception:
-        pass
+        logger.warning("complete_task: best-effort step failed", exc_info=True)
 
     return {"completed": True, "task": _task_to_dict(task)}
 

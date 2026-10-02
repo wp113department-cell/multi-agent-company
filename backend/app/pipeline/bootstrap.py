@@ -200,7 +200,7 @@ async def bootstrap(
                     "append_log failed during bootstrap (non-fatal)", exc_info=True
                 )
 
-    if not is_blank_repo(repo_path):
+    if not await asyncio.to_thread(is_blank_repo, repo_path):
         return BootstrapResult(bootstrapped=False)
 
     from app.config import get_settings

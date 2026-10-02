@@ -1548,13 +1548,13 @@ class ChatAgent:
                 )
                 if not approved:
                     return f"[DENIED] User declined to overwrite: {rel}"
-            return write_file_handler(root, repo, inp)
+            return await asyncio.to_thread(write_file_handler, root, repo, inp)
 
         if tool_name == "edit_file":
-            return edit_file_handler(root, repo, inp)
+            return await asyncio.to_thread(edit_file_handler, root, repo, inp)
 
         if tool_name == "append_file":
-            return append_file_handler(root, repo, inp)
+            return await asyncio.to_thread(append_file_handler, root, repo, inp)
 
         if tool_name == "rename_file":
             rf_inp, rf_denied = await self._guard_overwrite(
@@ -1650,11 +1650,11 @@ class ChatAgent:
             if cb_error:
                 return cb_error
             create_args = ["branch", bname] + ([from_b] if from_b else [])
-            out = _git(create_args, repo)
+            out = await asyncio.to_thread(_git, create_args, repo)
             if "[ERROR]" in out:
                 return out
             if do_checkout:
-                co_out = _git(["checkout", bname], repo)
+                co_out = await asyncio.to_thread(_git, ["checkout", bname], repo)
                 if not co_out.startswith("[ERROR]"):
                     # T2-B6 (2026-09-24, GRIDIRON_PARTIAL #361) — same
                     # active_branch persistence as this module's own
@@ -1693,8 +1693,10 @@ class ChatAgent:
                         return (
                             f"[DENIED] User declined to discard changes to {file_arg}"
                         )
-                return _git(["checkout", ck_target, "--", file_arg], repo)
-            result = _git(["checkout", ck_target], repo)
+                return await asyncio.to_thread(
+                    _git, ["checkout", ck_target, "--", file_arg], repo
+                )
+            result = await asyncio.to_thread(_git, ["checkout", ck_target], repo)
             # T2-B6 (2026-09-22, GRIDIRON_PARTIAL #361) — same real-branch
             # re-derivation as app/agents/tools.py's own git_checkout
             # handler (see that closure's own comment): always re-read the
@@ -1728,8 +1730,10 @@ class ChatAgent:
                 return "[DENIED] User declined to drop the stash."
             gst_msg = str(inp.get("message", ""))
             if gst_action == "push" and gst_msg:
-                return _git(["stash", "push", "-m", gst_msg], repo)
-            return _git(["stash", gst_action], repo)
+                return await asyncio.to_thread(
+                    _git, ["stash", "push", "-m", gst_msg], repo
+                )
+            return await asyncio.to_thread(_git, ["stash", gst_action], repo)
 
         if tool_name == "git_stash_list":
             # tool_enhance.md productionization pass, tool #151
@@ -1789,7 +1793,7 @@ class ChatAgent:
             restore_args = (
                 ["restore"] + (["--staged"] if gres_staged else []) + ["--", gres_rel]
             )
-            return _git(restore_args, repo)
+            return await asyncio.to_thread(_git, restore_args, repo)
 
         if tool_name == "git_push":
             branch = str(inp.get("branch", ""))
@@ -2002,10 +2006,10 @@ class ChatAgent:
             # shell=True command) PLUS a worktree-escape arbitrary
             # write (`root / rel` never validated). Now delegates to
             # the shared, list-args, worktree-validated handler.
-            return organize_imports_handler(root, repo, inp)
+            return await asyncio.to_thread(organize_imports_handler, root, repo, inp)
 
         if tool_name == "insert_at_line":
-            return insert_at_line_handler(root, repo, inp)
+            return await asyncio.to_thread(insert_at_line_handler, root, repo, inp)
 
         if tool_name == "insert_after":
             # tool_enhance.md productionization pass, tool #46 (2026-08-19)
@@ -2018,7 +2022,7 @@ class ChatAgent:
             # delete_block): `pattern` is an LLM-controlled regex run via
             # re.search() per line with no timeout — real ReDoS exposure,
             # but Python's stdlib re has no timeout primitive.
-            return insert_after_handler(root, repo, inp)
+            return await asyncio.to_thread(insert_after_handler, root, repo, inp)
 
         if tool_name == "insert_before":
             # tool_enhance.md productionization pass, tool #48 (2026-08-20)
@@ -2027,13 +2031,13 @@ class ChatAgent:
             # dispatched" bug class, same already-correct worktree check,
             # same deferred ReDoS finding on `pattern` (documented, not
             # fixed, matching tools #33/#46's reasoning).
-            return insert_before_handler(root, repo, inp)
+            return await asyncio.to_thread(insert_before_handler, root, repo, inp)
 
         if tool_name == "replace_function":
-            return replace_function_handler(root, repo, inp)
+            return await asyncio.to_thread(replace_function_handler, root, repo, inp)
 
         if tool_name == "delete_lines":
-            return delete_lines_handler(root, repo, inp)
+            return await asyncio.to_thread(delete_lines_handler, root, repo, inp)
 
         if tool_name == "apply_patch":
             return await asyncio.to_thread(apply_patch_handler, repo, inp)
@@ -2046,7 +2050,7 @@ class ChatAgent:
             # on the host in one call) and had an uncaught crash on a
             # non-numeric `context`. Now delegates to the shared,
             # worktree-validated handler.
-            return compare_files_handler(root, repo, inp)
+            return await asyncio.to_thread(compare_files_handler, root, repo, inp)
 
         if tool_name == "sync_files":
             # tool_enhance.md productionization pass, tool #64 (2026-08-22)
@@ -2090,7 +2094,8 @@ class ChatAgent:
                 return rb_cwd_error
             rb_wait_for = inp.get("wait_for_pids")
             rb_wait_pids = [int(p) for p in rb_wait_for] if rb_wait_for else None
-            return _pm.spawn(
+            return await asyncio.to_thread(
+                _pm.spawn,
                 rb_command,
                 rb_cwd,
                 self._background_processes,
@@ -2227,9 +2232,11 @@ class ChatAgent:
             if gm_msg:
                 gm_args += ["-m", gm_msg]
             gm_args.append(gm_branch)
-            gm_output = _git(gm_args, repo)
+            gm_output = await asyncio.to_thread(_git, gm_args, repo)
             if gm_output.startswith("[ERROR]") or "CONFLICT" in gm_output:
-                gm_conflicted = _git(["diff", "--name-only", "--diff-filter=U"], repo)
+                gm_conflicted = await asyncio.to_thread(
+                    _git, ["diff", "--name-only", "--diff-filter=U"], repo
+                )
                 gm_files = [f for f in gm_conflicted.strip().split("\n") if f]
                 if gm_files:
                     return (
@@ -2314,7 +2321,9 @@ class ChatAgent:
                 )
                 if not approved:
                     return "[DENIED] User declined git reset --hard."
-            return _git(["reset", f"--{gr_mode}", gr_ref], repo)
+            return await asyncio.to_thread(
+                _git, ["reset", f"--{gr_mode}", gr_ref], repo
+            )
 
         if tool_name == "git_worktree":
             gw_action = str(inp.get("action", "list"))
@@ -2324,7 +2333,7 @@ class ChatAgent:
             if gw_error:
                 return gw_error
             if gw_action == "list":
-                return _git(["worktree", "list"], repo)
+                return await asyncio.to_thread(_git, ["worktree", "list"], repo)
             elif gw_action == "add":
                 gw_confirmed = await self._confirm(
                     description=f"git worktree add {gw_wt_path} {gw_branch}",
@@ -2342,7 +2351,9 @@ class ChatAgent:
                     _git, ["worktree", "add", "--", gw_wt_path, gw_branch], repo, 30
                 )
             elif gw_action == "remove":
-                return _git(["worktree", "remove", "--", gw_wt_path], repo)
+                return await asyncio.to_thread(
+                    _git, ["worktree", "remove", "--", gw_wt_path], repo
+                )
             return f"[ERROR] Unknown action: {gw_action}"
 
         if tool_name in ("create_pr", "github_create_pr"):
@@ -2366,9 +2377,15 @@ class ChatAgent:
             pr_base = str(inp.get("base", "main"))
             pr_draft = bool(inp.get("draft", False))
             if not pr_title or not pr_body:
-                pr_stat = _git(["diff", f"{pr_base}...HEAD", "--stat"], repo)
-                pr_diff = _git(["diff", f"{pr_base}...HEAD"], repo)[:6000]
-                pr_branch = _git(["rev-parse", "--abbrev-ref", "HEAD"], repo)
+                pr_stat = await asyncio.to_thread(
+                    _git, ["diff", f"{pr_base}...HEAD", "--stat"], repo
+                )
+                pr_diff = (
+                    await asyncio.to_thread(_git, ["diff", f"{pr_base}...HEAD"], repo)
+                )[:6000]
+                pr_branch = await asyncio.to_thread(
+                    _git, ["rev-parse", "--abbrev-ref", "HEAD"], repo
+                )
                 if pr_stat and not pr_stat.startswith("[ERROR]"):
                     gen_title, gen_body = await asyncio.to_thread(
                         _llm_generate_pr_description,
@@ -2441,8 +2458,8 @@ class ChatAgent:
             rd_diff_args = build_review_diff_args(inp)
             if isinstance(rd_diff_args, str):
                 return rd_diff_args
-            rd_stat = _git(rd_diff_args + ["--stat"], repo)
-            rd_diff = _git(rd_diff_args, repo)[:6000]
+            rd_stat = await asyncio.to_thread(_git, rd_diff_args + ["--stat"], repo)
+            rd_diff = (await asyncio.to_thread(_git, rd_diff_args, repo))[:6000]
             if not rd_stat.strip() or rd_stat.startswith("[ERROR]"):
                 return "[ERROR] No changes to review for the given scope."
             rd_review = await asyncio.to_thread(_llm_review_diff, rd_stat, rd_diff)
@@ -2828,7 +2845,7 @@ class ChatAgent:
             # was missing try/except + timeout around its file-tail
             # subprocess call. Now delegates to the shared,
             # worktree-validated handler.
-            return read_logs_handler(root, repo, inp)
+            return await asyncio.to_thread(read_logs_handler, root, repo, inp)
 
         if tool_name == "analyze_error":
             # tool_enhance.md productionization pass, tool #121
@@ -2973,7 +2990,9 @@ class ChatAgent:
             de_cmd_policy = check_command(de_command)
             if not de_cmd_policy.allowed:
                 return f"[POLICY DENIED] {de_cmd_policy.reason}"
-            de_risk = _docker_container_risk_reason(de_container)
+            de_risk = await asyncio.to_thread(
+                _docker_container_risk_reason, de_container
+            )
             if de_risk:
                 return f"[POLICY DENIED] {de_risk}"
             return await asyncio.to_thread(
@@ -3608,7 +3627,7 @@ class ChatAgent:
         # ========== BATCH 15 — Editing extras ==========
 
         if tool_name == "replace_class":
-            return replace_class_handler(root, repo, inp)
+            return await asyncio.to_thread(replace_class_handler, root, repo, inp)
 
         if tool_name == "undo_changes":
             undo_rel = str(inp["path"])
@@ -4639,7 +4658,9 @@ class ChatAgent:
                             tu["name"], _tool_ok, _tool_duration_ms, _tool_err
                         )
                 except Exception:
-                    pass
+                    logger.warning(
+                        "_execute_tool_node: best-effort step failed", exc_info=True
+                    )
 
             if not result.startswith("[ERROR]") and not result.startswith("[POLICY"):
                 # AUDIT_Q_BATCH18 §54/55/56 gap-closure — this file's own
