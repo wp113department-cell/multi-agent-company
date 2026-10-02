@@ -779,8 +779,16 @@ async def run_specialized_agent_sync(
         logger.exception(
             "run-sync failed for agent %s task %d", agent_name, body.task_id
         )
+        # Production audit 13: a provider failure (bad key, outage, open
+        # circuit breaker) is an upstream error (502), not a server bug (500).
+        import anthropic
+
+        from app.fleet.circuit_breaker import CircuitBreakerOpenError
+
+        upstream = isinstance(exc, (anthropic.APIError, CircuitBreakerOpenError))
         raise HTTPException(
-            status_code=500, detail=f"{agent_name} failed: {exc}"
+            status_code=502 if upstream else 500,
+            detail=f"{agent_name} failed: {exc}",
         ) from exc
 
     # Phase 1.1 (MASTER_AGENT_v2.md) — same universal memory write as the

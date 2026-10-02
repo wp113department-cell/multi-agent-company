@@ -65,6 +65,33 @@ Whichever you choose, treat "backups exist" and "backups have been proven
 restorable" as two separate facts — schedule periodic restore drills (see
 below), not just periodic backups.
 
+Minimal working example (cron on the Docker host, daily at 02:30, 14 kept,
+using the same image so no local `pg_dump` is needed — this is exactly how
+the 2026-10-02 drill ran the script):
+
+```cron
+30 2 * * * cd /path/to/CRR2906 && docker run --rm --network crr2906_default \
+  -e DATABASE_URL="postgresql://gridiron:PASSWORD@db:5432/gridiron_dev" \
+  -e BACKUP_DIR=/backups -e BACKUP_RETENTION_COUNT=14 \
+  -v "$PWD/scripts:/scripts:ro" -v /var/backups/gridiron:/backups \
+  --entrypoint bash pgvector/pgvector:pg16 /scripts/backup_db.sh >> /var/log/gridiron-backup.log 2>&1
+```
+
+**RPO** = the schedule interval (24 h with the line above). Copy
+`/var/backups/gridiron` off the host — a backup on the same disk does not
+survive losing that disk.
+
+### Measured drill (production audit 13, 2026-10-02)
+
+| Step | Result |
+|---|---|
+| `backup_db.sh` (4.2 MB dump, 51 tables) | 3.5 s, self-verified |
+| `restore_db.sh` into an empty database | 7.1 s, schema at head (062) |
+| Restore into a brand-new Postgres server | OK, 373 tasks, 3 HNSW indexes, pgvector 0.8.6 |
+| App started on the restored database | healthy in 7.2 s; login, task list and HNSW vector search work |
+
+**RTO at this data size: under 1 minute** (backup → restore → healthy app ≈ 18 s, plus operator time).
+
 ## Restore
 
 ```bash
@@ -138,6 +165,35 @@ footgun — but it must still be *configured* correctly:
   not a silent success. There is currently no automated worktree
   snapshot/backup in this codebase; the durable-volume requirement above
   is the primary mitigation until one exists.
+
+## Secret rotation
+
+None of these are rotated automatically. (With `SECRETS_MANAGER_ENABLED=true` values can come from AWS Secrets Manager instead of `.env`; rotate them there.) Rotate on staff change, suspected
+leak, or on your policy interval. After any change to `backend/.env`,
+restart the backend (settings are read at startup).
+
+| Secret | Where | How to rotate | Effect |
+|---|---|---|---|
+| `ANTHROPIC_API_KEY` | `backend/.env`, **or** saved from Settings in the UI (stored in the `settings` table, which overrides `.env`) | Create a new key in the Anthropic console → update it in Settings (or `.env` + restart) → revoke the old key in the console | Next LLM call uses the new key. If the UI-saved key is set, changing `.env` alone has no effect. |
+| `VOYAGE_API_KEY` | `backend/.env` | New key in the Voyage dashboard → `.env` → restart → revoke old | Embeddings use the new key |
+| `JWT_SECRET_KEY` | `backend/.env` (≥ 32 chars: `openssl rand -hex 32`) | Replace → restart | **Every session is invalidated**; all users log in again. Only one key is accepted at a time (no overlap window). |
+| Postgres password | `docker-compose.yml` / DB server, `DATABASE_URL` in `backend/.env` | `ALTER USER gridiron PASSWORD '…'` → update `DATABASE_URL` → restart backend and workers | Brief 503s ("Database unavailable") until restarted |
+| `GITHUB_TOKEN` | `backend/.env`, **or** saved from Settings in the UI (`settings` table, overrides `.env`) | New fine-grained token → update in Settings (or `.env` + restart) → revoke old | Push/PR tools use the new token |
+| `CREDENTIAL_ENCRYPTION_KEY` | `backend/.env` (Fernet key) | **Do not just replace it**: it encrypts the UI-saved keys above. Note the saved keys, clear them in Settings, change the key, restart, save them again | Replacing it alone makes the stored keys unreadable |
+| `SENTRY_DSN`, webhook URLs | `backend/.env` | Regenerate in the provider → `.env` → restart | — |
+
+Verified on 2026-10-02: no real secret has ever been committed to git
+(`What_is/AUDIT_REPORT/evidence/secret_history_scan.py`, 613 commits; the
+matches are fake test fixtures and doc placeholders).
+
+## Behaviour during outages (drilled 2026-10-02)
+
+| Failure | What users see | Recovery |
+|---|---|---|
+| Redis down | Nothing — app keeps working (spend ledger and router cache fall back to in-process) | Automatic when Redis returns |
+| Postgres down | `503 "Database unavailable, retry shortly"` + `Retry-After: 5`; `/health` 503; sessions stay valid | Automatic when Postgres returns — no backend restart |
+| Backend killed mid-task | — | On restart, the orphaned run is marked failed and its task moves to **blocked** (reason `orphaned`) with a log line; restart the task from the UI |
+| LLM key invalid / provider down | Run fails in ~1 s with `502` and the provider's message; one call, no retries on auth errors | After 5 consecutive failures the circuit breaker stops calling the provider until its cooldown ends |
 
 ## What backup_db.sh/restore_db.sh deliberately do NOT do
 

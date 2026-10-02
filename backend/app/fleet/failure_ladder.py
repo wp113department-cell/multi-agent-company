@@ -279,6 +279,51 @@ async def _is_cross_run_looping(
     return all(s == "failed" for s in statuses)
 
 
+async def _block_tasks_of_orphans(db: Any, rows: list[Any]) -> None:
+    """Production audit 13 (crash drill): an orphaned run was marked failed
+    but its task stayed in planning/coding/testing forever — shown as running
+    in the UI with nothing running. Move such a task to "blocked"
+    (blocked_reason="orphaned") with a log line, unless another run for it is
+    still live. Resumed runs are not passed here, so their tasks keep going."""
+    from sqlalchemy import text
+
+    from app.db.repository import TransitionError, append_log, transition_task
+
+    for task_id in sorted({int(r.task_id) for r in rows if r.task_id is not None}):
+        try:
+            still_running = await db.execute(
+                text(
+                    "SELECT 1 FROM agent_runs WHERE task_id = :t "
+                    "AND status = 'running' LIMIT 1"
+                ),
+                {"t": task_id},
+            )
+            if still_running.first() is not None:
+                continue
+            status = await db.execute(
+                text("SELECT status FROM dev_tasks WHERE id = :t"), {"t": task_id}
+            )
+            current = status.scalar_one_or_none()
+            if current not in ("planning", "coding", "testing"):
+                continue
+            await transition_task(db, task_id, "blocked", blocked_reason="orphaned")
+            await append_log(
+                db,
+                task_id,
+                "error",
+                f"Agent run lost while the task was {current} (the server stopped "
+                "without a clean shutdown). Task blocked — restart it to continue.",
+            )
+            await db.commit()
+        except TransitionError:
+            await db.rollback()  # a concurrent change won; nothing to do
+        except Exception:
+            await db.rollback()
+            logger.warning(
+                "Orphan recovery: could not block task %s", task_id, exc_info=True
+            )
+
+
 async def reconcile_orphaned_runs(threshold_seconds: int | None = None) -> int:
     """Find agent_runs rows stuck in status="running" with a heartbeat older
     than the threshold. T2-B2 (2026-09-22, GRIDIRON_PARTIAL #235/#236/#246)
@@ -394,6 +439,7 @@ async def reconcile_orphaned_runs(threshold_seconds: int | None = None) -> int:
             )
         if to_fail or looping_rows:
             await db.commit()
+            await _block_tasks_of_orphans(db, to_fail + looping_rows)
 
     for row in to_fail:
         try:

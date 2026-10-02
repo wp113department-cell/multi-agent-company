@@ -846,6 +846,7 @@ def test_a_deleted_or_demoted_user_loses_access_immediately_not_when_the_token_e
 
     approver = live_accounts("approver")
     victim = live_accounts("approver")
+    admin = live_accounts("admin")
     with TestClient(app) as c:
         h_appr, h_victim = auth("approver", sub=approver), auth("approver", sub=victim)
         assert c.get("/api/tasks", headers=h_victim).status_code == 200
@@ -853,8 +854,11 @@ def test_a_deleted_or_demoted_user_loses_access_immediately_not_when_the_token_e
             c.post("/api/tasks/999999999/approve", headers=h_victim).status_code != 403
         )
 
-        # GDPR erasure of the victim by another approver
+        # Erasure is admin-only (production audit 13): an approver is refused...
         r = c.delete(f"/api/privacy/user/{victim}", headers=h_appr)
+        assert r.status_code == 403, r.text
+        # ...and the admin's erasure takes effect immediately.
+        r = c.delete(f"/api/privacy/user/{victim}", headers=auth("admin", sub=admin))
         assert r.status_code == 200, r.text
         assert c.get("/api/tasks", headers=h_victim).status_code == 401
         assert c.post("/api/tasks/1/approve", headers=h_victim).status_code == 401
@@ -1020,3 +1024,51 @@ def test_a_viewer_cannot_operate_the_platform_but_can_read(client) -> None:
         r = getattr(client, method)(path, json={}, headers=auth("viewer"))
         assert r.status_code == 403, (path, r.status_code)
     assert client.get("/api/tasks", headers=auth("viewer")).status_code == 200
+
+
+def test_account_erasure_and_cross_user_export_are_admin_only(live_accounts) -> None:
+    """Production audit 13 (drill): an approver erased the admin account and
+    could export any user's data. Both are admin-only now, and the last
+    admin can never be erased."""
+    from sqlalchemy import func, select
+
+    from app.db.models import User
+    from app.main import app
+
+    approver = live_accounts("approver")
+    admin_a = live_accounts("admin")
+    admin_b = live_accounts("admin")
+    h_appr = auth("approver", sub=approver)
+    h_admin = auth("admin", sub=admin_a)
+    with TestClient(app) as c:
+        assert (
+            c.delete(f"/api/privacy/user/{admin_a}", headers=h_appr).status_code == 403
+        )
+        assert (
+            c.get(f"/api/privacy/export/{admin_a}", headers=h_appr).status_code == 403
+        )
+        assert (
+            c.get(f"/api/privacy/export/{approver}", headers=h_admin).status_code == 200
+        )
+
+        # admin_b can go while admin_a remains...
+        assert (
+            c.delete(f"/api/privacy/user/{admin_b}", headers=h_admin).status_code == 200
+        )
+
+        async def other_admins() -> int:
+            async with _db() as s:
+                return int(
+                    (
+                        await s.execute(
+                            select(func.count())
+                            .select_from(User)
+                            .where(User.role == "admin", User.username != admin_a)
+                        )
+                    ).scalar_one()
+                )
+
+        # ...but admin_a is refused if it is the only admin left.
+        if asyncio.run(other_admins()) == 0:
+            r = c.delete(f"/api/privacy/user/{admin_a}", headers=h_admin)
+            assert r.status_code == 409, r.text

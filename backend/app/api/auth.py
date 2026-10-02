@@ -87,6 +87,13 @@ async def login(
     try:
         user = await get_user(db, body.username)
     except Exception as exc:
+        from app.db.errors import is_db_unavailable
+
+        if is_db_unavailable(exc):  # audit 13: an outage is not a config error
+            logger.error("Login: database unavailable: %r", exc)
+            raise HTTPException(
+                status_code=503, detail="Database unavailable, retry shortly"
+            ) from exc
         logger.exception("Failed to load user %s from users table", body.username)
         raise HTTPException(status_code=500, detail="Auth configuration error") from exc
 

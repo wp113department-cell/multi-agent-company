@@ -28,9 +28,9 @@ trail. The response says exactly what was removed and what was retained
 "fully erased" claim that wouldn't be true.
 
 All routes require an authenticated caller; cross-user export/erasure
-additionally requires the approver tier (an admin-level action over
-someone else's data), matching require_approver's use elsewhere for
-approval-authority-gated actions.
+requires the admin role (production audit 13: it used to accept any
+approver, who could then erase every admin account), and the last admin
+account can never be erased.
 """
 
 from __future__ import annotations
@@ -39,15 +39,15 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import CurrentUser, get_current_user
 from app.db import get_db
-from app.db.models import UserRole
+from app.db.models import User, UserRole
 from app.db.repository import delete_user, get_user
 from app.fleet.audit_log import AuditEntry, get_audit_log
-from app.middleware.rbac import require_approver
+from app.middleware.rbac import require_admin
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +120,7 @@ async def export_my_data(
 @router.get("/export/{username}")
 async def export_user_data(
     username: str,
-    _approver: str = Depends(require_approver),
+    _admin: str = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Admin-initiated GDPR/CCPA data-access request on behalf of another
@@ -132,7 +132,7 @@ async def export_user_data(
 @router.delete("/user/{username}")
 async def delete_user_data(
     username: str,
-    _approver: str = Depends(require_approver),
+    _admin: str = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """GDPR/CCPA erasure request: removes login credentials and role
@@ -140,6 +140,20 @@ async def delete_user_data(
     attributable to them — see this module's docstring for why that's a
     deliberate, legally-grounded scope boundary, not a partial
     implementation."""
+    # Never erase the last admin: nobody could manage users afterwards.
+    target = await get_user(db, username)
+    if target is not None and str(target.role) == "admin":
+        remaining = await db.execute(
+            select(func.count())
+            .select_from(User)
+            .where(User.role == "admin", User.username != username)
+        )
+        if int(remaining.scalar_one()) == 0:
+            raise HTTPException(
+                status_code=409,
+                detail="Refusing to erase the last admin account; create another admin first.",
+            )
+
     identity_removed = await delete_user(db, username)
     from app.auth.revocation import invalidate
 

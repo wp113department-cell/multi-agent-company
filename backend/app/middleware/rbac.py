@@ -31,6 +31,21 @@ from app.db.models import UserRole
 logger = logging.getLogger(__name__)
 
 
+def _raise_if_db_unavailable(exc: Exception) -> None:
+    """Production audit 13: the token's account re-check reads the database.
+    During an outage that read failed and was reported as "Invalid token"
+    (401), which makes the UI log every user out over a database blip.
+    Answer 503 instead; the session stays valid."""
+    from app.db.errors import is_db_unavailable
+
+    if is_db_unavailable(exc):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database unavailable, retry shortly",
+            headers={"Retry-After": "5"},
+        ) from exc
+
+
 async def _get_user_role(user_id: str, db: AsyncSession) -> str:
     result = await db.execute(select(UserRole).where(UserRole.user_id == user_id))
     row = result.scalar_one_or_none()
@@ -89,6 +104,7 @@ async def require_approver(
             except Exception as exc:
                 if isinstance(exc, HTTPException):
                     raise
+                _raise_if_db_unavailable(exc)
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token"
                 ) from exc
@@ -118,6 +134,40 @@ async def require_approver(
         detail="Approver role required: provide Authorization: Bearer <token> "
         "or X-User-Id (with an approver role recorded in user_roles)",
     )
+
+
+async def require_admin(
+    request: Request,
+    approver: str = Depends(require_approver),
+    db: AsyncSession = Depends(get_db),
+) -> str:
+    """FastAPI dependency — 403 unless the caller's CURRENT role is "admin".
+
+    Production audit 13: account erasure and exporting another user's data
+    were gated by require_approver only, so any approver could erase every
+    admin account (locking admins out) or download anyone's data. The role
+    is read live from the users / user_roles tables, never from the token.
+    """
+    settings = get_settings()
+    if not settings.rbac_enabled:
+        return approver
+    role: str | None = None
+    if settings.jwt_auth_enabled:
+        from app.db.repository import get_user
+
+        user = await get_user(db, approver)
+        role = str(user.role) if user is not None else None
+    if role is None and settings.allow_legacy_role_header:
+        if request.headers.get("X-User-Role", "").lower() == "admin":
+            role = "admin"
+    if role is None:
+        role = await _get_user_role(approver, db)
+    if role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"User {approver!r} has role {role!r}; admin required",
+        )
+    return approver
 
 
 async def require_authenticated(
@@ -181,6 +231,7 @@ async def require_authenticated(
             except HTTPException:
                 raise
             except Exception as exc:
+                _raise_if_db_unavailable(exc)
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token"
                 ) from exc

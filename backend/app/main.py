@@ -1900,13 +1900,49 @@ app.include_router(audit_router)
 app.include_router(privacy_router)
 
 
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Production audit 13: unhandled errors used to reach the client as a bare
+    text/plain "Internal Server Error". Answer in the app's JSON error shape;
+    a lost/unreachable database becomes 503 + Retry-After, not 500."""
+    from app.db.errors import is_db_unavailable
+
+    if is_db_unavailable(exc):
+        logger.error(
+            "Database unavailable during %s %s: %r",
+            request.method,
+            request.url.path,
+            exc,
+        )
+        return JSONResponse(
+            status_code=503,
+            headers={"Retry-After": "5"},
+            content={
+                "error": {
+                    "code": "503",
+                    "message": "Database unavailable, retry shortly",
+                }
+            },
+        )
+    logger.exception("Unhandled error during %s %s", request.method, request.url.path)
+    return JSONResponse(
+        status_code=500,
+        content={"error": {"code": "500", "message": "Internal server error"}},
+    )
+
+
+app.add_exception_handler(Exception, unhandled_exception_handler)
+
+
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(
     request: Request, exc: StarletteHTTPException
 ) -> JSONResponse:
+    # Keep headers set on the exception (Retry-After, WWW-Authenticate…);
+    # they were dropped here before production audit 13.
     return JSONResponse(
         status_code=exc.status_code,
         content={"error": {"code": str(exc.status_code), "message": str(exc.detail)}},
+        headers=getattr(exc, "headers", None),
     )
 
 
