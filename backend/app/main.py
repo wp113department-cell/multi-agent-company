@@ -11,7 +11,6 @@ from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -258,18 +257,20 @@ async def _versioned_lesson_consolidation_loop() -> None:
     while True:
         await asyncio.sleep(get_settings().memory_consolidation_interval_hours * 3600)
         try:
-            if not get_settings().memory_consolidation_enabled:
-                continue
-            from app.fleet.versioned_memory import get_versioned_memory_store
+            # Qoder cross-check MEM-03-002: this used `continue`, which also
+            # skipped the zero-vector repair below — the repair's only
+            # scheduled caller — whenever consolidation was switched off.
+            if get_settings().memory_consolidation_enabled:
+                from app.fleet.versioned_memory import get_versioned_memory_store
 
-            created = await asyncio.to_thread(
-                get_versioned_memory_store().consolidate_published_lessons
-            )
-            if created:
-                logger.info(
-                    "Versioned lesson consolidation: %d draft(s) proposed",
-                    len(created),
+                created = await asyncio.to_thread(
+                    get_versioned_memory_store().consolidate_published_lessons
                 )
+                if created:
+                    logger.info(
+                        "Versioned lesson consolidation: %d draft(s) proposed",
+                        len(created),
+                    )
         except Exception as exc:
             logger.warning("Versioned lesson consolidation loop failed: %s", exc)
         # Also repair memory rows stored with a zero embedding during a provider
@@ -1878,7 +1879,27 @@ app = FastAPI(
 
 # Wire rate limiter state and middleware before other middleware
 app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
+def _rate_limit_handler(request: Request, exc: RateLimitExceeded) -> Response:
+    """Qoder cross-check PROD-08-102 (2026-10-02): slowapi's default body is
+    {"error": "<string>"}, unlike every other error ({"error": {"code",
+    "message"}}), so the UI could not show it. Same headers (Retry-After,
+    X-RateLimit-*) as slowapi's own handler."""
+    response = JSONResponse(
+        {
+            "error": {
+                "code": "429",
+                "message": f"Too many requests ({exc.detail}). Please wait and retry.",
+            }
+        },
+        status_code=429,
+    )
+    injected: Response = request.app.state.limiter._inject_headers(
+        response, request.state.view_rate_limit
+    )
+    return injected
+
+
+app.add_exception_handler(RateLimitExceeded, _rate_limit_handler)  # type: ignore[arg-type]
 app.add_middleware(SlowAPIMiddleware)
 
 # Production audit 14 (REPRO-14-006): enforce must_change_password server-side.

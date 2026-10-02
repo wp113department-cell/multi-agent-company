@@ -53,7 +53,7 @@ _REQUIRED_ROLE_SPECIFIC_SECTIONS = (
 )
 
 
-def test_role_file_count_is_85() -> None:
+def test_role_file_count_is_86() -> None:
     # 67 from Day 0-8 (68 agent_models.json entries minus groq_adapter, which has no role
     # file) + 5 Day 9 fleet-enhancement agents (agent_performance_reviewer, agent_debugger,
     # agent_advisor, knowledge_curator, quality_auditor) = 72.
@@ -76,7 +76,9 @@ def test_role_file_count_is_85() -> None:
     # from (app/agents/temporary_agent.py's TemporaryAgentPool._write_role_
     # file); barot_agent.py itself has no role file (it never calls
     # load_role() / run_agent_graph() — it only plans and spawns). = 85.
-    assert len(_ROLE_NAMES) == 85, f"expected 85 role files, found {len(_ROLE_NAMES)}"
+    # + 1 (Qoder cross-check H-3, 2026-10-02): bhaskar_agent — run by bhaskar_tool
+    # (offered to 83 agents) but had no role file, so every call failed. = 86.
+    assert len(_ROLE_NAMES) == 86, f"expected 86 role files, found {len(_ROLE_NAMES)}"
 
 
 def test_global_standards_file_exists() -> None:

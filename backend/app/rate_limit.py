@@ -17,13 +17,55 @@ from starlette.types import Scope
 
 from app.config import get_settings
 
+
 # Keyed by remote IP; the blanket default_limits below apply to every route
 # automatically via SlowAPIMiddleware (see main.py). Routes that need a
 # tighter limit than the default (login, task/epic/agent dispatch) apply
 # their own @limiter.limit(...) decorator, which overrides the default for
 # that route rather than stacking with it.
+def rate_limit_key(request: Any) -> str:
+    """Who a request counts against.
+
+    Qoder cross-check PROD-08-101 (2026-10-02): keyed by the TCP peer only,
+    so behind the Next.js frontend (which proxies every /api call) all users
+    shared ONE bucket — a few open task pages exhausted the 200/min default
+    for everyone. Now: a valid session → per user; otherwise the client IP,
+    taken from X-Forwarded-For only when the peer is a trusted proxy (so the
+    header cannot be spoofed by a direct caller).
+    """
+    token = (
+        request.cookies.get("gridiron_token") if hasattr(request, "cookies") else None
+    )
+    auth = (
+        request.headers.get("authorization", "") if hasattr(request, "headers") else ""
+    )
+    if not token and auth.lower().startswith("bearer "):
+        token = auth[7:].strip()
+    if token:
+        try:
+            from app.auth.jwt import decode_access_token
+
+            sub = decode_access_token(token).get("sub")
+            if sub:
+                return f"user:{sub}"
+        except Exception:
+            pass  # invalid/expired token: fall back to the client IP
+    peer = get_remote_address(request)
+    trusted = {
+        p.strip()
+        for p in get_settings().rate_limit_trusted_proxies.split(",")
+        if p.strip()
+    }
+    if peer in trusted:
+        forwarded = request.headers.get("x-forwarded-for", "")
+        client = forwarded.split(",")[0].strip()
+        if client:
+            return f"ip:{client}"
+    return f"ip:{peer}"
+
+
 limiter = Limiter(
-    key_func=get_remote_address,
+    key_func=rate_limit_key,
     default_limits=[get_settings().rate_limit_default],
     enabled=get_settings().rate_limit_enabled,
 )

@@ -29,9 +29,6 @@ from app.services.alert import send_task_alert
 
 logger = logging.getLogger(__name__)
 
-# Haiku cost estimate: ~$0.80/M input, $4.00/M output (per Anthropic pricing)
-_COST_PER_INPUT_TOKEN = 0.0000008
-_COST_PER_OUTPUT_TOKEN = 0.000004
 
 # Gap-closure (Audit 04 fix, ORCH-04-014): asyncio.create_task()'s own docs
 # warn "save a reference to the result of this function, to avoid a task
@@ -63,10 +60,25 @@ def _finish_tracked(task: "asyncio.Task[Any]") -> None:
         )
 
 
-def _estimate_cost(tokens_in: int, tokens_out: int) -> float:
-    return round(
-        tokens_in * _COST_PER_INPUT_TOKEN + tokens_out * _COST_PER_OUTPUT_TOKEN, 6
-    )
+def _estimate_cost(tokens_in: int, tokens_out: int, agent_name: str) -> float:
+    """Cost of a simple-mode run at the model the agent really used.
+
+    Qoder cross-check H-2 (2026-10-02): this used fixed Haiku-era rates
+    ($0.80/$4 per M) for every agent, while the planner routes to Opus and
+    the coder to Sonnet — stored agent_runs costs were 3.75-6x too low,
+    understating dashboards and the daily-budget DB floor. Now: routed model,
+    capped by the active cost mode (economy -> Haiku), priced by tier.
+    """
+    from app.config import get_settings
+    from app.fleet.cost_mode import cap_model
+    from app.fleet.model_router import get_model_router
+    from app.pipeline.cost_controller import cost_rates_for_tier
+
+    route = get_model_router().route(agent_name)
+    model = cap_model(route.model, route.tier).lower()
+    tier = "haiku" if "haiku" in model else "opus" if "opus" in model else "sonnet"
+    rate_in, rate_out = cost_rates_for_tier(tier, get_settings())
+    return round(tokens_in * rate_in + tokens_out * rate_out, 6)
 
 
 # ---- Planning pipeline (PM → Architect → Decomposer, with interrupt) ----
@@ -302,6 +314,52 @@ async def resume_planning_pipeline(
 
     factory = get_session_factory()
 
+    # Qoder cross-check ORCH-04-107 (2026-10-02): two approvals (the task's
+    # pipeline/approve and the approvals inbox, or a double click) could both
+    # resume the same plan graph. Claim it atomically; a second caller finds
+    # nothing to claim and stops. Tasks without a pipeline_state row (older
+    # call paths) proceed as before.
+    from sqlalchemy import text as _sql
+
+    async with factory() as claim_db:
+        row = (
+            await claim_db.execute(
+                _sql("SELECT stage FROM pipeline_state WHERE task_id = :t"),
+                {"t": task_id},
+            )
+        ).first()
+        if row is not None:
+            claimed = (
+                await claim_db.execute(
+                    _sql(
+                        "UPDATE pipeline_state SET stage = 'resuming' "
+                        "WHERE task_id = :t AND stage = 'awaiting_approval' "
+                        "RETURNING id"
+                    ),
+                    {"t": task_id},
+                )
+            ).first()
+            await claim_db.commit()
+            if claimed is None:
+                logger.info(
+                    "Plan for task %d already resumed (stage=%s) — ignoring "
+                    "duplicate approval",
+                    task_id,
+                    row[0],
+                )
+                return
+
+    async def _release_claim() -> None:
+        async with factory() as rdb:
+            await rdb.execute(
+                _sql(
+                    "UPDATE pipeline_state SET stage = 'awaiting_approval' "
+                    "WHERE task_id = :t AND stage = 'resuming'"
+                ),
+                {"t": task_id},
+            )
+            await rdb.commit()
+
     async with factory() as db:
         try:
             result = await resume_pipeline(
@@ -358,6 +416,7 @@ async def resume_planning_pipeline(
                 )
 
         except SubtaskEditError as e:
+            await _release_claim()  # still awaiting approval: allow a retry
             # #227 — a malformed edit must never half-apply or corrupt the
             # plan's dependency graph. The graph.ainvoke() call above raised
             # BEFORE human_review_node returned any updated state, so
@@ -371,6 +430,10 @@ async def resume_planning_pipeline(
                 )
         except Exception as e:
             logger.exception("resume_planning_pipeline failed for task %d", task_id)
+            try:
+                await _release_claim()
+            except Exception:
+                logger.warning("Could not release plan claim for task %d", task_id)
             async with factory() as db2:
                 await append_log(db2, task_id, "pipeline_error", f"Resume failed: {e}")
 
@@ -616,6 +679,18 @@ async def launch_manager(
             logger.exception("Manager pipeline failed for task %d", task_id)
             async with factory() as db2:
                 await update_pipeline_state(db2, task_id, "blocked")
+                # Qoder cross-check H-1 (2026-10-02): the task itself was never
+                # transitioned, so it stayed "coding" forever with nothing
+                # running (unrestartable, invisible to the alert bell).
+                # launch_coder already does this; mirror it.
+                try:
+                    await transition_task(db2, task_id, "blocked")
+                except Exception:
+                    logger.warning(
+                        "Could not mark task %d blocked after manager failure",
+                        task_id,
+                        exc_info=True,
+                    )
                 await append_log(db2, task_id, "pipeline_error", f"Manager failed: {e}")
             await send_task_alert(task_id, "failed", f"Manager pipeline exception: {e}")
 
@@ -724,7 +799,7 @@ async def launch_planner(
             tokens_in = 0
             tokens_out = 0
 
-        cost = _estimate_cost(tokens_in, tokens_out)
+        cost = _estimate_cost(tokens_in, tokens_out, "planner")
 
         if error:
             await finish_agent_run(
@@ -957,7 +1032,7 @@ async def launch_coder(
                 images=task_images or None,
             )
 
-            cost = _estimate_cost(tokens_in, tokens_out)
+            cost = _estimate_cost(tokens_in, tokens_out, "coder")
 
             if error:
                 await finish_agent_run(

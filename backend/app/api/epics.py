@@ -10,7 +10,7 @@ import uuid
 from decimal import Decimal
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi import Path as PathParam
 
 from app.api.budget_gate import require_daily_budget
@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.db import get_db
-from app.db.models import DevTask, Epic
+from app.db.models import DevTask, Epic, PipelineState
 from app.event_bus.bus import publish_event
 from app.event_bus.models import GridironEvent
 from app.middleware.rbac import require_approver, require_authenticated
@@ -149,11 +149,15 @@ async def create_epic(
 
 @router.get("")
 async def list_epics(
+    limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
     _actor: str = Depends(require_authenticated),
 ) -> list[dict[str, Any]]:
-    """List all epics, newest first."""
-    result = await db.execute(select(Epic).order_by(Epic.created_at.desc()))
+    """List epics, newest first (Qoder cross-check PROD-09-104: was unbounded —
+    every epic ever created on every 5 s poll of the epics page)."""
+    result = await db.execute(
+        select(Epic).order_by(Epic.created_at.desc()).limit(limit)
+    )
     epics = list(result.scalars().all())
     return [
         {
@@ -179,8 +183,17 @@ async def batch_review(
 ) -> dict[str, Any]:
     """Return all epics + tasks that are ready for human review, grouped for batch approval.
 
-    Returns epics in 'ready_for_review', 'pending_cost_approval', and tasks in
-    'ready_for_review' or 'awaiting_approval' — ordered by age (oldest first).
+    Returns epics in 'ready_for_review' / 'pending_cost_approval', and tasks
+    whose plan awaits approval (pipeline stage 'awaiting_approval') — the
+    action this page's Approve/Reject buttons perform
+    (POST /api/tasks/{id}/pipeline/approve|reject) — oldest first.
+
+    Qoder cross-check ORCH-04-109 (2026-10-02): tasks were filtered on
+    DevTask.status in ('ready_for_review', 'awaiting_approval'), but
+    'awaiting_approval' is a pipeline stage, never a task status (a task
+    awaiting plan approval is status 'planning'). Plans waiting for approval
+    never appeared, and the listed ready_for_review tasks got buttons the
+    pipeline/approve endpoint refuses (409).
     """
 
     epic_result = await db.execute(
@@ -192,7 +205,8 @@ async def batch_review(
 
     task_result = await db.execute(
         select(DevTask)
-        .where(DevTask.status.in_(["ready_for_review", "awaiting_approval"]))
+        .join(PipelineState, PipelineState.task_id == DevTask.id)
+        .where(PipelineState.stage == "awaiting_approval")
         .order_by(DevTask.created_at.asc())
     )
     tasks = list(task_result.scalars().all())
@@ -216,7 +230,7 @@ async def batch_review(
                 "taskId": t.id,
                 "title": t.title,
                 "description": t.description[:300] if t.description else "",
-                "status": t.status,
+                "status": "awaiting_approval",
                 "epicId": t.epic_id,
                 "age": (datetime.now(timezone.utc) - t.created_at).total_seconds()
                 / 3600,
@@ -332,10 +346,16 @@ async def approve_epic_cost(
             detail=f"Epic is in status {epic.status!r}; must be pending_cost_approval",
         )
 
+    # Qoder cross-check H-5: record the approval (and the amount approved).
+    # Before, "cost approval granted" existed only in the comment: the
+    # relaunched manager re-estimated, saw the same over-threshold cost and
+    # halted at pending_cost_approval again — the epic could never start.
+    epic.cost_approved_usd = epic.cost_estimate
+    epic.cost_approved_by = user_id
+    epic.halt_reason = None
     epic.status = "pending"
     await db.commit()
 
-    # Re-launch the manager with cost approval granted
     asyncio.create_task(_launch_epic_manager(epic_id, epic.description))
 
     return {
@@ -415,5 +435,27 @@ async def _launch_epic_manager(epic_id: str, goal: str) -> None:
                 repo_path=repo_path,
                 created_by=created_by,
             )
-    except Exception:
+    except Exception as exc:
         logger.exception("Epic manager pipeline failed for epic %s", epic_id)
+        # Qoder cross-check ORCH-04-108 (2026-10-02): the epic stayed in
+        # whatever status the last node set (pending/planning/coding) with
+        # no halt_reason, and no endpoint accepts those statuses — stuck for
+        # good. "halted" is visible and can be rejected (or re-reviewed).
+        try:
+            from sqlalchemy import update
+
+            async with get_async_session() as db2:
+                await db2.execute(
+                    update(Epic)
+                    .where(Epic.epic_id == epic_id)
+                    .where(Epic.status.in_(["pending", "planning", "coding"]))
+                    .values(
+                        status="halted",
+                        halt_reason=f"Epic pipeline failed: {type(exc).__name__}: {exc}"[
+                            :2000
+                        ],
+                    )
+                )
+                await db2.commit()
+        except Exception:
+            logger.warning("Could not mark epic %s halted", epic_id, exc_info=True)

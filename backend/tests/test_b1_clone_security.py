@@ -271,6 +271,31 @@ async def test_wrong_token_fails_and_is_not_echoed(tmp_path, server) -> None:
     assert not (dest / ".git" / "config").exists()
 
 
+async def test_wrong_token_fails_fast_even_with_a_password_helper(
+    tmp_path, server, monkeypatch
+) -> None:
+    """Qoder cross-check SEC-05-101 (2026-10-02): with GIT_ASKPASS set (VS Code
+    and desktop sessions set it), git asked that helper on the 401 and the
+    clone hung forever (reproduced: killed after 90 s). git must never ask a
+    helper; a wrong token has to fail fast."""
+    import time
+
+    from app.services import git_service
+
+    helper = tmp_path / "never-answers.sh"
+    helper.write_text("#!/bin/sh\nsleep 600\n")
+    helper.chmod(0o755)
+    monkeypatch.setenv("GIT_ASKPASS", str(helper))
+    monkeypatch.setenv("SSH_ASKPASS", str(helper))
+
+    started = time.monotonic()
+    result = await git_service.git_clone_with_token(
+        server.url, str(tmp_path / "w5"), "ghp_WRONGTOKEN999"
+    )
+    assert result["ok"] is False
+    assert time.monotonic() - started < 30, "clone waited on the password helper"
+
+
 # ---------------------------------------------------------------------------
 # Defect 3 — workspace prefix confusion
 # ---------------------------------------------------------------------------

@@ -93,6 +93,9 @@ async def init_active_repo() -> None:
 # ---------------------------------------------------------------------------
 
 
+_CLONE_TIMEOUT_SECONDS = 300.0
+
+
 async def _clone_and_activate(
     repo_id: int,
     github_url: str,
@@ -108,24 +111,18 @@ async def _clone_and_activate(
             # host-scoped Authorization header — NOT spliced into the clone
             # URL (which git persists in plaintext as remote.origin.url in
             # <repo>/.git/config, readable by every agent in that repo).
-            git_env = (
-                {**os.environ, **git_service._auth_env(github_url, token)}
-                if token
-                else None
-            )
+            git_env = git_service._auth_env(github_url, token) if token else None
 
             is_git_repo = (target / ".git").exists()
 
+            # Qoder cross-check SEC-05-101: non-interactive git with a hard
+            # timeout (whole process group killed). This awaited
+            # communicate() with no timeout, so a prompting credential
+            # helper pinned the task forever with the repo stuck "cloning".
             if target.exists() and is_git_repo:
                 # Already a cloned repo — pull latest
-                proc = await asyncio.create_subprocess_exec(
-                    "git",
-                    "pull",
-                    cwd=local_path,
-                    env=git_env,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
+                cmd = ["git", "pull"]
+                cwd: str | None = local_path
             else:
                 # Directory doesn't exist or exists but isn't a git repo — clone fresh
                 target.mkdir(parents=True, exist_ok=True)
@@ -135,18 +132,19 @@ async def _clone_and_activate(
                 # `--` so neither the URL nor the destination can ever be
                 # read by git as an option.
                 cmd += ["--", github_url, local_path]
-                proc = await asyncio.create_subprocess_exec(
-                    *cmd,
-                    env=git_env,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
-            _, stderr_bytes = await proc.communicate()
+                cwd = None
+            rc, _, stderr_bytes, timed_out = await git_service.run_git_process(
+                cmd, cwd, git_env, timeout=_CLONE_TIMEOUT_SECONDS
+            )
 
-            if proc.returncode != 0:
-                error_msg = git_service.scrub_secret(
-                    stderr_bytes.decode(errors="replace"), token
-                )[:2000]
+            if rc != 0:
+                raw = (
+                    f"git timed out after {_CLONE_TIMEOUT_SECONDS:.0f}s "
+                    "(check the URL and token)"
+                    if timed_out
+                    else stderr_bytes.decode(errors="replace")
+                )
+                error_msg = git_service.scrub_secret(raw, token)[:2000]
                 await db.execute(
                     update(Repo)
                     .where(Repo.id == repo_id)

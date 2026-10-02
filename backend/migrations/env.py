@@ -15,6 +15,21 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 
+
+def include_object(obj, name, type_, reflected, compare_to):  # type: ignore[no-untyped-def]
+    """Qoder cross-check PROD-13-101 (2026-10-02): the schema is built by
+    hand-written migrations, and several live objects are not declared on the
+    models (LangGraph checkpoint tables created at runtime, audit_log,
+    chat_messages, lessons, HNSW vector indexes, many indexes). Autogenerate
+    therefore proposed DROPPING them — one careless `alembic revision
+    --autogenerate` would have destroyed live tables and vector indexes.
+    Objects that exist only in the database are never proposed for removal;
+    write those migrations by hand."""
+    if reflected and compare_to is None:
+        return False
+    return True
+
+
 # Override sqlalchemy.url from DATABASE_URL env var (strip +asyncpg for sync ops)
 db_url = os.environ.get("DATABASE_URL", "")
 if db_url.startswith("postgresql+asyncpg://"):
@@ -28,6 +43,7 @@ def run_migrations_offline() -> None:
     context.configure(
         url=url,
         target_metadata=target_metadata,
+        include_object=include_object,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
     )
@@ -36,7 +52,11 @@ def run_migrations_offline() -> None:
 
 
 def do_run_migrations(connection):
-    context.configure(connection=connection, target_metadata=target_metadata)
+    context.configure(
+        connection=connection,
+        target_metadata=target_metadata,
+        include_object=include_object,
+    )
     with context.begin_transaction():
         context.run_migrations()
 

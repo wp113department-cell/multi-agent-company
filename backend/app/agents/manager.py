@@ -1638,30 +1638,66 @@ async def run_manager(
 
     wave_queue: deque[list[int]] = deque(waves)
     halted = False
+
+    # Qoder cross-check ORCH-04-105 (2026-10-02): every subtask of a wave got
+    # the SAME AsyncSession and ran concurrently. SQLAlchemy sessions are not
+    # safe for concurrent use, and every write site swallows its errors, so
+    # subtask status rows and events could be lost silently. Concurrent
+    # subtasks now each use their own session on the same engine; row ids
+    # are snapshotted so nothing lazy-loads through the shared session.
+    from types import SimpleNamespace
+
+    from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
+
+    _row_refs: list[Any] = [SimpleNamespace(id=r.id) for r in _db_subtask_rows]
+    _bind = getattr(db, "bind", None) if db is not None else None
+    _own_sessions = (
+        async_sessionmaker(_bind, expire_on_commit=False)
+        if isinstance(_bind, AsyncEngine)
+        else None
+    )
+
+    async def _dispatch(idx: int, session: Any) -> dict[str, Any]:
+        return await _dispatch_one_subtask(
+            subtask_idx=idx,
+            subtask=subtasks[idx],
+            task_id=task_id,
+            worktree_path=worktree_path,
+            plan=plan,
+            repo=repo,
+            epic_id=epic_id,
+            images=images,
+            extra_env=extra_env,
+            db=session,
+            max_retries=max_retries,
+            manager_trace_id=manager_trace_id,
+            task_priority=task_priority,
+            db_subtask_rows=_row_refs,
+            git_commit_lock=git_commit_lock,
+        )
+
+    async def _dispatch_own_session(idx: int) -> dict[str, Any]:
+        assert _own_sessions is not None
+        async with _own_sessions() as own:
+            return await _dispatch(idx, own)
+
     while wave_queue:
         wave = wave_queue.popleft()
-        outcomes = await asyncio.gather(
-            *[
-                _dispatch_one_subtask(
-                    subtask_idx=idx,
-                    subtask=subtasks[idx],
-                    task_id=task_id,
-                    worktree_path=worktree_path,
-                    plan=plan,
-                    repo=repo,
-                    epic_id=epic_id,
-                    images=images,
-                    extra_env=extra_env,
-                    db=db,
-                    max_retries=max_retries,
-                    manager_trace_id=manager_trace_id,
-                    task_priority=task_priority,
-                    db_subtask_rows=_db_subtask_rows,
-                    git_commit_lock=git_commit_lock,
-                )
-                for idx in wave
-            ]
-        )
+        if len(wave) == 1:
+            outcomes = [await _dispatch(wave[0], db)]
+        elif db is None:
+            # nothing shared to protect: keep full concurrency
+            outcomes = list(
+                await asyncio.gather(*[_dispatch(idx, None) for idx in wave])
+            )
+        elif _own_sessions is not None:
+            outcomes = list(
+                await asyncio.gather(*[_dispatch_own_session(idx) for idx in wave])
+            )
+        else:
+            # A connection-bound session cannot be split: stay correct by
+            # running this wave's subtasks one at a time.
+            outcomes = [await _dispatch(idx, db) for idx in wave]
         dispatched.update(wave)
         wave_proposals: list[dict[str, Any]] = []
 
@@ -2033,6 +2069,70 @@ async def _resource_check_node(state: EpicManagerState) -> dict[str, Any]:
     return {"stage": ""}
 
 
+async def _halt_for_cost_approval(
+    db: Any, epic_id: str, estimate: Any, settings: Any, repo: str
+) -> dict[str, Any]:
+    """Mark the epic pending_cost_approval and return the early-exit state.
+    Shared by the pre-planning gate and (Qoder cross-check PROD-09-102) the
+    post-planning re-check against the real subtask count."""
+    from sqlalchemy import update as sa_update
+
+    from app.db.models import Epic
+    from app.event_bus.bus import publish_event
+    from app.event_bus.models import GridironEvent
+
+    halt_reason = (
+        f"Cost estimate (${estimate.estimated_cost_usd:.2f}) exceeds the "
+        f"${settings.cost_approval_threshold:.2f} approval threshold "
+        f"(~${estimate.cost_per_subtask_usd:.4f}/subtask). "
+    )
+    if estimate.max_subtasks_within_threshold is not None:
+        halt_reason += (
+            f"Reducing scope to ~{estimate.max_subtasks_within_threshold} "
+            "subtask(s) would fit within the threshold without approval, "
+            "or approve to proceed at the current scope."
+        )
+    else:
+        halt_reason += "Approve to proceed at the current scope."
+    await db.execute(
+        sa_update(Epic)
+        .where(Epic.epic_id == epic_id)
+        .values(status="pending_cost_approval", halt_reason=halt_reason)
+    )
+    await db.commit()
+    await publish_event(
+        GridironEvent(
+            event_type="epic.pending_cost_approval",
+            epic_id=epic_id,
+            payload={
+                "estimated_cost_usd": estimate.estimated_cost_usd,
+                "threshold": settings.cost_approval_threshold,
+                "cost_per_subtask_usd": estimate.cost_per_subtask_usd,
+                "max_subtasks_within_threshold": estimate.max_subtasks_within_threshold,
+                "halt_reason": halt_reason,
+            },
+            emitted_by="manager",
+        ),
+        db=db,
+    )
+    return {
+        "stage": "pending_cost_approval",
+        "settings": settings,
+        "repo": repo,
+        "package": EpicApprovalPackage(
+            epic_id=epic_id,
+            status="pending_cost_approval",
+            subtask_results=[],
+            total_files_changed=[],
+            all_diffs="",
+            all_qa_summaries=[],
+            all_review_findings=[],
+            cost_actual_usd=0.0,
+            halt_reason=halt_reason,
+        ),
+    }
+
+
 async def _cost_estimate_node(state: EpicManagerState) -> dict[str, Any]:
     """Step 1 of _run_epic_manager_body()'s original flow — rough cost
     estimate (subtask count unknown yet; use 5 as baseline). Sets
@@ -2042,8 +2142,6 @@ async def _cost_estimate_node(state: EpicManagerState) -> dict[str, Any]:
     from sqlalchemy import select, update as sa_update
 
     from app.db.models import Epic
-    from app.event_bus.bus import publish_event
-    from app.event_bus.models import GridironEvent
     from app.pipeline.cost_controller import estimate_epic_cost
 
     epic_id = state["epic_id"]
@@ -2053,7 +2151,7 @@ async def _cost_estimate_node(state: EpicManagerState) -> dict[str, Any]:
 
     # Load the epic
     result = await db.execute(select(Epic).where(Epic.epic_id == epic_id))
-    epic = result.scalar_one()  # noqa: F841
+    epic = result.scalar_one()
 
     estimate = await estimate_epic_cost(subtask_count=5, db=db)
     await db.execute(
@@ -2063,7 +2161,15 @@ async def _cost_estimate_node(state: EpicManagerState) -> dict[str, Any]:
     )
     await db.commit()
 
-    if estimate.requires_approval:
+    # Qoder cross-check H-5: a human already approved this epic's cost
+    # (POST /epics/{id}/approve-cost) — let it through while the estimate is
+    # within the approved amount, instead of re-blocking forever.
+    approved = epic.cost_approved_usd
+    already_approved = approved is not None and Decimal(
+        str(estimate.estimated_cost_usd)
+    ) <= Decimal(approved)
+
+    if estimate.requires_approval and not already_approved:
         # AUDIT_Q_BATCH13 §42 gap-closure (2026-08-11) — "recommend cheaper
         # approaches". No dev agent runs below sonnet-tier today (see
         # cost_controller.py's module docstring), so a real recommendation
@@ -2073,56 +2179,7 @@ async def _cost_estimate_node(state: EpicManagerState) -> dict[str, Any]:
         # (unlike the resource-check/conflict-check halt paths below), so
         # even the generic "exceeds threshold" reason never reached the
         # human-facing GET /epics/batch-review endpoint's haltReason field.
-        halt_reason = (
-            f"Cost estimate (${estimate.estimated_cost_usd:.2f}) exceeds the "
-            f"${settings.cost_approval_threshold:.2f} approval threshold "
-            f"(~${estimate.cost_per_subtask_usd:.4f}/subtask). "
-        )
-        if estimate.max_subtasks_within_threshold is not None:
-            halt_reason += (
-                f"Reducing scope to ~{estimate.max_subtasks_within_threshold} "
-                "subtask(s) would fit within the threshold without approval, "
-                "or approve to proceed at the current scope."
-            )
-        else:
-            halt_reason += "Approve to proceed at the current scope."
-        await db.execute(
-            sa_update(Epic)
-            .where(Epic.epic_id == epic_id)
-            .values(status="pending_cost_approval", halt_reason=halt_reason)
-        )
-        await db.commit()
-        await publish_event(
-            GridironEvent(
-                event_type="epic.pending_cost_approval",
-                epic_id=epic_id,
-                payload={
-                    "estimated_cost_usd": estimate.estimated_cost_usd,
-                    "threshold": settings.cost_approval_threshold,
-                    "cost_per_subtask_usd": estimate.cost_per_subtask_usd,
-                    "max_subtasks_within_threshold": estimate.max_subtasks_within_threshold,
-                    "halt_reason": halt_reason,
-                },
-                emitted_by="manager",
-            ),
-            db=db,
-        )
-        return {
-            "stage": "pending_cost_approval",
-            "settings": settings,
-            "repo": repo,
-            "package": EpicApprovalPackage(
-                epic_id=epic_id,
-                status="pending_cost_approval",
-                subtask_results=[],
-                total_files_changed=[],
-                all_diffs="",
-                all_qa_summaries=[],
-                all_review_findings=[],
-                cost_actual_usd=0.0,
-                halt_reason=halt_reason,
-            ),
-        }
+        return await _halt_for_cost_approval(db, epic_id, estimate, settings, repo)
 
     return {"stage": "", "settings": settings, "repo": repo}
 
@@ -2204,6 +2261,44 @@ async def _planning_node(state: EpicManagerState) -> dict[str, Any]:
         .values(cost_estimate=Decimal(str(refined_estimate.estimated_cost_usd)))
     )
     await db.commit()
+
+    # Qoder cross-check PROD-09-102: the pre-planning gate assumed 5 subtasks;
+    # re-check with the real count, honouring an amount a human approved.
+    from sqlalchemy import select as _select
+
+    approved = (
+        await db.execute(_select(Epic.cost_approved_usd).where(Epic.epic_id == epic_id))
+    ).scalar_one_or_none()
+    within_approval = approved is not None and Decimal(
+        str(refined_estimate.estimated_cost_usd)
+    ) <= Decimal(approved)
+    if refined_estimate.requires_approval and not within_approval:
+        from app.db.repository import append_log, transition_task
+
+        try:
+            await transition_task(db, task_id, "cancelled")
+            await append_log(
+                db,
+                task_id,
+                "pipeline",
+                "Planned cost needs approval; this plan was set aside and will be "
+                "re-planned once the epic's cost is approved.",
+            )
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            logger.warning(
+                "Could not cancel epic child task %s", task_id, exc_info=True
+            )
+        settings = get_settings()
+        halted = await _halt_for_cost_approval(
+            db,
+            epic_id,
+            refined_estimate,
+            settings,
+            str(state.get("repo_path") or settings.target_repo_path),
+        )
+        return {**halted, "task_id": task_id}
 
     architect_plan = pipeline_result.get("architect_plan") or {}
 
@@ -2535,6 +2630,12 @@ def _route_after_cost_estimate(state: EpicManagerState) -> str:
     return "planning"
 
 
+def _route_after_planning(state: EpicManagerState) -> str:
+    if state.get("stage") == "pending_cost_approval":
+        return "END"
+    return "conflict_check"
+
+
 def _route_after_conflict_check(state: EpicManagerState) -> str:
     if state.get("stage") == "halted_conflict":
         return "END"
@@ -2587,7 +2688,11 @@ def build_epic_manager_graph() -> Any:
         _route_after_cost_estimate,
         {"planning": "planning", "END": END},
     )
-    graph.add_edge("planning", "conflict_check")
+    graph.add_conditional_edges(
+        "planning",
+        _route_after_planning,
+        {"conflict_check": "conflict_check", "END": END},
+    )
     graph.add_conditional_edges(
         "conflict_check",
         _route_after_conflict_check,

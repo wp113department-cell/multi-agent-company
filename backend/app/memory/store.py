@@ -45,6 +45,8 @@ real schema rather than assumed:
 
 from __future__ import annotations
 
+from collections import OrderedDict
+
 import logging
 import time
 from dataclasses import dataclass, field
@@ -60,6 +62,11 @@ from app.memory.analytics import record_retrieval_time
 logger = logging.getLogger(__name__)
 
 _ZERO_VECTOR_1536 = [0.0] * 1536
+
+# Recent embeddings, reused for identical (model, text) — see _embed.
+_EMBED_MEMO: "OrderedDict[tuple[str, str], tuple[float, list[float]]]" = OrderedDict()
+_EMBED_MEMO_MAX = 512
+_EMBED_MEMO_TTL_SECONDS = 3600.0
 
 
 def _build_outcome_text(
@@ -394,6 +401,17 @@ async def _embed(text_to_embed: str) -> list[float]:
     if not settings.voyage_api_key:
         return _ZERO_VECTOR_1536
 
+    # Qoder cross-check MEM-03-003: one agent run asked Voyage for the same
+    # text 7 times (one per memory category) — paid, serial round-trips.
+    # Embeddings are deterministic per (model, text), so reuse recent ones.
+    import time as _time
+
+    memo_key = (settings.voyage_model, text_to_embed)
+    hit = _EMBED_MEMO.get(memo_key)
+    if hit is not None and _time.monotonic() - hit[0] < _EMBED_MEMO_TTL_SECONDS:
+        _EMBED_MEMO.move_to_end(memo_key)
+        return list(hit[1])
+
     last_exc: Exception | None = None
     for attempt in range(_EMBED_ATTEMPTS):
         try:
@@ -408,8 +426,12 @@ async def _embed(text_to_embed: str) -> list[float]:
                 model=settings.voyage_model,
                 input_type="document",
             )
-            raw = result.embeddings[0]
-            return [float(v) for v in raw]
+            vector = [float(v) for v in result.embeddings[0]]
+            _EMBED_MEMO[memo_key] = (_time.monotonic(), vector)
+            _EMBED_MEMO.move_to_end(memo_key)
+            while len(_EMBED_MEMO) > _EMBED_MEMO_MAX:
+                _EMBED_MEMO.popitem(last=False)
+            return list(vector)
         except Exception as exc:
             last_exc = exc
             if attempt < _EMBED_ATTEMPTS - 1:
@@ -615,6 +637,10 @@ async def query_similar_tasks(
                 WHERE embedding IS NOT NULL
                   AND vector_norm(embedding) > 0
                   AND archived = false
+                  -- Qoder cross-check MEM-03-001: only task rows; failures,
+                  -- bugs, preferences etc. have their own queries and were
+                  -- being injected twice, once as "similar past tasks".
+                  AND category = 'task'
                   AND (CAST(:repo_id AS BIGINT) IS NULL OR repo_id IS NULL OR repo_id = CAST(:repo_id AS BIGINT))
                 ORDER BY embedding <=> CAST(:vec AS vector)
                 LIMIT :candidate_limit

@@ -204,6 +204,58 @@ def _strip_userinfo(url: str) -> str:
     return parsed._replace(netloc=netloc).geturl()
 
 
+# Qoder cross-check SEC-05-101 (2026-10-02): with only GIT_TERMINAL_PROMPT=0,
+# git still runs GIT_ASKPASS / SSH_ASKPASS (set by VS Code, desktop sessions)
+# on a 401, and that helper can wait forever — a wrong token hung the clone
+# indefinitely (reproduced). Empty askpass vars disable the helper; the
+# terminal prompt stays disabled, so authentication fails fast instead.
+NON_INTERACTIVE_GIT_ENV: dict[str, str] = {
+    "GIT_TERMINAL_PROMPT": "0",
+    "GIT_ASKPASS": "",
+    "SSH_ASKPASS": "",
+    "GCM_INTERACTIVE": "never",
+}
+
+
+async def run_git_process(
+    cmd: list[str],
+    cwd: str | None,
+    env: dict[str, str] | None,
+    timeout: float,
+) -> tuple[int, bytes, bytes, bool]:
+    """Run git non-interactively with a hard timeout. Returns
+    (returncode, stdout, stderr, timed_out).
+
+    The process gets its own session so a timeout kills the WHOLE group —
+    git spawns git-remote-https (and possibly an askpass helper) which keep
+    the pipes open; killing only `git` left communicate() waiting forever.
+    """
+    import signal
+
+    full_env = {**os.environ, **NON_INTERACTIVE_GIT_ENV, **(env or {})}
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        cwd=cwd,
+        env=full_env,
+        start_new_session=True,
+    )
+    try:
+        out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        return proc.returncode or 0, out, err, False
+    except asyncio.TimeoutError:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            proc.kill()
+        try:
+            await asyncio.wait_for(proc.communicate(), timeout=10)
+        except asyncio.TimeoutError:
+            pass
+        return -1, b"", b"", True
+
+
 def _auth_env(url: str, token: str) -> dict[str, str]:
     """Environment that makes git send `Authorization: Basic x-access-token:
     <token>` to (only) `url`'s origin. Env vars, not argv/URL/config-file:
@@ -211,10 +263,13 @@ def _auth_env(url: str, token: str) -> dict[str, str]:
     parsed = urlparse(url)
     basic = base64.b64encode(f"x-access-token:{token}".encode()).decode()
     return {
-        "GIT_CONFIG_COUNT": "1",
+        **NON_INTERACTIVE_GIT_ENV,
+        "GIT_CONFIG_COUNT": "2",
         "GIT_CONFIG_KEY_0": f"http.{parsed.scheme}://{parsed.netloc}/.extraheader",
         "GIT_CONFIG_VALUE_0": f"Authorization: Basic {basic}",
-        "GIT_TERMINAL_PROMPT": "0",
+        # an empty helper resets the list: no stored/OS credential is consulted
+        "GIT_CONFIG_KEY_1": "credential.helper",
+        "GIT_CONFIG_VALUE_1": "",
     }
 
 
@@ -240,24 +295,10 @@ async def _run_git(
     """
     cmd = ["git"] + args
     logger.debug("git %s (cwd=%s)", " ".join(args), cwd)
-    proc = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        cwd=cwd,
-        env={**os.environ, **env} if env else None,
-    )
-    try:
-        stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-    except asyncio.TimeoutError:
-        proc.kill()
-        await proc.communicate()
+    rc, stdout_b, stderr_b, timed_out = await run_git_process(cmd, cwd, env, timeout)
+    if timed_out:
         return -1, "", f"git {args[0]} timed out after {timeout}s"
-    return (
-        proc.returncode or 0,
-        stdout_b.decode(errors="replace"),
-        stderr_b.decode(errors="replace"),
-    )
+    return rc, stdout_b.decode(errors="replace"), stderr_b.decode(errors="replace")
 
 
 # ---------------------------------------------------------------------------

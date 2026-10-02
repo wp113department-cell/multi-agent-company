@@ -529,6 +529,12 @@ class Epic(Base):
     status: Mapped[str] = mapped_column(String(50), default="pending")
     cost_estimate: Mapped[Decimal | None] = mapped_column(Numeric(10, 4), nullable=True)
     cost_actual: Mapped[Decimal | None] = mapped_column(Numeric(10, 4), nullable=True)
+    # Migration 063 (Qoder cross-check H-5): a human's cost approval, so the
+    # relaunched epic manager does not re-block on the same estimate.
+    cost_approved_usd: Mapped[Decimal | None] = mapped_column(
+        Numeric(10, 4), nullable=True
+    )
+    cost_approved_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
     halt_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Stage 4 Cluster R Phase 1 (2026-08-05, migration 031, CLUSTER_R_DESIGN.md
     # §2/§4/§6): the epic's own source of truth for which repository its

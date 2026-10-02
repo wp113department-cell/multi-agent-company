@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+import os
+from collections import OrderedDict
 import re
 from dataclasses import dataclass
 
@@ -16,10 +18,15 @@ from app.repo_tools.embeddings import semantic_search
 # an unrelated-but-central file (e.g. main.py) on its own.
 _RANK_BOOST_WEIGHT = 0.5
 
-# In-memory per-task context cache: {cache_key: ContextResult}
+# In-memory per-task context cache: {cache_key: (repo_path, ContextResult)}
 # Cache key = SHA-256(task_description + repo_path).
 # Avoids re-running keyword scoring + semantic search on the same task description.
-_context_cache: dict[str, "ContextResult"] = {}
+# Qoder cross-check PROD-09-103 (2026-10-02): this grew forever, and the
+# per-repo invalidation compared a path against the hex key, so it never
+# matched — after a re-index agents kept getting stale context. Now an LRU
+# bounded at _CONTEXT_CACHE_MAX with the repo path stored next to each entry.
+_CONTEXT_CACHE_MAX = 256
+_context_cache: "OrderedDict[str, tuple[str, ContextResult]]" = OrderedDict()
 
 
 def _cache_key(task_description: str, repo_path: str) -> str:
@@ -29,13 +36,14 @@ def _cache_key(task_description: str, repo_path: str) -> str:
 
 def invalidate_context_cache(repo_path: str | None = None) -> None:
     """Clear cached context — call after a re-index completes."""
-    global _context_cache
     if repo_path is None:
         _context_cache.clear()
-    else:
-        keys_to_drop = [k for k, v in _context_cache.items() if repo_path in str(k)]
-        for k in keys_to_drop:
-            del _context_cache[k]
+        return
+    target = os.path.normpath(repo_path)
+    for k in [
+        k for k, (rp, _) in _context_cache.items() if os.path.normpath(rp) == target
+    ]:
+        del _context_cache[k]
 
 
 @dataclass
@@ -78,8 +86,10 @@ def build_context(
     """
     if use_cache:
         ck = _cache_key(task_description, index.repo_path)
-        if ck in _context_cache:
-            return _context_cache[ck]
+        hit = _context_cache.get(ck)
+        if hit is not None:
+            _context_cache.move_to_end(ck)
+            return hit[1]
 
     query_tokens = [w.lower() for w in re.split(r"\W+", task_description) if len(w) > 2]
 
@@ -163,6 +173,9 @@ def build_context(
     )
 
     if use_cache:
-        _context_cache[ck] = ctx
+        _context_cache[ck] = (index.repo_path, ctx)
+        _context_cache.move_to_end(ck)
+        while len(_context_cache) > _CONTEXT_CACHE_MAX:
+            _context_cache.popitem(last=False)
 
     return ctx

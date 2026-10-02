@@ -2123,6 +2123,10 @@ class Settings(BaseSettings):
     )
 
     # Rate limiting (slowapi)
+    rate_limit_trusted_proxies: str = Field(
+        default="127.0.0.1,::1",
+        description="Comma-separated IPs of reverse proxies (the Next.js frontend server) whose X-Forwarded-For is trusted for rate limiting. Requests from any other peer are keyed by their own IP. Logged-in requests are keyed per user regardless.",
+    )
     rate_limit_enabled: bool = Field(
         default=True, description="Enable API rate limiting via slowapi."
     )

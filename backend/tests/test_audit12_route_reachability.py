@@ -56,10 +56,25 @@ async def _seed() -> tuple[str, int]:
                 description="x",
                 status="ready_for_review",
             )
+            # A task whose PLAN awaits approval (what the Review page's buttons
+            # act on): status "planning", pipeline stage "awaiting_approval".
             task = DevTask(
-                title="audit12 review task", description="x", status="ready_for_review"
+                title="audit12 review task", description="x", status="planning"
             )
-            db.add_all([epic, task])
+            code_review = DevTask(
+                title="audit12 code review task",
+                description="x",
+                status="ready_for_review",
+            )
+            db.add_all([epic, task, code_review])
+            await db.commit()
+            await db.execute(
+                text(
+                    "INSERT INTO pipeline_state (task_id, stage) "
+                    "VALUES (:t, 'awaiting_approval')"
+                ),
+                {"t": task.id},
+            )
             await db.commit()
             return epic.epic_id, task.id
     finally:
@@ -71,7 +86,13 @@ async def _cleanup(epic_id: str, task_id: int) -> None:
     try:
         async with async_sessionmaker(engine)() as db:
             await db.execute(
+                text("DELETE FROM pipeline_state WHERE task_id = :i"), {"i": task_id}
+            )
+            await db.execute(
                 text("DELETE FROM dev_tasks WHERE id = :i"), {"i": task_id}
+            )
+            await db.execute(
+                text("DELETE FROM dev_tasks WHERE title = 'audit12 code review task'")
             )
             await db.execute(
                 text("DELETE FROM epics WHERE epic_id = :e"), {"e": epic_id}
@@ -90,9 +111,11 @@ def test_batch_review_returns_waiting_epics_and_tasks() -> None:
         body = r.json()
         epic = next(e for e in body["epics"] if e["epicId"] == epic_id)
         assert epic["age"] >= 0
-        assert any(
-            t.get("id") == task_id or t.get("taskId") == task_id for t in body["tasks"]
-        )
+        waiting = [t for t in body["tasks"] if t["taskId"] == task_id]
+        assert waiting and waiting[0]["status"] == "awaiting_approval"
+        assert not any(
+            t["title"] == "audit12 code review task" for t in body["tasks"]
+        ), "a code-review task was listed; its Approve button would 409"
     finally:
         asyncio.run(_cleanup(epic_id, task_id))
 

@@ -90,7 +90,6 @@ const PAGES = [
   "/epics",
   "/goals",
   "/roadmap",
-  "/stream",
   "/chat",
   "/console",
   "/onboarding",
@@ -108,7 +107,10 @@ test("Page tour — every page renders against the real backend with no 5xx or e
   page.on("response", onResp);
   page.on("pageerror", (e) => problems.push(`pageerror: ${e.message}`));
   for (const path of PAGES) {
-    await page.goto(path, { waitUntil: "load" });
+    // A missing page (404) must fail the tour, not pass it silently
+    // (Qoder cross-check PROD-12-105: "/stream" had no page and still "passed").
+    const doc = await page.goto(path, { waitUntil: "load" });
+    if (!doc || doc.status() >= 400) problems.push(`${path}: HTTP ${doc?.status()}`);
     // Live SSE streams keep the network busy, so "networkidle" never fires;
     // give each page's initial data requests time to complete instead.
     await page.waitForTimeout(2_500);
