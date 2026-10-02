@@ -61,3 +61,21 @@ Same method as step 3.
 - Full regression: backend suite, frontend checks, real browser journeys.
 - One page for the owner: final status of all 14 audits, what was fixed, what each of the three audits found, and what is left (owner-only items).
 - Commit; push when the owner says.
+
+---
+
+## Monday (updated 2026-10-02 evening)
+
+Done since this plan was written: audit 10, backups (running, `./backups`), Sentry (live; it caught a real bug, fixed), in-app alerts, forced password change, Antigravity cross-check (GREEN, pushed), Qoder fixes for 5 High + 12 Medium/Low (commit `0a6378b3`, **local, not pushed**). Owner re-enabled GitHub Actions.
+
+**Pending, in order:**
+1. **Verify and push the Qoder fixes:** full backend suite, real-browser journeys (the page tour now fails on 404), mocked e2e; then `git push`.
+2. **Check the first GitHub Actions run** on `main`. If green → audit 06 GREEN.
+3. **Write `CROSS_CHECK_QODER.md`** (same format as the Antigravity one) and update audit 10 + the tracker.
+4. **Owner decisions (Qoder):**
+   - ORCH-04-103/104: the epic path never asks for plan approval, never transitions its child task, never opens a PR. Build the lifecycle, or document epics as "plan + code only"?
+   - SEC-05-102: policy engine v2 rules are recorded but never enforced. Wire them into the write checks, or remove the feature?
+5. **Remaining Qoder Lows:** doc drift (PROD-08-104, INFRA-06-103, EVAL-07-105), `archived_at` timezone mix (INFRA-06-102), `prompt_change` missing from the memory API filter (MEM-03-005), 4 empty stub tests + 1 `assert True` (T-17-101/102).
+6. **Live AI tests (L1–L10):** only when the owner says go. Haiku/economy, stop at $3.50, keep $1. Estimate $2.26–3.86 without L6. Closes audits 07 and 12.
+7. **Audit 14:** independent person sets up from the README, or the owner accepts the clean-room test.
+8. **Final report** for the owner.
