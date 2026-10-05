@@ -797,13 +797,13 @@ touched**.
 
 ---
 
-## N. (2026-10-05) Final live-AI test plan: free APIs first, then Anthropic within $4
+## N. (2026-10-05) Final live-AI test plan: free APIs first, then Anthropic within $3 (keep $1)
 
 Owner rules (2026-10-05):
 - Small and simple tests run on the free APIs first (Groq, then Gemini).
 - Anthropic is used only for the big tests, and only after the test code has been checked, so that a small code issue never burns a paid re-run.
 - Token-heavy features stay off until the cheap runs pass; they are enabled last.
-- Total Anthropic budget is **$4**. Stop at a measured **$3.50**.
+- Anthropic balance is **$4**. **$1 stays untouched**; the tests may use up to **$3**, with a hard stop at a measured **$2.80** (owner, 2026-10-05).
 
 Keys checked 2026-10-05 with zero-token calls: Anthropic, Groq, Gemini and Voyage all authenticate.
 
@@ -839,7 +839,7 @@ Done earlier: L2 (live semantic memory). Removed: section A stubs (Qoder T-17-10
 2. **Dry run with a fake Anthropic key.** Each paid test must fail exactly at its first LLM call (401, which Anthropic doesn't bill). A test that fails earlier has a setup bug, which gets fixed now.
 3. **Cost guards**, checked to work before spending:
    - `COST_MODE=economy` passed explicitly. `tests/conftest.py` defaults to **quality**, which costs several times more.
-   - `COST_BUDGET_DAILY_USD=3.50` with the Redis ledger on (`SPEND_GUARD_REDIS=true`), so the cap covers every test process together. Proven first with the fake key.
+   - `COST_BUDGET_DAILY_USD=2.80` with the Redis ledger on (`SPEND_GUARD_REDIS=true`), so the cap covers every test process together. Proven first with the fake key.
    - `PIPELINE_MODE=auto` (smart router: a small task runs one specialist).
 4. **Throwaway repo** for anything that writes or commits; never this project's repo.
 5. **Build the missing pieces with mocked tests first:** the L5 judge, and the L8–L10 journeys in `apps/web/e2e-real`.
@@ -866,12 +866,44 @@ Every free run also rehearses the full code path. If a test fails for a code rea
 Rules:
 - The ledger below is updated after every step.
 - A failure stops the run. It is diagnosed from logs for $0, fixed, and only that one test is re-run, never the whole file.
-- Stop at $3.50.
+- Stop at $2.80.
 
 ### N5. Phase 3: restore
 
 - `USE_GROQ` / `USE_GEMINI` go back off, `COST_BUDGET_DAILY_USD` goes back to the owner's $1, and any test-only settings are removed.
 - The audit 07 and 12 reports and the tracker are updated from the results.
+
+### N5b. Phase 0 + 1 results (2026-10-05, $0 spent)
+
+**Free checks found and fixed, before any paid call:**
+- **Product bug:** the task page's "Approve Plan & Start Coding" called `POST /run`, which refuses `ready_for_review` (400). A Smart Run or quick plan could never be approved from the UI (broken since 2026-07-02). It now calls `/approve`. Commit `5eb37912`.
+- **Host blocker for epics:** on this machine an epic on the project repo halts at the resource check (54 GB projected vs 5.6 GB free; 20 parallel agents vs 6 CPUs). Paid epic tests use a throwaway repo and `MAX_CONCURRENT_AGENT_RUNS=4`.
+- **Cost traps:**
+  - `tests/conftest.py` defaults to **quality** mode. Every paid run now forces economy.
+  - Background loops (orphan recovery, doc agent, dependency dispatch, consolidation) could start paid agents on the dev DB. The live server uses an isolated empty DB with those loops parked.
+- **Stale or fake-pass tests fixed:**
+  - 4 specialist tests unpacked the wrong number of return values.
+  - QA, reviewer, research and manager tests passed with **no model answer**.
+  - The epic test predated the plan-approval lifecycle.
+  - The Voyage search tests used an old signature; one "passed" because the search errored.
+  - The API e2e tests had no login (all 401).
+  - The reject response shape had changed.
+  - The demo repo already has `multiply`, so paid tests now ask for `subtract`.
+- **Fewer paid runs:** each agent file shares one real run (19 runs → 8). The coder reads its small temp project, not this repository. The pipeline uses fresh task IDs.
+- **The spend cap is proven:** with the ledger set to $2.81 and a cap of $2.80, the call was refused before sending.
+
+**Free runs:**
+
+| Item | Result |
+|---|---|
+| B1 Groq node + mini-graph tests | 9/9 pass (2 needed a one-tool role) |
+| K1 Gemini | 2/2 pass |
+| Voyage `test_embeddings` | 4/4 pass (real ranking: auth.py first) |
+| L5 judge (Groq) | Built + unit tests; live: passes a concrete answer, fails a vague one (3/3 each) |
+| L4 evals on Groq | Not possible: agents' requests grow past 8k tokens → 413 (as in K3). Moved to Anthropic; the judge stays on Groq (`EVAL_JUDGE_BACKEND=groq`) |
+| L8–L10 journeys | Rehearsed on the real stack with a fake key: C passes fully, D/G reach the first model call |
+| `test_api_e2e` | 7/8 pass at $0; the full-pipeline one reaches the first model call |
+| All `tests/pending` agent tests | Dry run: every one fails only at the first model call (401) |
 
 ### N6. Ledger
 
