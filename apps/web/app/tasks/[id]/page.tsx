@@ -19,6 +19,7 @@ import {
   restartTask,
   retryTaskPush,
   triggerAgentRun,
+  approveTaskPlan,
   triggerPipeline,
   triggerSmartRun,
   updateTaskStatus,
@@ -180,7 +181,7 @@ export default function TaskDetailPage() {
   });
 
   const startCodingMutation = useMutation({
-    mutationFn: () => triggerAgentRun(params.id),
+    mutationFn: () => approveTaskPlan(params.id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["task", params.id] }),
   });
 

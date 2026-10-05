@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { approveEpic, createTask, deleteRepo, fetchTasks, updateTaskStatus } from "./api";
+import {
+  approveEpic,
+  approveTaskPlan,
+  createTask,
+  deleteRepo,
+  fetchTasks,
+  updateTaskStatus,
+} from "./api";
 
 function mockFetchOk(body: unknown = {}): ReturnType<typeof vi.fn> {
   const mockFetch = vi.fn().mockResolvedValue({
@@ -53,5 +60,19 @@ describe("apiFetch (cookie-authenticated requests)", () => {
     const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
     expect(init.headers).toMatchObject({ "X-User-Id": "user-1" });
     expect(init.headers).not.toHaveProperty("Authorization");
+  });
+});
+
+describe("approveTaskPlan", () => {
+  // Live-AI rehearsal 2026-10-05: the task page approved a waiting plan by
+  // calling POST /run, which only starts planning and refuses ready_for_review.
+  it("approves a waiting plan through /approve, never /run", async () => {
+    const mockFetch = mockFetchOk({ triggered: true });
+
+    await approveTaskPlan("42");
+
+    const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toMatch(/\/api\/tasks\/42\/approve$/);
+    expect(init.method).toBe("POST");
   });
 });

@@ -272,8 +272,8 @@ async def test_manager_orchestrates_subtasks(tmp_path: Path) -> None:
         {
             "id": 1,
             "type": "backend",
-            "title": "Add multiply function",
-            "description": "Add multiply(a: int, b: int) -> int to demo_module.py that returns a * b.",
+            "title": "Add subtract function",
+            "description": "Add subtract(a: int, b: int) -> int to demo_module.py that returns a - b.",
         }
     ]
 
@@ -281,7 +281,7 @@ async def test_manager_orchestrates_subtasks(tmp_path: Path) -> None:
         task_id=9020,
         subtasks=subtasks,
         worktree_path=str(wt),
-        plan="Add multiply function to demo_module.py",
+        plan="Add subtract function to demo_module.py",
         repo_path=str(wt),
     )
 
@@ -289,4 +289,5 @@ async def test_manager_orchestrates_subtasks(tmp_path: Path) -> None:
     # counted as success; require the real outcome.
     assert result["status"] == "completed", result
     assert len(result["results"]) == 1
-    assert "def multiply" in (wt / "demo_module.py").read_text()
+    # demo_module.py already defines multiply(); subtract() must be new work.
+    assert "def subtract" in (wt / "demo_module.py").read_text()

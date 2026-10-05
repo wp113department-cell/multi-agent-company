@@ -206,6 +206,17 @@ export async function updateTaskStatus(taskId: string, status: string): Promise<
 // Planner agent (simple mode — POST /run with mode=simple)
 // ---------------------------------------------------------------------------
 
+/**
+ * Approve a plan that is waiting in ready_for_review (quick planner plan or a
+ * Smart Run routed plan) and start coding. POST /run only *starts planning*
+ * and refuses ready_for_review (400) — found by the live-AI rehearsal
+ * 2026-10-05; the task page's approve button had been calling /run.
+ */
+export async function approveTaskPlan(taskId: string): Promise<{ triggered: boolean }> {
+  const res = await apiFetch(`/api/tasks/${taskId}/approve`, { method: "POST" });
+  return handleResponse(res);
+}
+
 export async function triggerAgentRun(taskId: string): Promise<{ triggered: boolean }> {
   const res = await apiFetch(`/api/tasks/${taskId}/run`, {
     method: "POST",

@@ -51,11 +51,12 @@ async def test_manager_dispatches_subtasks_and_completes() -> None:
     repo = _throwaway_repo()
     async with get_async_session() as db:
         epic_id = str(uuid.uuid4())
-        goal = "Add a function multiply(a: int, b: int) -> int to demo_module.py"
+        # demo_module.py already has greet() and multiply(); subtract() is new.
+        goal = "Add a function subtract(a: int, b: int) -> int returning a - b to demo_module.py"
         db.add(
             Epic(
                 epic_id=epic_id,
-                title="Add multiply",
+                title="Add subtract",
                 description=goal,
                 status="pending",
             )
