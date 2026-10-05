@@ -195,8 +195,16 @@ async def get_task_repo_id(db: AsyncSession, task_id: int) -> int | None:
     memory visibility (INV-8), never an exception."""
     if task_id in _task_repo_id_cache:
         return _task_repo_id_cache[task_id]
-    result = await db.execute(select(DevTask.repo_id).where(DevTask.id == task_id))
-    return _cache_task_repo_id(task_id, result.scalar_one_or_none())
+    row = (
+        await db.execute(
+            select(DevTask.id, DevTask.repo_id).where(DevTask.id == task_id)
+        )
+    ).first()
+    if row is None:
+        # Not cached: "no such task yet" can become a real task later, and a
+        # cached None would then scope that task's memory to EVERY repo.
+        return None
+    return _cache_task_repo_id(task_id, row.repo_id)
 
 
 def get_task_repo_id_sync(task_id: int, *, strict: bool = False) -> int | None:

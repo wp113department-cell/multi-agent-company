@@ -332,6 +332,27 @@ def test_run_agent_graph_memory_context_never_contains_the_other_repos_marker() 
         _cleanup_sync([task_a, task_b], [repo_a, repo_b])
 
 
+def test_lookup_of_a_missing_task_is_not_cached_as_no_repo() -> None:
+    """Found by the local CI run (2026-10-05): a run with a not-yet-existing
+    task id cached "no repo" forever, so the real task created later with that
+    id searched every repo's memory."""
+    import app.db.repository as repository
+
+    suffix = uuid.uuid4().hex[:8]
+    repo_a = _make_repo_sync(f"nocache-{suffix}")
+    missing = 2_147_483_600
+    repository._task_repo_id_cache.pop(missing, None)
+    try:
+        assert get_task_repo_id_sync(missing) is None
+        assert missing not in repository._task_repo_id_cache
+        task = _real_task_id_sync(f"clustero nocache {suffix}", repo_a)
+        assert get_task_repo_id_sync(task) == repo_a
+        assert repository._task_repo_id_cache[task] == repo_a
+    finally:
+        repository._task_repo_id_cache.pop(missing, None)
+        _cleanup_sync([], [repo_a])
+
+
 def test_repo_lookup_failure_never_falls_back_to_other_repos_memory() -> None:
     """Fail closed (found by the local CI run, 2026-10-05): under Postgres
     connection exhaustion the repo lookup failed, repo_id silently became
