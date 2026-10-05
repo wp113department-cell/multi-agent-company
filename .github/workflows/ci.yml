@@ -95,7 +95,18 @@ jobs:
       - name: Type check (mypy)
         run: python -m mypy app/ --strict --ignore-missing-imports
 
+      - name: Prepare sandbox images (real-Docker tests)
+        # The bash-tool and terminal tests run real containers: the toolchain
+        # image is built from this repo and alpine is pre-pulled so the first
+        # `docker run` inside a test doesn't time out on a download.
+        run: |
+          docker pull -q alpine:latest
+          docker build -q -t gridiron-bash-toolchain:latest -f docker/bash-sandbox/Dockerfile .
+
       - name: Test suite (pytest)
+        env:
+          # inspect_github_repo tests call the public GitHub API through `gh`.
+          GH_TOKEN: ${{ github.token }}
         run: python -m pytest tests/ -v --tb=short --timeout=120 --junitxml=pytest-results.xml
 
       - name: Regression gate (regression_detector baseline check)
