@@ -51,10 +51,14 @@ _TASKS_FILE = Path(__file__).parent / "tasks.json"
 
 
 def _run_agent(agent_name: str, task_id: int, description: str, repo_path: str) -> "AgentResult":  # type: ignore[name-defined]  # noqa: F821
-    from app.api.specialized_agents import _load_agent_fn
+    from app.api.specialized_agents import _agent_call_kwargs, _load_agent_fn
 
     fn = _load_agent_fn(agent_name)
-    return fn(task_id=task_id, description=description, repo_path=repo_path)
+    # Same per-agent argument binding as the real /run endpoint: several agents
+    # name their description parameter differently (bug_fix, security_*,
+    # database_architect, ... raised "unexpected keyword argument 'description'"
+    # in the first paid eval run, 2026-10-05).
+    return fn(**_agent_call_kwargs(fn, task_id, description, repo_path))
 
 
 # ──────────────────────────────────────────────────────────────────────────────

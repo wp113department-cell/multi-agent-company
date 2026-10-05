@@ -1757,12 +1757,17 @@ def _make_call_llm_node(
         from app.fleet.model_router import get_model_router as _get_router
 
         _route = _get_router().route(role_name)
-        if _route.tier == "opus":
+        # Decide on the model this node REALLY calls: COST_MODE caps an opus
+        # agent to Haiku in economy, and Haiku rejects thinking (400 "adaptive
+        # thinking is not supported on this model") — every opus-tier agent,
+        # architect included, failed its first call in economy (live-AI eval
+        # run 2026-10-05).
+        if _route.tier == "opus" and "haiku" not in model.lower():
             from app.fleet.model_router import thinking_param_for
 
             # model-aware: opus 4.7+/sonnet 5 reject the fixed-budget form (400)
             _thinking_budget = thinking_param_for(
-                _route.model, get_settings().thinking_budget_opus
+                model, get_settings().thinking_budget_opus
             )
         _real_context_window = _route.context_window
     except Exception:

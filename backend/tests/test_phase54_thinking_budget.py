@@ -140,3 +140,20 @@ def test_budget_tokens_stays_below_max_tokens_api_constraint() -> None:
     thinking_budget_opus never violates that, since a config change here
     could otherwise silently break every opus-tier agent's real API calls."""
     assert 1024 <= get_settings().thinking_budget_opus < 8096
+
+
+def test_opus_agent_capped_to_haiku_sends_no_thinking() -> None:
+    """Economy caps opus agents to Haiku, which rejects thinking with a 400
+    ("adaptive thinking is not supported on this model"); every opus-tier
+    agent failed its first call in economy (live-AI eval run 2026-10-05)."""
+    mock_client = MagicMock()
+    mock_client.messages.create.return_value = _mock_response()
+    call_llm = _make_call_llm_node(
+        role_name="architect",
+        model="claude-haiku-4-5-20251001",
+        tools=[],
+        context_token_budget=100_000,
+    )
+    with patch("app.agents.base_graph._make_client", return_value=mock_client):
+        call_llm(_minimal_state())
+    assert "thinking" not in mock_client.messages.create.call_args.kwargs
