@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import os
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
@@ -287,31 +288,43 @@ class TestLessonExtractionRealLLM:
 # ---------------------------------------------------------------------------
 
 
+# These tests check the graph mechanics, not a real role: the coder role's
+# prompt describes tools (get_file_tree, ...) this test doesn't provide, and
+# Groq rejects a call to a tool missing from request.tools (live run 2026-10-05).
+_MINI_ROLE = (
+    "# Test Agent\nYou have exactly one tool: submit_result. Do the task in your "
+    "reply, then call submit_result. Never call any other tool.\n"
+)
+
+
 class TestFullGraphRunGroq:
     def test_mini_task_runs_end_to_end(self, groq_llm_patch: Any) -> None:  # noqa: F811
         """Run a real mini-task through the graph with Groq. Agent must call submit_result."""
         from app.agents.base_graph import run_agent_graph, VerificationConfig
 
-        result_state = run_agent_graph(
-            role_name="coder",
-            model="qwen/qwen3-32b",
-            tools=[SUBMIT_TOOL],
-            tool_handlers={
-                "submit_result": lambda inp: f"submitted: {inp.get('summary', '')}"
-            },
-            verification_cfg=VerificationConfig(),
-            initial_message=(
-                "Write a one-line Python function called `add(a, b)` that returns a+b. "
-                "Then call submit_result with summary='done'."
-            ),
-            task_description="Write add function and submit",
-            model_haiku="llama-3.1-8b-instant",
-            max_turns=8,
-            enable_planning=True,
-            enable_memory=False,  # skip repo context (no repo in test)
-            enable_reflection=False,  # save tokens
-            enable_lesson=True,
-        )
+        with patch("app.agents.base_graph.load_role", return_value=_MINI_ROLE), patch(
+            "app.agents.base.load_role", return_value=_MINI_ROLE
+        ):
+            result_state = run_agent_graph(
+                role_name="coder",
+                model="qwen/qwen3-32b",
+                tools=[SUBMIT_TOOL],
+                tool_handlers={
+                    "submit_result": lambda inp: f"submitted: {inp.get('summary', '')}"
+                },
+                verification_cfg=VerificationConfig(),
+                initial_message=(
+                    "Write a one-line Python function called `add(a, b)` that returns a+b. "
+                    "Then call submit_result with summary='done'."
+                ),
+                task_description="Write add function and submit",
+                model_haiku="llama-3.1-8b-instant",
+                max_turns=8,
+                enable_planning=True,
+                enable_memory=False,  # skip repo context (no repo in test)
+                enable_reflection=False,  # save tokens
+                enable_lesson=True,
+            )
 
         assert result_state["submitted"] is True, (
             "Agent must call submit_result to complete the task. "
@@ -323,22 +336,25 @@ class TestFullGraphRunGroq:
         """trace_id passed to run_agent_graph appears in final state."""
         from app.agents.base_graph import run_agent_graph, VerificationConfig
 
-        state = run_agent_graph(
-            role_name="coder",
-            model="llama-3.1-8b-instant",
-            tools=[SUBMIT_TOOL],
-            tool_handlers={"submit_result": lambda inp: "ok"},
-            verification_cfg=VerificationConfig(),
-            initial_message="Say hello and submit_result with summary='hi'.",
-            task_description="say hello",
-            model_haiku="llama-3.1-8b-instant",
-            max_turns=5,
-            enable_planning=False,
-            enable_memory=False,
-            enable_reflection=False,
-            enable_lesson=False,
-            trace_id="GROQ-TRACE-XYZ",
-        )
+        with patch("app.agents.base_graph.load_role", return_value=_MINI_ROLE), patch(
+            "app.agents.base.load_role", return_value=_MINI_ROLE
+        ):
+            state = run_agent_graph(
+                role_name="coder",
+                model="llama-3.1-8b-instant",
+                tools=[SUBMIT_TOOL],
+                tool_handlers={"submit_result": lambda inp: "ok"},
+                verification_cfg=VerificationConfig(),
+                initial_message="Say hello and submit_result with summary='hi'.",
+                task_description="say hello",
+                model_haiku="llama-3.1-8b-instant",
+                max_turns=5,
+                enable_planning=False,
+                enable_memory=False,
+                enable_reflection=False,
+                enable_lesson=False,
+                trace_id="GROQ-TRACE-XYZ",
+            )
         assert state.get("trace_id") == "GROQ-TRACE-XYZ"
 
 
