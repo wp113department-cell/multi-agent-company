@@ -14,30 +14,68 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+def _throwaway_repo() -> str:
+    """A tiny git repo (copy of tests/fixtures/demo-repo) so an epic never
+    plans, branches or codes against this project's own repository, and the
+    host resource check sizes a small repo (live-AI plan §N)."""
+    import shutil
+    import subprocess
+    import tempfile
+    from pathlib import Path
+
+    src = Path(__file__).resolve().parents[1] / "fixtures" / "demo-repo"
+    dst = Path(tempfile.mkdtemp(prefix="gridiron-live-epic-")) / "repo"
+    shutil.copytree(
+        src, dst, ignore=shutil.ignore_patterns("__pycache__", ".ruff_cache")
+    )
+    for cmd in (
+        ["git", "init", "-q", "-b", "main"],
+        ["git", "add", "-A"],
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init"],
+    ):
+        subprocess.run(cmd, cwd=dst, check=True)
+    return str(dst)
+
+
 @pytest.mark.asyncio
 async def test_manager_dispatches_subtasks_and_completes() -> None:
-    """Manager: goal → epic → subtasks → batched approval package."""
+    """Epic lifecycle (2026-10-05): goal → plan waits for approval → approved
+    → coding from the saved plan → ready_for_review."""
+    from sqlalchemy import update
+
+    from app.agents.manager import run_epic_after_plan_approval, run_epic_manager
+    from app.db.models import Epic
     from app.db.session import get_async_session
-    from app.agents.manager import run_epic_manager
     import uuid
 
+    repo = _throwaway_repo()
     async with get_async_session() as db:
         epic_id = str(uuid.uuid4())
-        from app.db.models import Epic
-
-        epic = Epic(
-            epic_id=epic_id,
-            title="Add a hello world endpoint",
-            description="Add GET /hello that returns {message: 'hello world'} to the FastAPI app",
-            status="pending",
+        goal = "Add a function multiply(a: int, b: int) -> int to demo_module.py"
+        db.add(
+            Epic(
+                epic_id=epic_id,
+                title="Add multiply",
+                description=goal,
+                status="pending",
+            )
         )
-        db.add(epic)
         await db.commit()
 
-        package = await run_epic_manager(epic_id=epic_id, goal=epic.description, db=db)
+        package = await run_epic_manager(
+            epic_id=epic_id, goal=goal, db=db, repo_path=repo
+        )
+        assert package.status == "pending_plan_approval", package.halt_reason
+
+        await db.execute(
+            update(Epic).where(Epic.epic_id == epic_id).values(status="plan_approved")
+        )
+        await db.commit()
+        package = await run_epic_after_plan_approval(epic_id, db, repo_path=repo)
 
     assert package.epic_id == epic_id
-    assert package.status in ("ready_for_review", "halted", "pending_cost_approval")
+    assert package.status == "ready_for_review", package.halt_reason
+    assert package.total_files_changed, "coding changed no files"
 
 
 @pytest.mark.asyncio
@@ -112,7 +150,10 @@ async def test_cost_estimate_before_execution() -> None:
             await db.commit()
 
             package = await run_epic_manager(
-                epic_id=epic_id, goal=epic.description, db=db
+                epic_id=epic_id,
+                goal=epic.description,
+                db=db,
+                repo_path=_throwaway_repo(),
             )
 
         assert package.status == "pending_cost_approval"

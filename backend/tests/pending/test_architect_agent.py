@@ -1,8 +1,15 @@
-"""Architect Agent live tests — require ANTHROPIC_API_KEY or Groq."""
+"""Architect Agent live tests — require ANTHROPIC_API_KEY or Groq.
+
+One real architect run on a tiny repo is shared by every test in this file
+(module-scoped fixture), instead of one paid run per test
+(live-AI plan, PENDING_TESTS_API_KEYS.md §N).
+"""
 
 from __future__ import annotations
 
 import os
+from typing import Any
+
 import pytest
 from tests.pending.conftest import requires_anthropic
 
@@ -42,76 +49,53 @@ def _make_minimal_repo(tmp_path: pytest.TempPathFactory) -> str:
     return p
 
 
+@pytest.fixture(scope="module")
+def architect_result(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
+    from app.agents.architect import architect_node
+    from app.pipeline.state import PipelineState
+
+    repo = _make_minimal_repo(tmp_path_factory.mktemp("arch_repo"))  # type: ignore[arg-type]
+    state = PipelineState(
+        task_id=10,
+        task_title="Add a new FastAPI route for task stats",
+        task_description="GET /api/tasks/stats — returns count by status.",
+        repo_path=repo,
+        pm_brief={
+            "goals": ["Implement the feature"],
+            "constraints": ["No breaking changes"],
+            "acceptance_criteria": ["Feature works end-to-end"],
+            "out_of_scope": [],
+        },
+        stage="architect",
+    )
+    return dict(architect_node(state))
+
+
 @requires_anthropic
 class TestArchitectAgent:
     """Architect Agent: PM brief + codebase → impacted_files / risks / risk_level."""
 
-    def _make_state(self, task_id: int, title: str, desc: str, repo_path: str) -> dict:  # type: ignore[type-arg]
-        from app.pipeline.state import PipelineState
-
-        return PipelineState(
-            task_id=task_id,
-            task_title=title,
-            task_description=desc,
-            repo_path=repo_path,
-            pm_brief={
-                "goals": ["Implement the feature"],
-                "constraints": ["No breaking changes"],
-                "acceptance_criteria": ["Feature works end-to-end"],
-                "out_of_scope": [],
-            },
-            stage="architect",
-        )
-
-    def test_architect_returns_plan(self, tmp_path: pytest.TempPathFactory) -> None:
-        """Architect submits a plan with all required fields."""
-        from app.agents.architect import architect_node
-
-        repo = _make_minimal_repo(tmp_path)  # type: ignore[arg-type]
-        state = self._make_state(
-            10, "Add GET /health endpoint", "Return {status: ok}", repo
-        )
-        result = architect_node(state)
-
-        assert result["stage"] != "blocked", f"Architect blocked: {result.get('error')}"
-        assert "architect_plan" in result
-        plan = result["architect_plan"]
+    def test_architect_returns_plan(self, architect_result: dict[str, Any]) -> None:
+        r = architect_result
+        assert r["stage"] != "blocked", f"Architect blocked: {r.get('error')}"
+        plan = r["architect_plan"]
         assert plan.get("technical_approach")
         assert isinstance(plan.get("impacted_files"), list)
         assert isinstance(plan.get("risks"), list)
-        assert plan.get("risk_level") in ("low", "medium", "high")
 
     def test_architect_impacted_files_non_empty(
-        self, tmp_path: pytest.TempPathFactory
+        self, architect_result: dict[str, Any]
     ) -> None:
-        """Architect proposes at least one impacted file for a route addition task."""
-        from app.agents.architect import architect_node
-
-        repo = _make_minimal_repo(tmp_path)  # type: ignore[arg-type]
-        state = self._make_state(
-            11,
-            "Add a new FastAPI route for task stats",
-            "GET /api/tasks/stats — returns count by status.",
-            repo,
-        )
-        result = architect_node(state)
-
-        assert result["stage"] != "blocked", f"Architect blocked: {result.get('error')}"
-        plan = result["architect_plan"]
-        assert isinstance(plan.get("impacted_files"), list)
+        assert architect_result["stage"] != "blocked"
+        files = architect_result["architect_plan"].get("impacted_files")
         assert (
-            len(plan["impacted_files"]) >= 1
-        ), "Architect should propose at least one file"
+            isinstance(files, list) and len(files) >= 1
+        ), "Architect should propose a file"
 
-    def test_architect_risk_level_valid(self, tmp_path: pytest.TempPathFactory) -> None:
-        """risk_level is exactly one of low / medium / high."""
-        from app.agents.architect import architect_node
-
-        repo = _make_minimal_repo(tmp_path)  # type: ignore[arg-type]
-        state = self._make_state(
-            12, "Refactor config module", "Split config.py into sub-modules.", repo
+    def test_architect_risk_level_valid(self, architect_result: dict[str, Any]) -> None:
+        assert architect_result["stage"] != "blocked"
+        assert architect_result["architect_plan"]["risk_level"] in (
+            "low",
+            "medium",
+            "high",
         )
-        result = architect_node(state)
-
-        assert result["stage"] != "blocked", f"Architect blocked: {result.get('error')}"
-        assert result["architect_plan"]["risk_level"] in ("low", "medium", "high")

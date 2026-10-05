@@ -1,9 +1,16 @@
-"""Planner Agent live tests — require ANTHROPIC_API_KEY or Groq."""
+"""Planner Agent live tests — require ANTHROPIC_API_KEY or Groq.
+
+One real planner run is shared by every test in this file (module-scoped
+fixture) instead of one paid run per test (live-AI plan,
+PENDING_TESTS_API_KEYS.md §N).
+"""
 
 from __future__ import annotations
 
 import os
 import re
+from typing import Any
+
 import pytest
 from tests.pending.conftest import requires_anthropic
 
@@ -47,68 +54,48 @@ def _make_minimal_repo(tmp_path: pytest.TempPathFactory) -> str:
 _REQUIRED_PLAN_SECTIONS = ["## ", "Implementation Steps", "Files To Inspect"]
 
 
+@pytest.fixture(scope="module")
+def planner_run(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
+    from app.agents.planner import run_planner
+
+    repo = _make_minimal_repo(tmp_path_factory.mktemp("planner_repo"))  # type: ignore[arg-type]
+    plan, error, *_ = run_planner(
+        task_id=30,
+        title="Add task stats endpoint",
+        description="Add GET /api/tasks/stats returning count by status in tasks.py.",
+        repo_path=repo,
+    )
+    return {"plan": plan or "", "error": error, "repo": repo}
+
+
 @requires_anthropic
 class TestPlannerAgent:
     """Planner Agent: reads repo → validated markdown implementation plan."""
 
-    def test_planner_returns_valid_plan(self, tmp_path: pytest.TempPathFactory) -> None:
-        """Planner produces a plan that passes _validate_plan."""
-        from app.agents.planner import run_planner, _validate_plan
+    def test_planner_returns_valid_plan(self, planner_run: dict[str, Any]) -> None:
+        from app.agents.planner import _validate_plan
 
-        repo = _make_minimal_repo(tmp_path)  # type: ignore[arg-type]
-        plan, error, *_ = run_planner(
-            task_id=30,
-            title="Add GET /health endpoint",
-            description=(
-                "Add a GET /health route to FastAPI app that returns "
-                '{"status": "ok"} with HTTP 200. No auth required.'
-            ),
-            repo_path=repo,
-        )
-
-        assert error is None, f"Planner returned error: {error}"
-        assert plan, "Planner returned empty plan"
-        validation_error = _validate_plan(plan)
-        assert validation_error is None, f"Plan failed validation: {validation_error}"
+        assert (
+            planner_run["error"] is None
+        ), f"Planner returned error: {planner_run['error']}"
+        assert planner_run["plan"], "Planner returned empty plan"
+        assert _validate_plan(planner_run["plan"]) is None
 
     def test_planner_plan_contains_required_sections(
-        self, tmp_path: pytest.TempPathFactory
+        self, planner_run: dict[str, Any]
     ) -> None:
-        """Plan output contains required markdown sections."""
-        from app.agents.planner import run_planner
-
-        repo = _make_minimal_repo(tmp_path)  # type: ignore[arg-type]
-        plan, error, *_ = run_planner(
-            task_id=31,
-            title="Add database pool size config",
-            description="Allow DATABASE_POOL_SIZE to be set via env var (default 5).",
-            repo_path=repo,
-        )
-
-        assert error is None
+        assert planner_run["error"] is None
         for section in _REQUIRED_PLAN_SECTIONS:
-            assert (
-                section in plan
-            ), f"Plan missing required section: '{section}'\nPlan:\n{plan[:500]}"
+            assert section in planner_run["plan"], f"Plan missing section {section!r}"
 
     def test_planner_files_to_inspect_are_real(
-        self, tmp_path: pytest.TempPathFactory
+        self, planner_run: dict[str, Any]
     ) -> None:
         """Every .py file in 'Files To Inspect' must exist inside the minimal repo."""
-        from app.agents.planner import run_planner
-
-        repo = _make_minimal_repo(tmp_path)  # type: ignore[arg-type]
-        plan, error, *_ = run_planner(
-            task_id=32,
-            title="Add stats endpoint",
-            description="Add GET /api/tasks/stats returning count by status in tasks.py.",
-            repo_path=repo,
-        )
-
-        assert error is None
+        assert planner_run["error"] is None
         in_section = False
         hallucinated: list[str] = []
-        for line in plan.splitlines():
+        for line in planner_run["plan"].splitlines():
             if "Files To Inspect" in line:
                 in_section = True
                 continue
@@ -117,27 +104,12 @@ class TestPlannerAgent:
             if in_section:
                 for match in re.finditer(r"[\w./\-]+\.py", line):
                     rel = match.group(0).strip("`. ")
-                    full = os.path.join(repo, rel)
-                    if not os.path.exists(full):
+                    if not os.path.exists(os.path.join(planner_run["repo"], rel)):
                         hallucinated.append(rel)
+        assert not hallucinated, f"Planner listed non-existent files: {hallucinated}"
 
+    def test_planner_plan_minimum_length(self, planner_run: dict[str, Any]) -> None:
+        assert planner_run["error"] is None
         assert (
-            not hallucinated
-        ), f"Planner hallucinated non-existent files in 'Files To Inspect': {hallucinated}"
-
-    def test_planner_plan_minimum_length(
-        self, tmp_path: pytest.TempPathFactory
-    ) -> None:
-        """Plan is at least 100 characters."""
-        from app.agents.planner import run_planner
-
-        repo = _make_minimal_repo(tmp_path)  # type: ignore[arg-type]
-        plan, error, *_ = run_planner(
-            task_id=33,
-            title="Add config env var",
-            description="Add an APP_ENV env var to config.py with default 'production'.",
-            repo_path=repo,
-        )
-
-        assert error is None
-        assert len(plan) >= 100, f"Plan too short: {len(plan)} chars"
+            len(planner_run["plan"]) >= 100
+        ), f"Plan too short: {len(planner_run['plan'])}"

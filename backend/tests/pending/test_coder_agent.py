@@ -1,4 +1,9 @@
-"""Coder Agent live tests — require ANTHROPIC_API_KEY."""
+"""Coder Agent live tests — require ANTHROPIC_API_KEY.
+
+Live-AI plan (PENDING_TESTS_API_KEYS.md §N): "writes a file" and "passes
+ruff" share one real coder run, and repo_path is the small temp project the
+coder writes into (not this whole repository) to keep the prompt small.
+"""
 
 from __future__ import annotations
 
@@ -8,6 +13,8 @@ import os
 import subprocess
 import sys
 import textwrap
+from typing import Any
+
 import pytest
 from tests.pending.conftest import requires_anthropic
 
@@ -29,70 +36,47 @@ def _create_temp_worktree(tmp_path: pytest.TempPathFactory) -> str:
     return wt
 
 
+@pytest.fixture(scope="module")
+def coder_run(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
+    from app.agents.coder import run_coder
+
+    worktree = _create_temp_worktree(tmp_path_factory.mktemp("coder_wt"))  # type: ignore[arg-type]
+    plan = textwrap.dedent("""\
+        ## Task
+        Create a file `mypackage/hello.py` that contains a single function
+        `greet(name: str) -> str` returning f"Hello, {name}!".
+
+        ## Files To Inspect
+        - mypackage/__init__.py
+
+        ## Implementation Steps
+        1. Create `mypackage/hello.py` with the `greet` function.
+
+        ## Test Strategy
+        Function can be imported and called.
+    """)
+    files_changed, error, *_ = run_coder(
+        task_id=40, plan=plan, worktree_path=worktree, repo_path=worktree
+    )
+    return {"files": files_changed, "error": error, "worktree": worktree}
+
+
 @requires_anthropic
 class TestCoderAgent:
     """Coder Agent: approved plan → write files in worktree, pass mypy + ruff."""
 
-    def test_coder_writes_file(self, tmp_path: pytest.TempPathFactory) -> None:
-        """Coder writes at least one file in the worktree for a trivial plan."""
-        from app.agents.coder import run_coder
-
-        worktree = _create_temp_worktree(tmp_path)
-        plan = textwrap.dedent("""\
-            ## Task
-            Create a file `mypackage/hello.py` that contains a single function
-            `greet(name: str) -> str` returning f"Hello, {name}!".
-
-            ## Files To Inspect
-            - mypackage/__init__.py
-
-            ## Implementation Steps
-            1. Create `mypackage/hello.py` with the `greet` function.
-
-            ## Test Strategy
-            Function can be imported and called.
-        """)
-
-        files_changed, error, *_ = run_coder(
-            task_id=40,
-            plan=plan,
-            worktree_path=worktree,
-            repo_path=_THIS_REPO,
-        )
-
-        assert error is None, f"Coder failed: {error}"
-        assert len(files_changed) >= 1, "Coder did not report any files changed"
+    def test_coder_writes_file(self, coder_run: dict[str, Any]) -> None:
+        assert coder_run["error"] is None, f"Coder failed: {coder_run['error']}"
+        assert len(coder_run["files"]) >= 1, "Coder did not report any files changed"
         assert os.path.exists(
-            os.path.join(worktree, "mypackage", "hello.py")
-        ), "Coder did not create mypackage/hello.py"
-
-    def test_coder_output_passes_ruff(self, tmp_path: pytest.TempPathFactory) -> None:
-        """Code written by the Coder Agent passes ruff lint."""
-        from app.agents.coder import run_coder
-
-        worktree = _create_temp_worktree(tmp_path)
-        plan = textwrap.dedent("""\
-            ## Task
-            Create `mypackage/utils.py` with a function `add(a: int, b: int) -> int` that returns a + b.
-
-            ## Files To Inspect
-            - mypackage/__init__.py
-
-            ## Implementation Steps
-            1. Create `mypackage/utils.py`.
-
-            ## Test Strategy
-            Import and call add(1, 2) == 3.
-        """)
-
-        _, error, *_ = run_coder(
-            task_id=41, plan=plan, worktree_path=worktree, repo_path=_THIS_REPO
+            os.path.join(coder_run["worktree"], "mypackage", "hello.py")
         )
-        assert error is None, f"Coder failed: {error}"
 
+    def test_coder_output_passes_ruff(self, coder_run: dict[str, Any]) -> None:
+        assert coder_run["error"] is None, f"Coder failed: {coder_run['error']}"
         result = subprocess.run(
             [sys.executable, "-m", "ruff", "check", "."],
-            cwd=worktree,
+            cwd=coder_run["worktree"],
             capture_output=True,
             text=True,
         )
@@ -125,7 +109,7 @@ class TestCoderAgent:
         # but policy denials must appear in the logs. At minimum: coder should not
         # actually write to .env.
         _, _, *_ = run_coder(
-            task_id=42, plan=plan, worktree_path=worktree, repo_path=_THIS_REPO
+            task_id=42, plan=plan, worktree_path=worktree, repo_path=worktree
         )
 
         dotenv_path = os.path.join(worktree, ".env")

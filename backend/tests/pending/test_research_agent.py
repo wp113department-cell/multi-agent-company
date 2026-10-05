@@ -24,7 +24,11 @@ async def test_research_agent_returns_report() -> None:
         task_description="Research how to add rate limiting to FastAPI endpoints. What libraries exist? What are the trade-offs?",
     )
 
-    assert error is None or report is not None
+    # run_research returns an empty report plus an error string when the LLM
+    # call fails, so "error is None or report" passed with no real answer.
+    assert error is None, f"Research agent error: {error}"
+    assert report is not None and report.recommended_approach.strip()
+    assert tokens_in > 0
     if report:
         assert isinstance(report.findings, list)
         assert isinstance(report.relevant_libraries, list)

@@ -44,7 +44,7 @@ def test_backend_dev_reads_and_writes_file(tmp_path: Path) -> None:
         "The function must have a type annotation: def hello() -> str."
     )
 
-    files_changed, error = run_backend_dev(
+    files_changed, error, *_ = run_backend_dev(
         task_id=9001,
         subtask_id=1,
         plan=plan,
@@ -73,7 +73,7 @@ def test_backend_dev_respects_worktree_boundary(tmp_path: Path) -> None:
         "Also write a file inside the worktree at hello.txt with 'safe'."
     )
 
-    files_changed, error = run_backend_dev(
+    files_changed, error, *_ = run_backend_dev(
         task_id=9002,
         subtask_id=2,
         plan=plan,
@@ -109,6 +109,9 @@ def test_qa_agent_runs_pytest_and_produces_result(tmp_path: Path) -> None:
         repo_path=str(wt),
     )
 
+    # run_qa never raises: an LLM failure comes back as a "failed" result
+    # whose summary is the error, so require a real answer explicitly.
+    assert "agent error" not in result.summary.lower(), result.summary
     assert result.status in ("passed", "failed")
     assert result.tests_run >= 0
     assert isinstance(result.errors, list)
@@ -156,6 +159,9 @@ def test_reviewer_produces_structured_findings() -> None:
         repo_path=FIXTURE_REPO,
     )
 
+    # run_reviewer never raises: an LLM failure becomes a blocking finding
+    # with "Reviewer agent error", so require a real answer explicitly.
+    assert "agent error" not in result.summary.lower(), result.summary
     assert result.verdict in ("approved", "changes_required")
     assert isinstance(result.findings, list)
     assert isinstance(result.summary, str)
@@ -191,7 +197,7 @@ async def test_full_dev_qa_review_pipeline_happy_path(tmp_path: Path) -> None:
 
     plan = "Add a function add(a: int, b: int) -> int that returns a + b to demo_module.py."
 
-    files_changed, dev_error = run_backend_dev(
+    files_changed, dev_error, *_ = run_backend_dev(
         task_id=9010,
         subtask_id=10,
         plan=plan,
@@ -239,7 +245,7 @@ async def test_qa_failure_triggers_dev_retry(tmp_path: Path) -> None:
         "Fix the first function to also return len(x) (which is an int)."
     )
 
-    files_changed, error = run_backend_dev(
+    files_changed, error, *_ = run_backend_dev(
         task_id=9011,
         subtask_id=11,
         plan=plan,
@@ -279,5 +285,8 @@ async def test_manager_orchestrates_subtasks(tmp_path: Path) -> None:
         repo_path=str(wt),
     )
 
-    assert result["status"] in ("completed", "blocked")
+    # "blocked" used to pass too, so a run where the model never answered
+    # counted as success; require the real outcome.
+    assert result["status"] == "completed", result
     assert len(result["results"]) == 1
+    assert "def multiply" in (wt / "demo_module.py").read_text()
