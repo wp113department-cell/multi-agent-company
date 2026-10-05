@@ -41,12 +41,12 @@ A flag is never rounded up. A check that needs something not available here is m
 | 04 | Orchestration | `04_ORCHESTRATION_AUDIT_REPORT.md` | ✅ 🟢 GREEN, 5 High + 3 Medium fixed |
 | 05 | Security | `05_SECURITY_AUDIT_REPORT.md` | ✅ 🟢 GREEN, 1 Critical (Next.js RCE) + 1 High fixed |
 | 06 | Infrastructure | `06_INFRASTRUCTURE_AUDIT_REPORT.md` | ✅ 🟢 GREEN (2026-10-05): GitHub Actions green on `main` (run 37283792188, all 5 jobs); vercel.json domain not applicable (owner: runs locally, no domain) |
-| 07 | AI Evaluation | `07_AI_EVALUATION_AUDIT_REPORT.md` | ✅ 🟡 YELLOW (1 High fixed: cost undercount; live evals BLOCKED on LLM credit) |
+| 07 | AI Evaluation | `07_AI_EVALUATION_AUDIT_REPORT.md` | ✅ 🟢 GREEN (2026-10-05): 11 live evals avg 0.78, LLM judge live, regression gate blocked a worse prompt, real cost measured; 5 real bugs fixed. Was: 🟡 YELLOW (1 High fixed: cost undercount; live evals BLOCKED on LLM credit) |
 | 08 | Production Readiness | `08_PRODUCTION_READINESS_AUDIT_REPORT.md` | ✅ 🟢 GREEN (2026-10-02): all fixed — Sentry live (caught + fixed 4 dead background loops), in-app alerts, hard cost cap (09) |
 | 09 | Performance & Scalability | `09_PERFORMANCE_SCALABILITY_AUDIT_REPORT.md` | ✅ 🟢 GREEN (2026-10-02): 8 fixed incl. hard daily spend cap (closes PROD-08-007) + thread-pool starvation; full suite 8887 pass, 3 flaky pass on rerun |
 | 10 | Final Consolidation | `10_FINAL_CONSOLIDATION_AUDIT_REPORT.md` | ✅ DONE (2026-10-02): 90 findings, 77 closed, 0 open Critical, 2 open High after same-day fixes (both owner: LLM go, CI); score 87/100; NOT READY for external users / READY for local use; 5 fixes listed |
 | 11 | Zero Policy | `11_ZERO_POLICY_AUDIT_REPORT.md` | ✅ 🟢 GREEN (2026-10-02): 4 fixed incl. host-mode secret leak + vault redaction; 0 blockers |
-| 12 | End-to-End Feature Production | `12_E2E_FEATURE_PRODUCTION_AUDIT_REPORT.md` | 🟡 YELLOW (2026-10-02): real-stack journeys found+fixed 6 (Review page 500 ×2, logout 500, shadowed SSE, bad-input 500, blank title); LLM journeys L8–L10 BLOCKED on live run |
+| 12 | End-to-End Feature Production | `12_E2E_FEATURE_PRODUCTION_AUDIT_REPORT.md` | ✅ 🟢 GREEN (2026-10-05): live journeys C/D/G pass on real Haiku; 3 real bugs fixed (plan approve 400, coding commit blocked, chat cost). Was: 🟡 YELLOW (2026-10-02): real-stack journeys found+fixed 6 (Review page 500 ×2, logout 500, shadowed SSE, bad-input 500, blank title); LLM journeys L8–L10 BLOCKED on live run |
 | 13 | Operations / DR / Lifecycle | `13_OPERATIONS_DR_LIFECYCLE_AUDIT_REPORT.md` | ✅ 🟢 GREEN (2026-10-02): drills pass, 5 fixed; daily backup service running into ./backups (owner's choice) |
 | 14 | Reproducibility / Transfer | `14_REPRODUCIBILITY_TRANSFER_AUDIT_REPORT.md` | ✅ 🟢 GREEN (2026-10-05): clean-room pass + owner set it up independently from the README (works); 6 fixed |
 

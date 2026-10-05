@@ -78,3 +78,26 @@ Tokens, per-tool success and duration, verification coverage and status all reac
 ## Verdict
 
 **READY in code. NOT yet evidence-producing:** a real quality number needs LLM credit (L4–L7).
+
+## Update 2026-10-05: GREEN (live evaluation run)
+
+The live checks ran on real Haiku in economy mode, under a hard spend cap (plan and ledger: `PENDING_TESTS_API_KEYS.md` §N).
+
+| Item | Result |
+|---|---|
+| **L4**: the 11 eval tasks for real | All 11 ran. Average score **0.78**; 2 perfect (database_architect, evaluation_agent). Weakest: bug_fix 0.40 and sprint_planner 0.55 — both spend their turns exploring and hand in thin answers. ~$0.05–0.19 per eval. |
+| **L5**: LLM judge for the `quality_checks` | Built (`tests/evals/eval_runner.py --judge`, unit tests), runs free on Groq (`EVAL_JUDGE_BACKEND=groq`). Graded all 11 live, no judge errors; 15 of 26 quality checks passed. It passes a concrete answer and fails a vague one. |
+| **L6**: regression gate active | `evidence/live_regression_gate.py`: baseline from 3 real PM runs (score 0.98); a worse prompt (wastes calls on missing files) dropped tool accuracy 0.90 → 0.27 and the score by 0.127 (> 10%): `gate_deploy` raised **DeploymentBlocked**. |
+| **L7**: real cost | Smart Run small task (one backend_dev run): ≈ $0.01–0.02. PM agent run: ≈ $0.02. Repository chat question: **$0.047** (was $0.72 before the fixes below). Specialist evals: $0.05–0.19. |
+
+**Real bugs the live runs found, all fixed with a test that fails on the old code:**
+
+| Bug | Effect |
+|---|---|
+| After a submission, economy/balanced runs looped back to `call_llm` | One wasted, paid LLM call in every run (2 calls measured for an immediate submit; now 1) |
+| An agent that only explored hit `max_turns` and returned nothing | The whole run's spend was wasted; the final turn now forces the single submit tool |
+| Opus-tier agents capped to Haiku still sent `thinking` | Every opus agent (architect included) failed its first call in economy (400) |
+| Repository chat ignored COST_MODE (always Sonnet), had no prompt caching, and condensed on every turn | $0.72 per question; now $0.047 |
+| Eval runner bound arguments differently from the real `/run` endpoint | bug_fix / security_reviewer could not run in the eval suite |
+
+AIEVAL-07-003 and AIEVAL-07-004 are **CLOSED**. Score: **72 → 88 / 100**.

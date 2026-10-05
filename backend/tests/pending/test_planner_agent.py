@@ -51,7 +51,8 @@ def _make_minimal_repo(tmp_path: pytest.TempPathFactory) -> str:
     return p
 
 
-_REQUIRED_PLAN_SECTIONS = ["## ", "Implementation Steps", "Files To Inspect"]
+# roles/planner.md v2 section names (the files section is "Files Read").
+_REQUIRED_PLAN_SECTIONS = ["## ", "Implementation Steps", "Files Read"]
 
 
 @pytest.fixture(scope="module")
@@ -91,12 +92,12 @@ class TestPlannerAgent:
     def test_planner_files_to_inspect_are_real(
         self, planner_run: dict[str, Any]
     ) -> None:
-        """Every .py file in 'Files To Inspect' must exist inside the minimal repo."""
+        """Every .py file in 'Files Read' must exist inside the minimal repo."""
         assert planner_run["error"] is None
         in_section = False
         hallucinated: list[str] = []
         for line in planner_run["plan"].splitlines():
-            if "Files To Inspect" in line:
+            if "Files Read" in line:
                 in_section = True
                 continue
             if in_section and line.startswith("## "):

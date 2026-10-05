@@ -121,12 +121,21 @@ _VERIFICATION_CFG = VerificationConfig(
 # ---------------------------------------------------------------------------
 
 
+_FILES_SECTIONS = ("Files Read", "Files To Create or Modify", "Files To Inspect")
+
+
 def _validate_plan(plan: str) -> str | None:
     """Return error string if plan is invalid, else None."""
     if len(plan) < _MIN_PLAN_LENGTH:
         return f"Plan is too short ({len(plan)} chars, min {_MIN_PLAN_LENGTH})"
-    required = ["## ", "Implementation Steps", "Files To Inspect"]
+    required = ["## ", "Implementation Steps"]
     missing = [s for s in required if s not in plan]
+    # roles/planner.md v2 (2026-07-20) asks for "Files Read" + "Files To Create
+    # or Modify"; this check still demanded the v1 "Files To Inspect", so a
+    # planner that followed its prompt was ALWAYS rejected (live run
+    # 2026-10-05: 4/4). Any of the three names satisfies the files section.
+    if not any(h in plan for h in _FILES_SECTIONS):
+        missing.append("Files Read / Files To Create or Modify")
     if missing:
         return f"Plan missing required sections: {missing}"
     return None

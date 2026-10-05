@@ -407,6 +407,23 @@ class TestValidatePlan:
         assert result is not None
         assert "missing" in result.lower()
 
+    def test_plan_in_the_v2_role_format_is_accepted(self) -> None:
+        """roles/planner.md v2 asks for "Files Read" / "Files To Create or
+        Modify", never "Files To Inspect": a planner following its prompt was
+        always rejected (live-AI run 2026-10-05, 4/4)."""
+        plan = (
+            "### Task Interpretation\nAdd a stats endpoint.\n\n"
+            "### Files Read\n- app/api/tasks.py: router\n\n"
+            "### Files To Create or Modify\n- app/api/tasks.py: add route\n\n"
+            "### Implementation Steps\n1. Add GET /stats.\n\n### Risks\nNone.\n"
+        )
+        assert _validate_plan(plan) is None
+
+    def test_plan_without_any_files_section_is_rejected(self) -> None:
+        plan = "## Overview\n\nImplementation Steps:\n1. Do X\n" * 5
+        result = _validate_plan(plan)
+        assert result is not None and "Files" in result
+
 
 # ---------------------------------------------------------------------------
 # architect_node returns blocked when run_agent_graph raises

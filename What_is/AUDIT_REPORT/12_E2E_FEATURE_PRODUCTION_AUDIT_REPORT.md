@@ -77,3 +77,27 @@ Error envelope is consistent: `{"error":{"code","message"}}`.
 ## What's still needed for GREEN
 
 Run L8–L10 in the live LLM session (Haiku, economy, throwaway repo, under the $3.50 stop).
+
+## Update 2026-10-05: GREEN (live LLM journeys)
+
+`apps/web/e2e-real/live-ai.spec.ts` (off unless `LIVE_AI=1`) ran on the real stack: production Next build → FastAPI → isolated Postgres → real Haiku, economy mode, throwaway git repo, spend cap. A $0 rehearsal with a fake key ran first.
+
+| Journey | Result |
+|---|---|
+| **C** (L8) Smart Run → routed plan waits for approval → approve → coding starts | ✅ |
+| **D** (L9) backend_dev codes in a worktree → committed diff on the task page → Approve & Complete | ✅ |
+| **G** (L10) repository chat answers about the repo (names both real functions) | ✅ |
+
+**Real bugs found, all fixed with tests:**
+
+| Bug | Effect |
+|---|---|
+| "Approve Plan & Start Coding" on the task page called `POST /run`, which refuses `ready_for_review` (since 2026-07-02) | A Smart Run or quick plan could never be approved from the UI |
+| `git_add`/`git_commit` in the task worktree failed the `/home` workspace guard (worktrees live in `/tmp/gridiron-worktrees`) | Every coding task that changed files ended **blocked** |
+| Chat on Sonnet in every mode, no caching, condensing every turn | $0.72 per question → $0.047 |
+
+Notes:
+- The Review page lists plans and epics awaiting approval; finished diffs are reviewed on the task page (by design).
+- A git-push approval is only recorded for GitHub-cloned repos. The throwaway repo has no remote, so tests never push.
+
+E2E-12-007 is **CLOSED**. Score: **80 → 90 / 100**.
