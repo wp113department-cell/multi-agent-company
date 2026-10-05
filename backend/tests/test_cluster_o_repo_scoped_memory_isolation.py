@@ -332,6 +332,55 @@ def test_run_agent_graph_memory_context_never_contains_the_other_repos_marker() 
         _cleanup_sync([task_a, task_b], [repo_a, repo_b])
 
 
+def test_repo_lookup_failure_never_falls_back_to_other_repos_memory() -> None:
+    """Fail closed (found by the local CI run, 2026-10-05): under Postgres
+    connection exhaustion the repo lookup failed, repo_id silently became
+    None and the run searched GLOBAL memory, injecting repo A's memories into
+    repo B's agent. A lookup FAILURE must disable memory for that run, not
+    widen it to every repo."""
+    import app.db.repository as repository
+
+    suffix = uuid.uuid4().hex[:8]
+    repo_a = _make_repo_sync(f"failclosed-a-{suffix}")
+    repo_b = _make_repo_sync(f"failclosed-b-{suffix}")
+    task_a = _real_task_id_sync(f"clustero failclosed A {suffix}", repo_a)
+    task_b = _real_task_id_sync(f"clustero failclosed B {suffix}", repo_b)
+    marker_a = f"CLUSTERO_FAILCLOSED_A_{suffix}"
+
+    async def _seed() -> None:
+        engine = _engine()
+        try:
+            async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                with patch("app.memory.store._embed", side_effect=_vector_for):
+                    await embed_task_outcome(
+                        task_id=str(task_a),
+                        description=marker_a,
+                        summary=marker_a,
+                        outcome="completed",
+                        files_changed=[],
+                        db=session,
+                        repo_id=repo_a,
+                    )
+        finally:
+            await engine.dispose()
+
+    asyncio.run(_seed())
+
+    async def _db_down(*_a: Any, **_k: Any) -> int | None:
+        raise ConnectionError("sorry, too many clients already")
+
+    try:
+        repository._task_repo_id_cache.pop(task_b, None)
+        with patch.object(repository, "get_task_repo_id", _db_down):
+            final_b = _run_scripted_agent_for_task(task_b)
+        assert final_b["submitted"] is True, "the run itself must still complete"
+        assert marker_a not in final_b.get(
+            "memory_context", ""
+        ), "repo lookup failed and the run fell back to every repo's memory"
+    finally:
+        _cleanup_sync([task_a, task_b], [repo_a, repo_b])
+
+
 # ---------------------------------------------------------------------------
 # 2. record_agent_run_outcome (change point A/B) threads repo_id correctly.
 # ---------------------------------------------------------------------------

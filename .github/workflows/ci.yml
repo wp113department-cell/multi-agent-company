@@ -73,6 +73,16 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt -r requirements-dev.txt
 
+      - name: Raise Postgres connection limit for the test suite
+        # The suite opens many short-lived engines; at Postgres' default of
+        # 100 it randomly hit "too many clients already" (local CI, 2026-10-05).
+        # Service containers can't take server flags, so set it and restart.
+        run: |
+          docker exec ${{ job.services.postgres.id }} psql -U gridiron -d gridiron_test -c "ALTER SYSTEM SET max_connections = 300"
+          docker restart ${{ job.services.postgres.id }}
+          for i in $(seq 1 30); do docker exec ${{ job.services.postgres.id }} pg_isready -U gridiron && break; sleep 1; done
+          docker exec ${{ job.services.postgres.id }} psql -U gridiron -d gridiron_test -tc "SHOW max_connections"
+
       - name: Run Alembic migrations
         run: alembic upgrade head
 

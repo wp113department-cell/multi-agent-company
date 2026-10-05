@@ -199,13 +199,18 @@ async def get_task_repo_id(db: AsyncSession, task_id: int) -> int | None:
     return _cache_task_repo_id(task_id, result.scalar_one_or_none())
 
 
-def get_task_repo_id_sync(task_id: int) -> int | None:
+def get_task_repo_id_sync(task_id: int, *, strict: bool = False) -> int | None:
     """Sync bridge for get_task_repo_id() — for sync LangGraph-node call
     sites (e.g. run_agent_graph()) that cannot await, mirroring
     create_agent_run_sync's own new_isolated_async_engine()/asyncio.run()
     pattern exactly. Non-fatal: returns None on any failure (invalid
     task_id, DB unavailable) — never raises, so a memory-scoping lookup can
-    never break the caller's real work (INV-8)."""
+    never break the caller's real work (INV-8).
+
+    ``strict=True`` re-raises a lookup FAILURE instead of returning None, so
+    a caller that scopes memory by repo can tell "this task has no repo"
+    (None: global memory is correct) from "the lookup failed" (unknown repo:
+    global memory would leak other repos' rows)."""
     if task_id in _task_repo_id_cache:
         return _task_repo_id_cache[task_id]
 
@@ -227,6 +232,8 @@ def get_task_repo_id_sync(task_id: int) -> int | None:
         return asyncio.run(_run())
     except Exception as exc:
         logger.warning("get_task_repo_id_sync failed for task_id=%r: %s", task_id, exc)
+        if strict:
+            raise
         return None
 
 

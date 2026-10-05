@@ -3883,17 +3883,32 @@ def run_agent_graph(
     # runs against the same task_id (e.g. multiple subtask agents under one
     # epic) cost one DB round-trip total, not one per run.
     _repo_id: int | None = None
+    _numeric_task_id: int | None = None
     if task_id:
         try:
-            from app.db.repository import get_task_repo_id_sync
-
-            _repo_id = get_task_repo_id_sync(int(task_id))
+            _numeric_task_id = int(task_id)
         except (ValueError, TypeError):
             # Same synthetic-task_id case as _agent_run_id above — not an
             # error, this run's memory is correctly unscoped/global (INV-8).
-            _repo_id = None
-        except Exception:
-            _repo_id = None
+            _numeric_task_id = None
+    if _numeric_task_id is not None:
+        try:
+            from app.db.repository import get_task_repo_id_sync
+
+            _repo_id = get_task_repo_id_sync(_numeric_task_id, strict=True)
+        except Exception as exc:
+            # Fail closed: the task's repo is UNKNOWN (DB error), not absent.
+            # Falling back to unscoped/global memory here injected another
+            # repo's memories into this run (seen under connection
+            # exhaustion), so skip memory reads and procedure writes instead.
+            logger.warning(
+                "run_agent_graph: repo lookup failed for task %s (%s) — "
+                "memory disabled for this run to keep repos isolated",
+                task_id,
+                exc,
+            )
+            enable_memory = False
+            enable_lesson = False
 
     # Lifecycle: agent transitions to RUNNING + emits TaskStarted (Gap 7 / Gap 10)
     try:
