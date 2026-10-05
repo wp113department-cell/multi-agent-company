@@ -40,7 +40,7 @@ A flag is never rounded up. A check that needs something not available here is m
 | 03 | Memory | `03_MEMORY_AUDIT_REPORT.md` | ✅ 🟢 GREEN (Voyage key added, live retrieval verified; owner: add card to lift 3 req/min limit) |
 | 04 | Orchestration | `04_ORCHESTRATION_AUDIT_REPORT.md` | ✅ 🟢 GREEN, 5 High + 3 Medium fixed |
 | 05 | Security | `05_SECURITY_AUDIT_REPORT.md` | ✅ 🟢 GREEN, 1 Critical (Next.js RCE) + 1 High fixed |
-| 06 | Infrastructure | `06_INFRASTRUCTURE_AUDIT_REPORT.md` | ✅ 🟡 YELLOW (code fixed; owner: GitHub billing blocks CI, vercel.json placeholder domain) |
+| 06 | Infrastructure | `06_INFRASTRUCTURE_AUDIT_REPORT.md` | ✅ 🟢 GREEN (2026-10-05): GitHub Actions green on `main` (run 37283792188, all 5 jobs); vercel.json domain not applicable (owner: runs locally, no domain) |
 | 07 | AI Evaluation | `07_AI_EVALUATION_AUDIT_REPORT.md` | ✅ 🟡 YELLOW (1 High fixed: cost undercount; live evals BLOCKED on LLM credit) |
 | 08 | Production Readiness | `08_PRODUCTION_READINESS_AUDIT_REPORT.md` | ✅ 🟢 GREEN (2026-10-02): all fixed — Sentry live (caught + fixed 4 dead background loops), in-app alerts, hard cost cap (09) |
 | 09 | Performance & Scalability | `09_PERFORMANCE_SCALABILITY_AUDIT_REPORT.md` | ✅ 🟢 GREEN (2026-10-02): 8 fixed incl. hard daily spend cap (closes PROD-08-007) + thread-pool starvation; full suite 8887 pass, 3 flaky pass on rerun |

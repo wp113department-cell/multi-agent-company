@@ -107,3 +107,16 @@ Re-runnable: `What_is/AUDIT_REPORT/evidence/migration_drills.sh` (never touches 
 ## Verdict
 
 **READY in code.** Operational completion needs two owner actions: GitHub billing (CI) and the real API domain in `vercel.json`.
+
+## Update 2026-10-05: GREEN
+
+**CI is green on GitHub** (run 37283792188 on `main`, all 5 jobs: backend on Python 3.11, backend on Windows, frontend, Playwright e2e, security).
+
+Every job was first run locally on a clean clone (owner rule: never push a known-red state). The first two GitHub runs then showed differences that only exist on a fresh runner; each was fixed:
+- The test database hit Postgres' default 100 connections. Fixed with a smaller test pool and a CI limit of 300. This also exposed two real memory-isolation bugs, fixed with tests (`CROSS_CHECK_QODER.md`, commits `1c460e03`, `64fefa90`).
+- The sandbox Docker images are now built or pulled in CI before the tests.
+- `gh` gets the run's own token for the 2 GitHub API tests.
+- One Windows-only path assumption in a test was fixed.
+- One test depended on `pip list` length under the 6,000-character output cap. Fixed.
+
+`vercel.json` domain: not applicable. The owner runs Gridiron locally with no domain (decision 2026-10-02); revisit at deployment.

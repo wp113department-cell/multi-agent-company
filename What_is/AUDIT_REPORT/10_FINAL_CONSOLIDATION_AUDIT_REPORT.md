@@ -25,14 +25,14 @@ All four are scheduled, and none needs a redesign.
 | 03 | Memory | 94 | 0 | 1 | 0 | 1 | 🟢 GREEN | 8% |
 | 04 | Orchestration | 88 | 0 | 5 | 3 | 1 | 🟢 GREEN | 16% |
 | 05 | Security | 90 | 1 | 1 | 2 | 1 | 🟢 GREEN | 18% |
-| 06 | Infrastructure | 86 | 0 | 1 | 4 | 3 | 🟡 YELLOW | 10% |
+| 06 | Infrastructure | 86 | 0 | 1 | 4 | 3 | 🟢 GREEN (2026-10-05: CI green) | 10% |
 | 07 | AI Evaluation | 72 | 0 | 1 | 2 | 2 | 🟡 YELLOW | 5% |
-| 08 | Production Readiness | 84 | 0 | 3 | 4 | 0 | 🟡 YELLOW | 12% |
+| 08 | Production Readiness | 84 | 0 | 3 | 4 | 0 | 🟢 GREEN (2026-10-02) | 12% |
 | 09 | Performance & Scalability | 86 | 0 | 2 | 4 | 4 | 🟢 GREEN | 5% |
 | 11 | Zero Policy | 85 | 0 | 1 | 2 | 5 | 🟢 GREEN | 14% |
 | 12 | End-to-End | 80 | 0 | 4 | 2 | 1 | 🟡 YELLOW | — |
-| 13 | Operations / DR | 82 | 0 | 2 | 3 | 4 | 🟡 YELLOW | — |
-| 14 | Reproducibility | 84 | 2 | 1 | 3 | 2 | 🟡 YELLOW | — |
+| 13 | Operations / DR | 82 | 0 | 2 | 3 | 4 | 🟢 GREEN (2026-10-02) | — |
+| 14 | Reproducibility | 84 | 2 | 1 | 3 | 2 | 🟢 GREEN (2026-10-05) | — |
 | | **Total** | | **3** | **25** | **32** | **30** | | |
 
 ## 3. Master Critical list (all 3 fixed)
@@ -54,7 +54,7 @@ All four are scheduled, and none needs a redesign.
 | ID | Layer | Finding | State |
 |---|---|---|---|
 | E2E-12-007 | End-to-End | Plan approval, agent execution, repo chat never verified end to end in a browser (need paid LLM calls) | BLOCKED: owner gives the go for the live LLM plan |
-| INFRA-06-001 | Infrastructure | CI has not run since ≥ 2026-08-21 | DEFERRED BY OWNER (Actions disabled until the audits finish). Mitigation: the full suite runs locally (8,892 passed from a clean clone) |
+| INFRA-06-001 | Infrastructure | CI has not run since ≥ 2026-08-21 | FIXED 2026-10-05: GitHub Actions green on `main` (run 37283792188: backend 8,934 tests, Windows, frontend, e2e, security) |
 
 **Closed today after the audit:** OPS-13-006 (backup service; `docker compose --profile backup up -d backup` + `GRIDIRON_BACKUP_DIR`) · PROD-08-006 (Sentry + `GET /api/notifications` + NavBar bell/toast).
 
@@ -119,9 +119,9 @@ The reason is the spec's rule: every High must be either resolved, or accepted w
 |---|---|---|---|---|
 | 1 | ✅ **DONE 2026-10-02** · Add an opt-in `backup` service to `docker-compose.yml` running `scripts/backup_db.sh` daily into an owner-chosen off-host folder (14 kept) | OPS-13-006 | Small (1 file + docs) | Start it; a verified `.dump` appears; restore it into a throwaway DB (the audit-13 procedure) |
 | 2 | ✅ **DONE 2026-10-02** · In-app failure alerts: when a task becomes blocked or failed, the NavBar shows a bell/toast with a list (backend event → API → UI), with tests | PROD-08-006 (rest) | Medium (few files) | Force a blocked task in the real stack; the notification appears; a Playwright check in `e2e-real` |
-| 3 | Owner confirms the Sentry test event `1d8bc3d7…` arrived | PROD-08-006 | Owner | Sentry → Issues |
+| 3 | ✅ **DONE 2026-10-02** · Owner confirms the Sentry test event `1d8bc3d7…` arrived | PROD-08-006 | Owner | Sentry → Issues |
 | 4 | Live LLM plan (Haiku, economy, throwaway repo, ≤ $3.50): L1–L10 including journeys C/D/G | E2E-12-007, AIEVAL-07-003/004 | Medium (runs, not code) | Each recorded in the `PENDING_TESTS_API_KEYS.md` ledger |
-| 5 | Re-enable GitHub Actions after billing; one green CI run | INFRA-06-001 | Owner + Small | Green workflow on `main` |
+| 5 | ✅ **DONE 2026-10-05** · Re-enable GitHub Actions after billing; one green CI run (run 37283792188) | INFRA-06-001 | Owner + Small | Green workflow on `main` |
 | 6 | ✅ **DONE 2026-10-02** · (Recommended) Enforce the forced password change on the server + a change-password form on the login page | REPRO-14-006 | Medium | Seeded admin blocked until changed; journey test |
 
 After 1–5, re-run this consolidation (`python3 evidence/consolidate.py`). With no open High and no open Critical, the rule gives **READY**.
