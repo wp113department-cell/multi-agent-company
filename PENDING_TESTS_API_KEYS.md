@@ -794,3 +794,86 @@ touched**.
 
 | # | Item | Result | Measured cost | Running total |
 |---|---|---|---|---|
+
+---
+
+## N. (2026-10-05) Final live-AI test plan: free APIs first, then Anthropic within $4
+
+Owner rules (2026-10-05):
+- Small and simple tests run on the free APIs first (Groq, then Gemini).
+- Anthropic is used only for the big tests, and only after the test code has been checked, so that a small code issue never burns a paid re-run.
+- Token-heavy features stay off until the cheap runs pass; they are enabled last.
+- Total Anthropic budget is **$4**. Stop at a measured **$3.50**.
+
+Keys checked 2026-10-05 with zero-token calls: Anthropic, Groq, Gemini and Voyage all authenticate.
+
+### N1. Every pending live-AI test
+
+| # | Test | Count | Needed for | Backend | Est. cost |
+|---|---|---|---|---|---|
+| L8 | Journey C: plan approval in the real UI | 1 | **Audit 12 GREEN** | Anthropic | $0.05–0.10 |
+| L9 | Journey D: agent codes → Review → approve | 1 | **Audit 12 GREEN** | Anthropic | $0.05–0.15 |
+| L10 | Journey G: repo chat streams an answer | 1 | **Audit 12 GREEN** | Anthropic | $0.01–0.03 |
+| L4 | The 11 eval tasks for real | 11 | **Audit 07 GREEN** | Groq first; leftovers on Anthropic | $0–0.40 |
+| L5 | LLM judge for the evals' quality checks (code to write first) | 26 checks | **Audit 07 GREEN** | Groq first; Haiku if needed | $0–0.10 |
+| L6 | Regression gate becomes active (~20 runs of one agent, then a worse prompt is blocked) | ~21 runs | **Audit 07 GREEN** | Groq (mechanism proof) | $0 |
+| L7 | Real cost per task, measured | — | **Audit 07 GREEN** | from the L8/L9 runs | $0 extra |
+| L1 | How often model output fails its schema | — | Audit 02 decision | read from the logs of everything above | $0 |
+| L3 | Versioned-lesson merge (Voyage + one Haiku call) | 1 | Memory | Anthropic | < $0.01 |
+| B1 | Groq node tests: planner, reflection, lesson, mini graph | 9 | Groq path | Groq | $0 |
+| B2 | Groq eval tests | 4 | Eval path | Groq | $0 |
+| K1 | Gemini integration tests | 2 | Gemini path | Gemini | $0 |
+| C | `tests/pending/test_embeddings.py` | 4 | Memory | Voyage only | $0 |
+| C | `tests/pending/` single agents: pm 3, architect 3, decomposer 3, planner 4, coder 3, research 3 | 19 | Agents | Anthropic (too big for Groq, see K3) | $0.60–1.00 |
+| C | `tests/pending/` specialists 9, manager 4, pipeline 5 | 18 | Orchestration | Anthropic | $0.60–1.00 |
+| C | `tests/pending/test_api_e2e.py` (needs a live dev server) | 8 | API | Anthropic | $0.20–0.40 |
+| Q | One run in **quality** mode (reflection, critique, planning on) | 1 | Proves the big-token features | Anthropic | $0.20–0.40 |
+
+Done earlier: L2 (live semantic memory). Removed: section A stubs (Qoder T-17-101; replaced by real tests).
+
+**Audits 07 and 12 turn GREEN with: L4, L5, L6, L7, L8, L9, L10.** Everything else is "pending, should pass" but doesn't gate a flag.
+
+### N2. Phase 0: free checks before any paid call ($0)
+
+1. **Read every test that will run** and fix stale code: wrong statuses, renamed fields, old model names, fixtures.
+2. **Dry run with a fake Anthropic key.** Each paid test must fail exactly at its first LLM call (401, which Anthropic doesn't bill). A test that fails earlier has a setup bug, which gets fixed now.
+3. **Cost guards**, checked to work before spending:
+   - `COST_MODE=economy` passed explicitly. `tests/conftest.py` defaults to **quality**, which costs several times more.
+   - `COST_BUDGET_DAILY_USD=3.50` with the Redis ledger on (`SPEND_GUARD_REDIS=true`), so the cap covers every test process together. Proven first with the fake key.
+   - `PIPELINE_MODE=auto` (smart router: a small task runs one specialist).
+4. **Throwaway repo** for anything that writes or commits; never this project's repo.
+5. **Build the missing pieces with mocked tests first:** the L5 judge, and the L8–L10 journeys in `apps/web/e2e-real`.
+
+### N3. Phase 1: free APIs (Groq → Gemini → Voyage)
+
+B1, B2, K1, `test_embeddings`, L4 (paced for Groq's 8,000 tokens/min) and L6.
+
+Every free run also rehearses the full code path. If a test fails for a code reason, the fix happens here, for free. Tests too big for Groq (K3) move to Phase 2 with their setup already proven.
+
+### N4. Phase 2: Anthropic (Haiku, economy), one item at a time
+
+| Step | Item | Stop / check |
+|---|---|---|
+| 2.1 | Calibration: one small pending test (pm) | Measure the real cost; re-estimate everything below |
+| 2.2 | L10, L8, L9 (audit 12) | One small task, throwaway repo |
+| 2.3 | L7 from 2.2's `agent_runs` | $0 |
+| 2.4 | L4 leftovers + L5 (audit 07) | — |
+| 2.5 | L3 | — |
+| 2.6 | `tests/pending/` agents, then specialists/manager/pipeline, then api_e2e | Only while budget remains |
+| 2.7 | Q: one quality-mode run (big-token features on) | Last, only if ≥ $0.40 remains |
+| 2.8 | L1 from all logs | $0 |
+
+Rules:
+- The ledger below is updated after every step.
+- A failure stops the run. It is diagnosed from logs for $0, fixed, and only that one test is re-run, never the whole file.
+- Stop at $3.50.
+
+### N5. Phase 3: restore
+
+- `USE_GROQ` / `USE_GEMINI` go back off, `COST_BUDGET_DAILY_USD` goes back to the owner's $1, and any test-only settings are removed.
+- The audit 07 and 12 reports and the tracker are updated from the results.
+
+### N6. Ledger
+
+| Step | Item | Result | Measured cost | Running total |
+|---|---|---|---|---|
