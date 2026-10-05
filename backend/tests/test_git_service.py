@@ -371,3 +371,62 @@ class TestGitRevert:
             text=True,
         )
         assert status.stdout.strip() == ""  # worktree clean, no stuck revert state
+
+
+# ---------------------------------------------------------------------------
+# Live-AI run 2026-10-05: worktrees live under WORKTREES_DIR (/tmp by default)
+# while allowed_workspace_parent defaults to /home, so git_add/git_commit in a
+# task worktree raised "outside allowed workspace parent" and every coding
+# task that changed files ended blocked. Earlier tests pointed the parent at
+# their tmp dir, which hid the split.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_commit_inside_the_worktrees_dir_works_with_a_separate_workspace_parent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.config import get_settings
+    from app.services.git_service import git_add, git_commit
+
+    home, worktrees = tmp_path / "home", tmp_path / "worktrees"
+    home.mkdir()
+    wt = worktrees / "task-1"
+    wt.mkdir(parents=True)
+    monkeypatch.setattr(get_settings(), "allowed_workspace_parent", str(home))
+    monkeypatch.setattr(get_settings(), "worktrees_dir", str(worktrees))
+    subprocess.run(["git", "init", "-q"], cwd=wt, check=True)
+    (wt / "a.py").write_text("x = 1\n")
+
+    assert (await git_add(str(wt), ["a.py"]))["ok"]
+    result = await git_commit(
+        str(wt), "coder: task 1", author_name="Gridiron Agent", author_email="a@g.local"
+    )
+    assert result["ok"], result
+
+
+@pytest.mark.asyncio
+async def test_paths_outside_both_roots_and_clone_into_worktrees_are_still_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.config import get_settings
+    from app.services.git_service import _validate_dest, git_status
+
+    home, worktrees, other = (
+        tmp_path / "home",
+        tmp_path / "worktrees",
+        tmp_path / "other",
+    )
+    for d in (home, worktrees, other):
+        d.mkdir()
+    monkeypatch.setattr(get_settings(), "allowed_workspace_parent", str(home))
+    monkeypatch.setattr(get_settings(), "worktrees_dir", str(worktrees))
+
+    with pytest.raises(ValueError, match="outside allowed workspace parent"):
+        await git_status(str(other))
+    with pytest.raises(ValueError, match="outside allowed workspace parent"):
+        await git_status(str(worktrees / ".." / "other"))
+    # A user-chosen clone destination must stay under the workspace parent.
+    with pytest.raises(ValueError, match="outside allowed workspace parent"):
+        _validate_dest(str(worktrees / "cloned"))
+    assert _validate_dest(str(home / "cloned")) == str(home / "cloned")

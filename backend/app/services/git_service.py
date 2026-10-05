@@ -154,22 +154,36 @@ def _validate_remote_name(remote: str) -> str:
     return remote
 
 
-def _validate_workspace(path: str) -> None:
-    """Raise ValueError if path is outside allowed workspace parent."""
+def _is_within(real: str, parent: str) -> bool:
+    real_parent = os.path.realpath(parent)
+    return real == real_parent or real.startswith(real_parent.rstrip(os.sep) + os.sep)
+
+
+def _validate_workspace(path: str, allow_worktrees: bool = True) -> None:
+    """Raise ValueError if path is outside allowed workspace parent.
+
+    The server's own worktrees directory (WORKTREES_DIR, default
+    /tmp/gridiron-worktrees) is also allowed for repository operations: the
+    coding paths git_add/git_commit inside the task worktree they created. With
+    the defaults (/home vs /tmp) every coding task that changed files was
+    blocked here — found by the first live-AI run, 2026-10-05; unit tests had
+    always pointed allowed_workspace_parent at their tmp dir. A user-supplied
+    clone destination (allow_worktrees=False) must still be under the parent.
+    """
     try:
         from app.config import get_settings
 
-        parent = get_settings().allowed_workspace_parent
+        settings = get_settings()
+        parent = settings.allowed_workspace_parent
+        worktrees = settings.worktrees_dir
     except Exception:
-        parent = "/home"
+        parent, worktrees = "/home", ""
     real = os.path.realpath(path)
-    real_parent = os.path.realpath(parent)
-    if not (
-        real == real_parent or real.startswith(real_parent.rstrip(os.sep) + os.sep)
-    ):
-        raise ValueError(
-            f"Path '{path}' is outside allowed workspace parent '{parent}'."
-        )
+    if _is_within(real, parent):
+        return
+    if allow_worktrees and worktrees and _is_within(real, worktrees):
+        return
+    raise ValueError(f"Path '{path}' is outside allowed workspace parent '{parent}'.")
 
 
 def _validate_dest(dest_path: str) -> str:
@@ -183,7 +197,7 @@ def _validate_dest(dest_path: str) -> str:
         or "\x00" in dest_path
     ):
         raise ValueError("dest_path must be an absolute path.")
-    _validate_workspace(dest_path)
+    _validate_workspace(dest_path, allow_worktrees=False)
     return dest_path
 
 
