@@ -1727,6 +1727,7 @@ def _make_call_llm_node(
     context_token_budget: int,
     task_id: str = "",
     model_haiku: str = "",
+    max_turns: int = 0,
 ) -> Callable[[AgentRunState], dict[str, Any]]:
     """Calls Anthropic. Injects plan + memory_context into system prompt.
     Applies context condense (real LLM summarization, not silent drop) when
@@ -1775,6 +1776,14 @@ def _make_call_llm_node(
         )
         for t in tools
     ]
+
+    # Final-turn submit (live-AI run 2026-10-05): an agent that spends every
+    # turn exploring stops at max_turns without ever submitting, and the whole
+    # run's spend is wasted (eval_005: 16 calls, $0.13, nothing returned under
+    # economy's 15-turn cap). On the last allowed turn the single submit tool
+    # is forced, so the agent hands in its best answer from what it gathered.
+    _submit_tools = [t["name"] for t in tools if str(t["name"]).startswith("submit")]
+    _final_submit_tool = _submit_tools[0] if len(_submit_tools) == 1 else None
 
     def call_llm(state: AgentRunState) -> dict[str, Any]:
         # Check abort flag before calling LLM
@@ -1935,6 +1944,21 @@ def _make_call_llm_node(
         extra_kwargs: dict[str, Any] = (
             {"thinking": _thinking_budget} if _thinking_budget else {}
         )
+        if (
+            max_turns > 0
+            and _final_submit_tool is not None
+            and state["turns"] >= max_turns - 1
+            and not state.get("submitted")
+            and not _thinking_budget  # a forced tool_choice can't combine with thinking
+        ):
+            logger.info(
+                "%s: final turn %d/%d — forcing %s so the run returns a result",
+                role_name,
+                state["turns"] + 1,
+                max_turns,
+                _final_submit_tool,
+            )
+            extra_kwargs["tool_choice"] = {"type": "tool", "name": _final_submit_tool}
         response = _call_anthropic(
             client,
             model=model,
@@ -3348,15 +3372,24 @@ def _make_router(
     def router(state: AgentRunState) -> str:
         if state.get("submitted"):
             return END
-        if state["turns"] >= max_turns:
-            logger.warning("Agent hit max_turns (%d) — stopping", max_turns)
-            return END
-
         last_msg = state["messages"][-1] if state["messages"] else {}
         content = last_msg.get("content", []) if isinstance(last_msg, dict) else []
         has_tools = any(
             isinstance(b, dict) and b.get("type") == "tool_use" for b in content
         )
+        if state["turns"] >= max_turns:
+            # The final turn forces the submit tool (call_llm): execute that
+            # submission instead of discarding it. No further LLM call can
+            # follow — see _make_post_execute_tools_router.
+            if any(
+                isinstance(b, dict)
+                and b.get("type") == "tool_use"
+                and str(b.get("name", "")).startswith("submit")
+                for b in content
+            ):
+                return "execute_tools"
+            logger.warning("Agent hit max_turns (%d) — stopping", max_turns)
+            return END
 
         if has_tools:
             return "reflection_node" if enable_reflection else "execute_tools"
@@ -3383,6 +3416,23 @@ def _post_execute_tools_router(state: AgentRunState) -> str:
     if state.get("pending_tool_uses"):
         return "execute_tools"
     return "critique_node" if state.get("submitted") else "call_llm"
+
+
+def _make_post_execute_tools_router(max_turns: int) -> Callable[[AgentRunState], str]:
+    """_post_execute_tools_router plus the turn limit: once max_turns is
+    spent and nothing was submitted (e.g. the forced final submission was
+    rejected), the run ends here instead of paying for another LLM call."""
+
+    def router(state: AgentRunState) -> str:
+        key = _post_execute_tools_router(state)
+        if key == "call_llm" and state["turns"] >= max_turns:
+            logger.warning(
+                "Agent hit max_turns (%d) without a submission — stopping", max_turns
+            )
+            return END
+        return key
+
+    return router
 
 
 def _post_critique_router(state: AgentRunState) -> str:
@@ -3446,7 +3496,13 @@ def build_agent_graph(
     """
     haiku = model_haiku or model
     call_llm = _make_call_llm_node(
-        role_name, model, tools, context_token_budget, task_id, model_haiku=haiku
+        role_name,
+        model,
+        tools,
+        context_token_budget,
+        task_id,
+        model_haiku=haiku,
+        max_turns=max_turns,
     )
     execute_tools_node = _make_execute_tools_node(
         tool_handlers,
@@ -3536,11 +3592,12 @@ def build_agent_graph(
     if enable_critique:
         g.add_conditional_edges(
             "execute_tools",
-            _post_execute_tools_router,
+            _make_post_execute_tools_router(max_turns),
             {
                 "execute_tools": "execute_tools",
                 "critique_node": "critique_node",
                 "call_llm": loop_back_target,
+                END: END,
             },
         )
         g.add_conditional_edges(
@@ -3555,13 +3612,19 @@ def build_agent_graph(
         # dropped), exactly matching the pre-Day-19 unconditional edge that
         # always went straight to loop_back_target regardless of submitted;
         # call_llm's own router already handles ending the run on submitted.
+        # A fresh submission ("critique_node" key) ENDS the run here. It used
+        # to go back to call_llm, which made one more full, paid LLM call
+        # before its router noticed submitted=True — every economy/balanced
+        # run paid one wasted call (measured 2026-10-05: 2 calls for an
+        # immediate submit).
         g.add_conditional_edges(
             "execute_tools",
-            _post_execute_tools_router,
+            _make_post_execute_tools_router(max_turns),
             {
                 "execute_tools": "execute_tools",
-                "critique_node": loop_back_target,
+                "critique_node": END,
                 "call_llm": loop_back_target,
+                END: END,
             },
         )
 

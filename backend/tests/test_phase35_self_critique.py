@@ -413,12 +413,8 @@ def test_graph_critique_disabled_explicitly_preserves_prior_behavior() -> None:
 
     assert final_state["submitted"] is True
     assert llm.critique_call_count == 0
-    # Pre-existing base_graph.py behavior, unchanged by this flag: execute_tools
-    # always edges back to call_llm unconditionally when critique is disabled,
-    # so the router (which runs after call_llm) only observes submitted=True
-    # on the NEXT call_llm pass — one extra, discarded LLM turn happens before
-    # the graph actually stops. enable_critique=True avoids this (see
-    # test_graph_critique_satisfied_first_try_ends_immediately, which gets
-    # exactly 1 main-turn call) by routing execute_tools -> critique_node
-    # directly on submission instead.
-    assert llm.main_turn_calls == 2
+    # 2026-10-05: execute_tools used to edge back to call_llm on submission
+    # when critique was disabled, so one extra, discarded (but paid) LLM turn
+    # ran before the router saw submitted=True. A submission now ends the run
+    # directly — exactly 1 main-turn call, same as the critique-enabled path.
+    assert llm.main_turn_calls == 1

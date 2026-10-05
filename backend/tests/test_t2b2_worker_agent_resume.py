@@ -160,12 +160,11 @@ async def test_resume_trace_id_continues_real_prior_conversation_real_postgres()
             # actually been sent the real prior history (not just present in
             # the checkpoint object, or only visible in the final output) —
             # proves the merged state was truly the input to graph.stream(),
-            # not reconstructed after the fact. Each submit cycle is 2 real
-            # LLM calls (the tool_use turn, then one more turn where the
-            # model sees the tool_result before the graph ends) — so index 2
-            # is run 2's first call, immediately after run 1's 2 calls.
-            assert llm.calls == 4
-            second_run_first_call_messages = llm.seen_messages[2]
+            # not reconstructed after the fact. Each submit cycle is 1 real
+            # LLM call since 2026-10-05 (the extra post-submit turn is gone),
+            # so index 1 is run 2's first call, right after run 1's call.
+            assert llm.calls == 2
+            second_run_first_call_messages = llm.seen_messages[1]
             assert any(
                 "original task" in str(m.get("content"))
                 for m in second_run_first_call_messages
