@@ -1879,6 +1879,8 @@ app = FastAPI(
 
 # Wire rate limiter state and middleware before other middleware
 app.state.limiter = limiter
+
+
 def _rate_limit_handler(request: Request, exc: RateLimitExceeded) -> Response:
     """Qoder cross-check PROD-08-102 (2026-10-02): slowapi's default body is
     {"error": "<string>"}, unlike every other error ({"error": {"code",
