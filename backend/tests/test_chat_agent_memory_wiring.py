@@ -212,7 +212,8 @@ def test_run_uses_memory_augmented_system_prompt_not_static_one() -> None:
     assert "self._memory_read_context" in run_source
 
     node_source = inspect.getsource(ChatAgent._call_llm_node)
-    assert "system=system_prompt" in node_source
+    # system is a cached text block since 2026-10-05 (prompt caching)
+    assert '"text": system_prompt' in node_source
 
     finalize_source = inspect.getsource(ChatAgent._finalize_node)
     assert "self._memory_write_outcome" in finalize_source

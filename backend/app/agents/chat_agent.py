@@ -4373,12 +4373,18 @@ class ChatAgent:
             if self._context_tokens > 0
             else _estimate_tokens(self.session.history)
         )
-        if effective_tokens_in > 0 and context_token_budget > 0:
+        # The budget is for the conversation HISTORY. A real response's
+        # usage.input_tokens also counts the fixed system prompt + CHAT_TOOLS
+        # (~37k tokens), which alone exceeds the 8k default — so every turn
+        # re-summarized the newest tool results away and paid an extra Haiku
+        # call (live-AI run 2026-10-05). Gate condensing on the history only.
+        history_tokens = _estimate_tokens(self.session.history)
+        if history_tokens > 0 and context_token_budget > 0:
             messages_before = len(self.session.history)
             condensed, was_condensed = await _condense_history_async(
                 list(self.session.history),
                 token_budget=context_token_budget,
-                tokens_in=effective_tokens_in,
+                tokens_in=history_tokens,
                 client=client,
                 model_haiku=self._haiku_model(),
             )
@@ -4456,7 +4462,17 @@ class ChatAgent:
             async with client.messages.stream(
                 model=chat_model,
                 max_tokens=8192,
-                system=system_prompt,
+                # Prompt caching: tools + system (~37k tokens) are identical
+                # on every turn; the breakpoint on the system block caches the
+                # whole prefix, so later turns read it at 0.1x (base_graph
+                # already does this; chat never did).
+                system=[
+                    {
+                        "type": "text",
+                        "text": system_prompt,
+                        "cache_control": {"type": "ephemeral"},
+                    }
+                ],
                 messages=sdk_messages,
                 tools=sdk_tools,
             ) as stream:

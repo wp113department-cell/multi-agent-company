@@ -169,6 +169,11 @@ async def test_long_chat_session_condenses_and_preserves_content(
 
     # Turn 2: the last call's context (110) is strictly over budget (100) at the
     # start of this turn's own call_llm invocation -> must condense now.
+    # 2026-10-05: condensing is gated on the conversation HISTORY size, not
+    # usage.input_tokens (which also counts the fixed ~37k system+tools
+    # prefix and made real sessions condense on every turn). This fake usage
+    # leaves that prefix out, so make the history itself exceed the budget.
+    monkeypatch.setattr(get_settings(), "context_token_budget", 10)
     responses2 = [_FakeTextStream("ok", tokens_in=5)]
     p1, p2, p3 = _patched_agent(agent, responses2)
     with p1, p2, p3:
