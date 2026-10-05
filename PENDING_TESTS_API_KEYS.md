@@ -909,3 +909,24 @@ Rules:
 
 | Step | Item | Result | Measured cost | Running total |
 |---|---|---|---|---|
+| 2.1 | Calibration: pm (3 tests, one shared run) | 3/3 pass | $0.019 | $0.019 |
+| 2.2 | L8–L10 journeys, 1st run | C pass; D blocked → **bug: coding commit refused the worktree dir** | $0.032 | $0.051 |
+| 2.2 | Journeys re-run | D codes; Review-page expectation was wrong (by design) | $0.021 | $0.071 |
+| 2.2 | Journeys re-run | D diff OK; push approval needs a GitHub repo (by design) | $0.025 | $0.096 |
+| 2.2 | D (reused task) + G chat | Both pass; **bug: chat on Sonnet, no caching, condensing each turn** (~12 calls) | $0.719 | $0.815 |
+| 2.2 | G re-check after the chat fixes | Pass: 4 calls, Haiku + cache | $0.047 | $0.862 |
+| 2.4 | eval_005 alone | **Bug: hit max_turns, nothing submitted** | $0.128 | $0.990 |
+| 2.4 | eval_005 after the loop fixes | Score 0.90; also fixed the wasted post-submit call | $0.106 | $1.096 |
+| 2.4 | Evals 001–004, 009–011 | 0.55 / 0.89 / 0.67 / 0.80 / 1.00 / 0.80 / 1.00 | $0.703 | $1.799 |
+| 2.4 | Evals 006–008 (first try failed at $0) | **Bugs: eval runner args; opus agents + thinking on Haiku (400)**; re-run: 0.40 / 0.80 / 0.80 | $0.402 | $2.201 |
+| L6 | Regression gate, 1st run | "Never call a tool" prompt was ignored by the model | $0.087 | $2.288 |
+| — | Unattributed | Ledger moved between readings (likely late charges of the run above) | $0.036 | $2.324 |
+| L6 | Regression gate, worse prompt | **BLOCKED** as expected (tool accuracy 0.90 → 0.27) | $0.047 | $2.371 |
+| C | architect / decomposer / coder / research | 3/3, 3/3, 3/3, 3/3 | $0.191 | $2.562 |
+| C | planner | 4/4 failed → **bug: validator vs v2 prompt format**; after the fix 4/4 pass | $0.049 | $2.612 |
+
+**Total: $2.61 of the $4 balance; $1.39 left (the owner's $1 untouched).**
+
+**Not run** (budget kept): specialists 9, manager/epic 4, pipeline 5, api_e2e (full pipeline) 1, L3 lesson merge, the quality-mode run. Their code paths were all dry-run at $0 (each reaches its first model call cleanly) and the stale tests among them are fixed.
+
+**L1** (schema strictness): across the 22 paid run logs, exactly **one** submission broke its declared schema: `security_architect`'s `submit_threat_model` left out the required `overall_risk` (eval_008). Today it is kept with a warning. Under strict validation the agent would be asked to resubmit. One miss in ~25 agent runs (about 4%) says strict mode is affordable, but it would cost one extra call per miss. Recommendation: strict for submit tools whose output feeds code (patches, plans), soft for reports.
