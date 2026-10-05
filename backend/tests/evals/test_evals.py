@@ -85,11 +85,17 @@ class TestEvalTaskDefinitions:
         uses) — meaning it could silently diverge from the real registry.
         Verifies the dispatch now genuinely goes through _load_agent_fn,
         with no real LLM call (the agent function itself is mocked)."""
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import create_autospec, patch
 
         from tests.evals.eval_runner import _run_agent
 
-        fake_fn = MagicMock(return_value="fake-result")
+        # bug_fix's real parameter is `error_description`, not `description`:
+        # the runner binds arguments like the real /run endpoint
+        # (_agent_call_kwargs), which a signature-less MagicMock can't show.
+        def run_bug_fix(task_id: int, error_description: str, repo_path: str) -> str:
+            return "unused"
+
+        fake_fn = create_autospec(run_bug_fix, return_value="fake-result")
         with patch(
             "app.api.specialized_agents._load_agent_fn", return_value=fake_fn
         ) as mock_load:
@@ -97,7 +103,7 @@ class TestEvalTaskDefinitions:
 
         mock_load.assert_called_once_with("bug_fix")
         fake_fn.assert_called_once_with(
-            task_id=1, description="some description", repo_path="."
+            task_id=1, error_description="some description", repo_path="."
         )
         assert result == "fake-result"
 
