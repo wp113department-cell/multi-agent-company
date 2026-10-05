@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import logging
 import sys
 import time
@@ -170,8 +171,8 @@ def _score_result(task: dict[str, Any], result: Any) -> EvalResult:
 # Each task's natural-language quality_checks ("recommendations should be
 # actionable") used to be loaded and ignored. With --judge, ONE small call per
 # eval asks a cheap model to grade every check against the agent's output.
-# Backend: Groq when USE_GROQ=true (free tier), else Anthropic Haiku (the
-# process-wide spend guard applies). A judge failure never crashes the run and
+# Backend: Groq when USE_GROQ=true or EVAL_JUDGE_BACKEND=groq (free tier),
+# else Anthropic Haiku (the process-wide spend guard applies). A judge failure never crashes the run and
 # never counts as a pass: the checks are reported as not evaluated.
 
 _JUDGE_MAX_OUTPUT_CHARS = 6000
@@ -194,7 +195,10 @@ def _judge_call(prompt: str) -> str:
     from app.config import get_settings
 
     settings = get_settings()
-    if settings.use_groq:
+    # EVAL_JUDGE_BACKEND=groq: agents on Anthropic, judge on Groq's free tier.
+    # A judge prompt (~2-3k tokens) fits Groq's 8k tokens/minute; the agents'
+    # growing conversations don't (live run 2026-10-05: 413 at ~10.5k).
+    if settings.use_groq or os.environ.get("EVAL_JUDGE_BACKEND") == "groq":
         import groq
 
         client = groq.Groq(api_key=settings.groq_api_key, max_retries=0)
