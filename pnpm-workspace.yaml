@@ -23,7 +23,18 @@ overrides:
   # !!omap resolution, fixed in 4.3.1. Transitive via eslint's own
   # @eslint/eslintrc dependency (`pnpm why js-yaml` — resolved to 4.3.0
   # everywhere, no direct dependency on it anywhere in this workspace).
-  js-yaml: ">=4.3.1"
+  js-yaml: ">=5.4.1"  # 2026-10-05: was >=4.3.1 (already resolving v5); merge-key CPU advisory <=5.4.0
   "brace-expansion@1": ">=1.1.17"
   "brace-expansion@2": ">=2.1.2"
-  "brace-expansion@5": ">=5.0.9"
+  "brace-expansion@5": ">=5.0.12"  # 2026-10-05: 3 advisories <5.0.12 (pnpm audit before push)
+
+# Explicit, per-advisory audit exceptions (never a blanket suppression).
+# GHSA-vfj7-8cjw-p6xm — braces <=3.0.3 stack exhaustion on deeply nested
+# brace patterns. No patched release exists (3.0.3 is the newest, 2026-10-05).
+# Dev/build-only: reached through tailwindcss (chokidar, fast-glob) and
+# eslint-config-next; it only ever expands glob patterns written in this
+# repo's own config files, never user input, and is not in any runtime bundle.
+# Remove this entry as soon as a fixed braces (or replacement chain) ships.
+auditConfig:
+  ignoreGhsas:
+    - GHSA-vfj7-8cjw-p6xm
