@@ -1,7 +1,14 @@
-"""Full API end-to-end tests — require ANTHROPIC_API_KEY + real DATABASE_URL."""
+"""Full API end-to-end tests — require ANTHROPIC_API_KEY + real DATABASE_URL.
+
+Run against the live-AI server (plan §N: isolated DB, throwaway repo,
+economy mode, spend cap) with E2E_USER / E2E_PASS of a throwaway approver.
+"""
 
 from __future__ import annotations
 
+from typing import Any
+
+import pytest
 from tests.pending.conftest import requires_all
 
 
@@ -14,42 +21,56 @@ class TestAPIE2E:
     """
 
     _BASE = "http://localhost:8000"
+    _opener: Any = None
+
+    @classmethod
+    def _client(cls) -> Any:
+        """Every API route needs a session now: log in once, keep the cookie.
+        Credentials of a throwaway approver: E2E_USER / E2E_PASS."""
+        import http.cookiejar
+        import json
+        import os
+        import urllib.request
+
+        if cls._opener is None:
+            user, pw = os.environ.get("E2E_USER"), os.environ.get("E2E_PASS")
+            if not user or not pw:
+                pytest.skip(
+                    "set E2E_USER / E2E_PASS (a throwaway approver on the live server)"
+                )
+            opener = urllib.request.build_opener(
+                urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar())
+            )
+            req = urllib.request.Request(
+                f"{cls._BASE}/api/auth/login",
+                data=json.dumps({"username": user, "password": pw}).encode(),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            opener.open(req, timeout=10)
+            cls._opener = opener
+        return cls._opener
+
+    def _call(self, method: str, path: str, body: dict | None = None) -> dict:  # type: ignore[type-arg]
+        import json
+        import urllib.request
+
+        req = urllib.request.Request(
+            f"{self._BASE}{path}",
+            data=None if body is None else json.dumps(body).encode(),
+            headers={"Content-Type": "application/json"},
+            method=method,
+        )
+        return json.loads(self._client().open(req, timeout=30).read())
 
     def _get(self, path: str) -> dict:  # type: ignore[type-arg]
-        import urllib.request
-        import json
-
-        req = urllib.request.urlopen(f"{self._BASE}{path}", timeout=10)
-        return json.loads(req.read())
+        return self._call("GET", path)
 
     def _post(self, path: str, body: dict) -> dict:  # type: ignore[type-arg]
-        import urllib.request
-        import urllib.error
-        import json
-
-        data = json.dumps(body).encode()
-        req = urllib.request.Request(
-            f"{self._BASE}{path}",
-            data=data,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        resp = urllib.request.urlopen(req, timeout=10)
-        return json.loads(resp.read())
+        return self._call("POST", path, body)
 
     def _patch(self, path: str, body: dict) -> dict:  # type: ignore[type-arg]
-        import urllib.request
-        import json
-
-        data = json.dumps(body).encode()
-        req = urllib.request.Request(
-            f"{self._BASE}{path}",
-            data=data,
-            headers={"Content-Type": "application/json"},
-            method="PATCH",
-        )
-        resp = urllib.request.urlopen(req, timeout=10)
-        return json.loads(resp.read())
+        return self._call("PATCH", path, body)
 
     def test_server_is_running(self) -> None:
         """Health check: FastAPI server must be running before other E2E tests."""
@@ -97,14 +118,15 @@ class TestAPIE2E:
         task = self._post(
             "/api/tasks",
             {
-                "title": "E2E run test: add logging",
-                "description": "Add structlog JSON logging to app/agents/base.py",
+                "title": "E2E run test: add subtract",
+                # "backend"/"python" route by keyword rules: no LLM call needed
+                "description": "Backend Python only: add subtract(a, b) to demo_module.py",
             },
         )
         task_id = task["id"]
 
-        # Fire pipeline
-        self._post(f"/api/tasks/{task_id}/run", {})
+        # Fire the smart router explicitly (the production default)
+        self._post(f"/api/tasks/{task_id}/run", {"mode": "auto"})
 
         # Poll until status changes from pending (max 120s for real Claude call)
         deadline = time.time() + 120
@@ -115,10 +137,9 @@ class TestAPIE2E:
             time.sleep(5)
 
         final = self._get(f"/api/tasks/{task_id}")
-        assert final["status"] in (
-            "ready_for_review",
-            "blocked",
-        ), f"Unexpected final status after pipeline run: {final['status']}"
+        # "blocked" used to pass too, i.e. a run that never planned anything.
+        assert final["status"] == "ready_for_review", final
+        assert final.get("plan"), "no plan was produced"
 
     def test_pipeline_state_populated(self) -> None:
         """GET /api/tasks/:id/pipeline returns pm_brief after pipeline completes."""
@@ -132,9 +153,11 @@ class TestAPIE2E:
             },
         )
         task_id = task["id"]
-        self._post(f"/api/tasks/{task_id}/run", {})
+        # pm_brief only exists in the full pipeline (PM → Architect →
+        # Decomposer); the smart-router default plans small tasks without it.
+        self._post(f"/api/tasks/{task_id}/run", {"mode": "full"})
 
-        deadline = time.time() + 120
+        deadline = time.time() + 300
         while time.time() < deadline:
             t = self._get(f"/api/tasks/{task_id}")
             if t["status"] not in ("pending", "planning"):
@@ -164,7 +187,9 @@ class TestAPIE2E:
         result = self._post(
             f"/api/tasks/{task_id}/reject", {"feedback": "Not needed anymore."}
         )
-        assert result.get("status") == "rejected"
+        # The endpoint returns {"rejected": true, "task": {...}}.
+        assert result.get("rejected") is True
+        assert result["task"]["status"] == "rejected"
 
     def test_append_and_fetch_logs(self) -> None:
         """POST then GET /api/tasks/:id/logs round-trips a log entry."""
