@@ -7,7 +7,7 @@ every step, and hands you back verified, ready-to-review work.
 [![License: Proprietary](https://img.shields.io/badge/license-proprietary-red.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](backend/requirements.txt)
 [![Node 20+](https://img.shields.io/badge/node-20%2B-green.svg)](package.json)
-[![Tests](https://img.shields.io/badge/tests-3%2C500%2B%20passing-brightgreen.svg)](backend/tests)
+[![Tests](https://img.shields.io/badge/tests-8%2C900%2B%20passing-brightgreen.svg)](backend/tests)
 
 **Author:** Bhaskar Barot, AI/ML Engineer
 
@@ -61,7 +61,7 @@ apps/web/            → Next.js frontend (TypeScript, App Router)
 backend/              → FastAPI + LangGraph backend (Python 3.11+)
   app/
     agents/          → 85 registered agents (roles/*.md are their system prompts)
-    api/             → 18 FastAPI routers
+    api/             → 22 FastAPI routers
     pipeline/        → LangGraph StateGraph orchestration (PM → Architect → Decomposer → Manager)
     policy/          → Safety policy engine — command denylist, path guards, Docker sandbox
     fleet/           → Fleet OS: capability registry, dispatcher, metrics, audit log, self-improvement
@@ -433,7 +433,7 @@ agent cannot bypass any of the following by rephrasing its request.
 | Final audit report | [docs/reports/FINAL_AUDIT_REPORT.md](docs/reports/FINAL_AUDIT_REPORT.md) |
 | Production-readiness audit (120 questions) | [answers.md](answers.md) |
 | Engineering change log | [IMPLEMENTATION_PROGRESS.md](IMPLEMENTATION_PROGRESS.md) |
-| Project state (live) | [PROJECT.md](PROJECT.md) |
+| Project state (live) | [What_is/AUDIT_REPORT/](What_is/AUDIT_REPORT/) (audit reports, 2026-10) |
 
 ---
 

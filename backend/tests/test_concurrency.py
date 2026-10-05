@@ -58,8 +58,12 @@ class TestSemaphoreSlots:
                 await asyncio.sleep(0.01)
                 active_a.remove(n)
 
-        await asyncio.gather(*[run_subtask_a(i) for i in range(4)])
-        assert True  # No deadlock = pass
+        # A deadlock now fails fast instead of hanging (Qoder T-17-102: this
+        # ended in `assert True`), and every slot holder must have released.
+        await asyncio.wait_for(
+            asyncio.gather(*[run_subtask_a(i) for i in range(4)]), timeout=5
+        )
+        assert active_a == []
 
     async def test_subtask_slot_different_epics_independent(self) -> None:
         """Epic B's subtask slot doesn't block Epic A's."""

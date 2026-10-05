@@ -35,6 +35,9 @@ _VALID_CATEGORIES = {
     "procedure",
     "preference",
     "bug",
+    # Qoder cross-check MEM-03-005 (2026-10-02): written since #405
+    # (store.py prompt_change rows) but missing here.
+    "prompt_change",
 }
 
 
@@ -43,7 +46,7 @@ async def get_memory_patterns(
     db: AsyncSession = Depends(get_db),
     category: str | None = Query(
         default=None,
-        description="Filter by category: task | architecture | failure | learning | procedure | preference | bug",
+        description="Filter by category: task | architecture | failure | learning | procedure | preference | bug | prompt_change",
     ),
     _actor: str = Depends(require_authenticated),
 ) -> dict[str, Any]:
@@ -57,7 +60,14 @@ async def get_memory_patterns(
         MemoryEmbedding.outcome, func.count(MemoryEmbedding.id).label("count")
     ).group_by(MemoryEmbedding.outcome)
 
-    if category and category in _VALID_CATEGORIES:
+    if category and category not in _VALID_CATEGORIES:
+        # An unknown category used to be ignored silently, returning ALL
+        # memories as if they matched the filter.
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unknown category {category!r}; valid: {sorted(_VALID_CATEGORIES)}",
+        )
+    if category:
         base_q = base_q.where(MemoryEmbedding.category == category)
         count_q = count_q.where(MemoryEmbedding.category == category)
         dist_q = dist_q.where(MemoryEmbedding.category == category)

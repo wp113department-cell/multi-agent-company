@@ -78,3 +78,15 @@ def test_only_task_rows_are_similar_tasks(monkeypatch: pytest.MonkeyPatch) -> No
     assert not any(
         d.endswith(" bug") for d in mine
     ), f"bug row returned as a task: {mine}"
+
+
+def test_memory_api_category_filter_is_strict() -> None:
+    """Qoder cross-check MEM-03-005: prompt_change was not a filterable
+    category, and an unknown category was ignored (returned everything)."""
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    with TestClient(app) as c:
+        assert c.get("/api/memory/patterns?category=prompt_change").status_code == 200
+        assert c.get("/api/memory/patterns?category=no_such_thing").status_code == 422

@@ -1,4 +1,4 @@
-"""Central model router for all 68 Gridiron agents.
+"""Central model router for every Gridiron agent (85 registered as of 2026-10-05).
 
 Loads agent_models.json at startup. route(agent_name) returns provider, model,
 and token config. No model strings are hardcoded here — edit the JSON to change routing.

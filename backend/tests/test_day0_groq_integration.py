@@ -357,29 +357,8 @@ anthropic_only = pytest.mark.skipif(
 )
 
 
-@anthropic_only
-def test_prompt_caching_header_sent() -> None:
-    """Verify cache_control ephemeral header is sent on system prompt (Anthropic-specific)."""
-    # TODO: mock anthropic.Anthropic, capture kwargs, assert system[0]["cache_control"] == {"type": "ephemeral"}
-    pass
-
-
-@anthropic_only
-def test_image_block_param_in_call_llm() -> None:
-    """Verify ImageBlockParam flows correctly through call_llm (Anthropic vision, Day 16)."""
-    # TODO: inject {"type": "image", "source": {...}} into messages, verify no serialization error
-    pass
-
-
-@anthropic_only
-def test_reflection_node_with_real_claude() -> None:
-    """Verify reflection_node with Claude Sonnet gives structured JSON reliably."""
-    # qwen3 sometimes returns prose instead of JSON — Claude is more reliable here
-    pass
-
-
-@anthropic_only
-def test_full_pipeline_pm_to_qa_with_claude() -> None:
-    """Full pipeline: pm → architect → decomposer → planner → coder → reviewer → qa."""
-    # Requires Claude API key + database connection. Run on Day 12 smoke test day.
-    pass
+# Qoder cross-check T-17-101 (2026-10-05): four empty `pass` stubs lived here
+# (counted as passing tests, unable to fail). Their real checks exist
+# elsewhere: the cache_control marker and image blocks are asserted in
+# tests/test_task_images.py; live-Claude reflection and the full pipeline are
+# the pending live tests (PENDING_TESTS_API_KEYS.md, tests/pending/).

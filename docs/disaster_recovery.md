@@ -47,9 +47,11 @@ DATABASE_URL=postgresql+asyncpg://gridiron:PASSWORD@127.0.0.1:5432/gridiron_dev 
 
 ### Scheduling
 
-Not scheduled by this codebase (no cron/systemd-timer/CI job is shipped —
-that's an operator decision tied to the actual deployment target). Options,
-pick one appropriate to your environment:
+Two ready-made schedulers ship with the code (pick one; neither runs until
+you enable it): the docker-compose `backup` service described below, and
+systemd units `scripts/systemd/gridiron-backup.{service,timer}` (copy to
+`/etc/systemd/system`, set DATABASE_URL/BACKUP_DIR with `systemctl edit`,
+then `systemctl enable --now gridiron-backup.timer`). Other options:
 
 - A `cron` entry / systemd timer running `backup_db.sh` on the DB host or a
   jump box with network access to Postgres.

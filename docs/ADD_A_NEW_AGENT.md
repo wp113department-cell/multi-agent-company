@@ -275,7 +275,7 @@ cd backend
 pytest tests/ -q
 ```
 
-All 934+ tests must pass before merging.
+The full suite (8,900+ tests) must pass before merging — run it exactly as CI does (`.github/workflows/ci.yml`).
 
 ---
 

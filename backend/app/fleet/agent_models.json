@@ -1,5 +1,5 @@
 {
-  "_comment": "Central model routing table for all 72 Gridiron agents. Edit this file to change models — no code changes needed. sonnet/opus model strings kept in sync with config.py's model_coder default (Audit 02 gap-closure, 2026-07-24) — update both together.",
+  "_comment": "Central model routing table for every Gridiron agent (85 registered as of 2026-10-05). Edit this file to change models — no code changes needed. sonnet/opus model strings kept in sync with config.py's model_coder default (Audit 02 gap-closure, 2026-07-24) — update both together.",
   "_tiers": {
     "opus":   {"max_tokens": 8192,  "thinking_budget": 2048, "temperature": 1.0},
     "sonnet": {"max_tokens": 4096,  "thinking_budget": null,  "temperature": 1.0},

@@ -54,7 +54,8 @@ worker: cd backend && rq worker gridiron-high gridiron-default --url ${REDIS_URL
   needed for a first deploy).
 - Point the platform at `backend/requirements.txt` for dependency install.
 - Set every variable your deployment needs from `backend/.env.example`
-  (96 documented variables as of Audit 06, 2026-07-27 — count drifts as
+  (305 settings as of 2026-10-05, all listed in `backend/.env.example` and kept in sync by
+  `tests/test_audit06_env_example_complete.py` — count drifts as
   fields are added, verify with a real Settings-vs-.env.example diff if
   precision matters; all are optional except `DATABASE_URL` and
   `ANTHROPIC_API_KEY`, which crash startup with a clear message if unset).
@@ -119,10 +120,10 @@ this natively) so deploys only happen after CI is green, per the plan's
 
 `GET /health` (`backend/app/main.py`) returns:
 ```json
-{"status": "ok", "checks": {"db": "ok"}, "db": "ok", "agents": 72}
+{"status": "ok", "checks": {"db": "ok"}, "db": "ok", "agents": 85}
 ```
 `agents` comes from `ensure_all_agents_registered()`, called at startup —
-if this is below 72, something failed to import; check the deploy logs for
+if this is below 85 (the fleet size as of 2026-10), something failed to import; check the deploy logs for
 `"Fleet agent registry bootstrap failed"`.
 
 ## 6. Production smoke test (manual — do this yourself after deploying)
@@ -131,7 +132,7 @@ Once both services are live:
 ```bash
 curl https://<your-backend>/health
 ```
-Confirm `status: ok`, `agents: 72`. Then run one real task end-to-end
+Confirm `status: ok`, `agents: 85`. Then run one real task end-to-end
 through the deployed frontend to confirm the full pipeline (PM → Architect
 → Decomposer → Coder) works against the live database and a real
 `ANTHROPIC_API_KEY`. This is the plan's final success criterion and can only

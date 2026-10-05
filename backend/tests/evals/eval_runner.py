@@ -40,7 +40,7 @@ _TASKS_FILE = Path(__file__).parent / "tasks.json"
 # standalone backend/evals/ CLI, now retired). This module used to keep its
 # own separate, hardcoded _AGENT_MAP (only 12 of the 60 real specialized
 # agents) — app/api/specialized_agents.py's _REGISTRY is the actual,
-# comprehensive, real dispatch table (60 entries) already used by the real
+# comprehensive, real dispatch table (65 entries as of 2026-10-05) already used by the real
 # /api/agents/{name}/run endpoint, and test_evals.py's own
 # test_all_agent_names_in_registry already asserted every eval task's agent
 # exists there — so the standalone CLI's _load_agent_fn()-based dispatch

@@ -237,7 +237,9 @@ async def consolidate_group(
     if other_ids:
         await db.execute(
             text(
-                "UPDATE memory_embeddings SET archived = true, archived_at = now() "
+                # naive UTC like retention.py's writer (Qoder cross-check INFRA-06-102):
+                # plain now() was cast to the naive column via the session TimeZone.
+                "UPDATE memory_embeddings SET archived = true, archived_at = (now() AT TIME ZONE 'utc') "
                 "WHERE id = ANY(:ids)"
             ),
             {"ids": other_ids},
