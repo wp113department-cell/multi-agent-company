@@ -165,9 +165,10 @@ class TestAPIE2E:
             time.sleep(5)
 
         pipeline = self._get(f"/api/tasks/{task_id}/pipeline")
-        assert (
-            pipeline.get("pm_brief") is not None
-        ), "Pipeline state missing pm_brief after run"
+        # The API returns camelCase ("pmBrief"); the live run 2026-10-05 showed
+        # stage=awaiting_approval with a real brief under that key.
+        assert pipeline.get("pmBrief"), "Pipeline state missing pmBrief after run"
+        assert pipeline.get("stage") == "awaiting_approval", pipeline.get("stage")
 
     def test_reject_task(self) -> None:
         """POST /api/tasks/:id/reject returns the task in rejected status."""

@@ -925,8 +925,15 @@ Rules:
 | C | architect / decomposer / coder / research | 3/3, 3/3, 3/3, 3/3 | $0.191 | $2.562 |
 | C | planner | 4/4 failed → **bug: validator vs v2 prompt format**; after the fix 4/4 pass | $0.049 | $2.612 |
 
-**Total: $2.61 of the $4 balance; $1.39 left (the owner's $1 untouched).**
+| C | specialists (9) | 8/9; the manager test used a pytest tmp path outside the allowed workspace (test setup) → fixed | $0.230 | $2.842 |
+| C | manager / epic lifecycle (4) | 4/4 (full epic: plan → approve → code → review) | $0.491 | $3.332 |
+| C | pipeline e2e (5) | 5/5 (on this whole repo, hence the cost) | $0.456 | $3.788 |
+| L3 | versioned-lesson merge | Pass: near-duplicate merged as a new version (real Haiku merge), old version superseded, new one published (a loose paraphrase correctly did NOT merge) | $0.002 | $3.790 |
+| C | specialists: manager orchestration re-run | Pass (dev → QA → review) | $0.067 | $3.857 |
+| C | api_e2e full pipeline | PM → architect → decomposer ran, stage awaiting_approval with a real brief; the test read the wrong key (`pm_brief` vs API `pmBrief`) → test fixed, not re-run | $0.080 | $3.936 |
 
-**Not run** (budget kept): specialists 9, manager/epic 4, pipeline 5, api_e2e (full pipeline) 1, L3 lesson merge, the quality-mode run. Their code paths were all dry-run at $0 (each reaches its first model call cleanly) and the stale tests among them are fixed.
+**Total: $3.94 of the $4 balance** (owner approved using the reserve on 2026-10-05).
+
+**All pending LLM tests ran**, except **one optional quality-mode run** (Sonnet with reflection/critique/planning, ~$0.20–0.40). It no longer fits the balance and needs a recharge; every quality-mode feature is covered by mocked tests.
 
 **L1** (schema strictness): across the 22 paid run logs, exactly **one** submission broke its declared schema: `security_architect`'s `submit_threat_model` left out the required `overall_risk` (eval_008). Today it is kept with a warning. Under strict validation the agent would be asked to resubmit. One miss in ~25 agent runs (about 4%) says strict mode is affordable, but it would cost one extra call per miss. Recommendation: strict for submit tools whose output feeds code (patches, plans), soft for reports.

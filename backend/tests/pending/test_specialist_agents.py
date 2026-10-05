@@ -263,10 +263,23 @@ async def test_manager_orchestrates_subtasks(tmp_path: Path) -> None:
     Manager agent orchestrates: backend subtask → QA → Review → complete.
     """
     import shutil
-    from app.agents.manager import run_manager
+    import subprocess
+    import uuid
 
-    wt = tmp_path / "worktree"
-    shutil.copytree(FIXTURE_REPO, str(wt))
+    from app.agents.manager import run_manager
+    from app.config import get_settings
+
+    # A real task worktree lives under WORKTREES_DIR (the manager commits in
+    # it, and git_service only allows the workspace parent or that dir); a
+    # pytest tmp path is neither, so the commit step refused it.
+    wt = Path(get_settings().worktrees_dir) / f"pending-test-{uuid.uuid4().hex[:8]}"
+    shutil.copytree(FIXTURE_REPO, str(wt), ignore=shutil.ignore_patterns("__pycache__"))
+    for cmd in (
+        ["git", "init", "-q", "-b", "main"],
+        ["git", "add", "-A"],
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init"],
+    ):
+        subprocess.run(cmd, cwd=wt, check=True)
 
     subtasks = [
         {
