@@ -7,7 +7,7 @@
 
 🟢 **GREEN after fixes.** Qoder is a strong audit: **every High and Medium finding I checked was real.** It found several bugs our own audits missed.
 
-All 5 High root causes are fixed, as are 12 Medium and 13 Low findings. Two Medium items are feature gaps that need an owner decision (below). The remaining Lows are design limits, documentation notes or test-style observations, recorded and not changed.
+All 5 High root causes are fixed, as are 14 Medium and 13 Low findings, including the two feature gaps the owner decided on 2026-10-05 (epic lifecycle, policy engine v2). The remaining Lows are design limits, documentation notes or test-style observations, recorded and not changed.
 
 Qoder's verdict was "NOT GREEN, production readiness not certified". That was correct for the code it audited (commits `c927c44b` → `90dac23b`). Its High findings are now closed.
 
@@ -39,8 +39,8 @@ Qoder's verdict was "NOT GREEN, production readiness not certified". That was co
 | EVAL-07-101 eval `quality_checks` never evaluated | Real, known | Live-LLM item L5 (`PENDING_TESTS_API_KEYS.md`) |
 | ARCH-01-003 prompt_engineer / ux_design agents only reachable through the raw API | Real | Documented; reachable via `/api/specialized-agents/{name}/run` |
 | ARCH-01-004 audit prompt premise stale | Informational | No change |
-| **ORCH-04-103 / 104** epic path never asks for plan approval, never transitions its child task, never opens a PR | Real (feature gap) | ⏳ **Owner decision**: build the lifecycle, or document epics as "plan + code" |
-| **SEC-05-102** policy engine v2 rules recorded but never enforced | Real (dead feature) | ⏳ **Owner decision**: wire into the write checks, or remove |
+| ORCH-04-103 / 104 epic path never asks for plan approval, never transitions its child task, never opens a PR | Real (feature gap) | **Fixed** (owner decision 2026-10-05: build it). Plan → `pending_plan_approval` → approve-plan → coding from the saved plan → `ready_for_review` → approve requests the push/PR approval; reject closes the epic and its child task. UI buttons on the epic and Review pages. `test_epic_lifecycle.py` |
+| SEC-05-102 policy engine v2 rules recorded but never enforced | Real (dead feature) | **Fixed** (owner decision 2026-10-05: wire it). A plan that touches files matching an active blocking policy stops at `pending_policy_approval`; plan approval is refused (409) until that policy is approved for the epic. `test_epic_lifecycle.py` |
 
 ## Low findings
 

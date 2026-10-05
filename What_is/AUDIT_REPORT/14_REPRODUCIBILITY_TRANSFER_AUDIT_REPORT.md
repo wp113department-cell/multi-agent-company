@@ -63,3 +63,7 @@ The spec's **independent operator** gate (a different person on a different mach
 
 - The clean-room full suite (above) is the main proof; log kept in the session scratchpad.
 - Changed: `tests/test_git_service.py` (22/22 from `/tmp` and from the repo), 9 files with computed repo root (63 passed + the 3 pending modules import and resolve the same path).
+
+## Update 2026-10-05: GREEN
+
+The owner set the project up independently from the README and confirmed it works, which satisfies the independent-operator gate. REPRO-14-006 (forced password change) was fixed on 2026-10-02. No open items.

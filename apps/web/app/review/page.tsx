@@ -45,13 +45,34 @@ async function fetchBatchReview(): Promise<BatchReviewData> {
   return res.json();
 }
 
-async function approveEpic(epicId: string): Promise<void> {
-  const res = await fetch(`/api/epics/${epicId}/approve`, { method: "POST", headers: authHeaders() });
+// The right endpoint depends on what the epic is waiting for (2026-10-05):
+// a plan, a cost, or the finished work. Calling /approve for every status
+// failed for cost approvals (409) and could not approve a plan.
+const EPIC_APPROVE_PATH: Record<string, string> = {
+  pending_plan_approval: "approve-plan",
+  pending_cost_approval: "approve-cost",
+  ready_for_review: "approve",
+};
+
+async function approveEpic(epicId: string, status: string): Promise<void> {
+  const path = EPIC_APPROVE_PATH[status];
+  if (!path) throw new Error(`Epic ${epicId} (${status}) cannot be approved from here`);
+  const res = await fetch(`/api/epics/${epicId}/${path}`, {
+    method: "POST",
+    headers: authHeaders(),
+  });
   if (!res.ok) throw new Error(`Approve failed: ${res.status}`);
 }
 
-async function rejectEpic(epicId: string): Promise<void> {
-  const res = await fetch(`/api/epics/${epicId}/reject`, { method: "POST", headers: authHeaders() });
+async function rejectEpic(epicId: string, status: string): Promise<void> {
+  const path =
+    status === "pending_plan_approval" || status === "pending_policy_approval"
+      ? "reject-plan"
+      : "reject";
+  const res = await fetch(`/api/epics/${epicId}/${path}`, {
+    method: "POST",
+    headers: authHeaders(),
+  });
   if (!res.ok) throw new Error(`Reject failed: ${res.status}`);
 }
 
@@ -80,26 +101,21 @@ function AgeChip({ hours }: { hours: number }) {
     hours < 1
       ? `${Math.round(hours * 60)}m`
       : hours < 24
-      ? `${Math.round(hours)}h`
-      : `${Math.round(hours / 24)}d`;
+        ? `${Math.round(hours)}h`
+        : `${Math.round(hours / 24)}d`;
   const cls =
     hours > 48
       ? "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300"
       : hours > 12
-      ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200"
-      : "bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300";
-  return (
-    <span className={`text-xs rounded-full px-2 py-0.5 font-mono ${cls}`}>
-      {label} old
-    </span>
-  );
+        ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200"
+        : "bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300";
+  return <span className={`text-xs rounded-full px-2 py-0.5 font-mono ${cls}`}>{label} old</span>;
 }
 
 function StatusBadge({ status }: { status: string }) {
   const map: Record<string, string> = {
     ready_for_review: "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200",
-    pending_cost_approval:
-      "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200",
+    pending_cost_approval: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200",
     awaiting_approval: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
   };
   const cls = map[status] ?? "bg-gray-100 text-gray-600";
@@ -120,8 +136,8 @@ function EpicRow({
   onReject,
 }: {
   epic: PendingEpic;
-  onApprove: (id: string) => void;
-  onReject: (id: string) => void;
+  onApprove: (id: string, status: string) => void;
+  onReject: (id: string, status: string) => void;
 }) {
   return (
     <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
@@ -144,9 +160,7 @@ function EpicRow({
             </p>
           )}
           {epic.haltReason && (
-            <p className="text-xs text-red-600 dark:text-red-400 mt-0.5">
-              ⚠ {epic.haltReason}
-            </p>
+            <p className="text-xs text-red-600 dark:text-red-400 mt-0.5">⚠ {epic.haltReason}</p>
           )}
         </div>
         {/* Gap-closure Stage 1.4 (answers.md) — UI-level role gating, a
@@ -155,13 +169,13 @@ function EpicRow({
         {isApprover() ? (
           <div className="flex gap-2 shrink-0">
             <button
-              onClick={() => onApprove(epic.epicId)}
+              onClick={() => onApprove(epic.epicId, epic.status)}
               className="rounded bg-green-600 hover:bg-green-700 text-white text-xs px-3 py-1.5 font-medium transition-colors"
             >
               Approve
             </button>
             <button
-              onClick={() => onReject(epic.epicId)}
+              onClick={() => onReject(epic.epicId, epic.status)}
               className="rounded bg-red-600 hover:bg-red-700 text-white text-xs px-3 py-1.5 font-medium transition-colors"
             >
               Reject
@@ -254,13 +268,13 @@ export default function BatchReviewPage() {
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["batch-review"] });
 
   const epicApproveMut = useMutation({
-    mutationFn: approveEpic,
+    mutationFn: (v: { id: string; status: string }) => approveEpic(v.id, v.status),
     onSuccess: invalidate,
     onError: (e: Error) => setError(e.message),
   });
 
   const epicRejectMut = useMutation({
-    mutationFn: rejectEpic,
+    mutationFn: (v: { id: string; status: string }) => rejectEpic(v.id, v.status),
     onSuccess: invalidate,
     onError: (e: Error) => setError(e.message),
   });
@@ -280,7 +294,9 @@ export default function BatchReviewPage() {
   const handleApproveAll = async () => {
     if (!data) return;
     setError(null);
-    const epicPromises = data.epics.map((e) => approveEpic(e.epicId));
+    const epicPromises = data.epics
+      .filter((e) => e.status in EPIC_APPROVE_PATH)
+      .map((e) => approveEpic(e.epicId, e.status));
     const taskPromises = data.tasks.map((t) => approveTask(t.taskId));
     try {
       await Promise.all([...epicPromises, ...taskPromises]);
@@ -323,19 +339,14 @@ export default function BatchReviewPage() {
       {error && (
         <div className="rounded-lg bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 p-3 text-sm text-red-700 dark:text-red-300">
           {error}
-          <button
-            onClick={() => setError(null)}
-            className="ml-3 underline text-xs"
-          >
+          <button onClick={() => setError(null)} className="ml-3 underline text-xs">
             dismiss
           </button>
         </div>
       )}
 
       {/* Loading */}
-      {isLoading && (
-        <div className="text-center py-12 text-gray-400">Loading review queue…</div>
-      )}
+      {isLoading && <div className="text-center py-12 text-gray-400">Loading review queue…</div>}
 
       {/* Error */}
       {isError && (
@@ -348,12 +359,8 @@ export default function BatchReviewPage() {
       {data && total === 0 && (
         <div className="text-center py-16 rounded-xl border border-dashed border-gray-300 dark:border-gray-600">
           <div className="text-4xl mb-3">✅</div>
-          <p className="font-semibold text-gray-700 dark:text-gray-300">
-            Nothing pending review
-          </p>
-          <p className="text-sm text-gray-400 mt-1">
-            All epics and tasks are up to date.
-          </p>
+          <p className="font-semibold text-gray-700 dark:text-gray-300">Nothing pending review</p>
+          <p className="text-sm text-gray-400 mt-1">All epics and tasks are up to date.</p>
         </div>
       )}
 
@@ -380,8 +387,8 @@ export default function BatchReviewPage() {
             <EpicRow
               key={epic.epicId}
               epic={epic}
-              onApprove={(id) => epicApproveMut.mutate(id)}
-              onReject={(id) => epicRejectMut.mutate(id)}
+              onApprove={(id, status) => epicApproveMut.mutate({ id, status })}
+              onReject={(id, status) => epicRejectMut.mutate({ id, status })}
             />
           ))}
         </section>
@@ -404,9 +411,7 @@ export default function BatchReviewPage() {
         </section>
       )}
 
-      <p className="text-center text-xs text-gray-400 pt-4">
-        Auto-refreshes every 30 seconds
-      </p>
+      <p className="text-center text-xs text-gray-400 pt-4">Auto-refreshes every 30 seconds</p>
     </div>
   );
 }

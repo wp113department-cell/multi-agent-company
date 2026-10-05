@@ -404,6 +404,30 @@ export async function rejectEpic(
   return handleResponse(res);
 }
 
+// Epic lifecycle (2026-10-05): the epic's plan waits for approval before any
+// code is written; protected paths (policy engine v2) need policy approval first.
+export async function approveEpicPlan(
+  epicId: string,
+  userId: string,
+): Promise<{ epicId: string; status: string }> {
+  const res = await apiFetch(`/api/epics/${epicId}/approve-plan`, {
+    method: "POST",
+    headers: { "X-User-Id": userId },
+  });
+  return handleResponse(res);
+}
+
+export async function rejectEpicPlan(
+  epicId: string,
+  userId: string,
+): Promise<{ epicId: string; status: string }> {
+  const res = await apiFetch(`/api/epics/${epicId}/reject-plan`, {
+    method: "POST",
+    headers: { "X-User-Id": userId },
+  });
+  return handleResponse(res);
+}
+
 export async function approveCost(
   epicId: string,
   userId: string,

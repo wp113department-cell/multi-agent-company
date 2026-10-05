@@ -139,7 +139,7 @@ After 1–5, re-run this consolidation (`python3 evidence/consolidate.py`). With
 | Audit | Real bugs it found that we had missed | Result |
 |---|---|---|
 | Antigravity (`CROSS_CHECK_ANTIGRAVITY.md`) | 0 (4 claims false; 1 phantom manifest entry removed) | 🟢 GREEN |
-| Qoder (`CROSS_CHECK_QODER.md`) | 5 High + 9 Medium + several Low: all fixed, each with a test that fails on the old code | 🟢 GREEN after fixes; 2 owner decisions (ORCH-04-103/104 epic lifecycle, SEC-05-102 policy engine v2) |
+| Qoder (`CROSS_CHECK_QODER.md`) | 5 High + 14 Medium + 13 Low fixed, each with a test | 🟢 GREEN after fixes; the 2 owner decisions were built on 2026-10-05 (ORCH-04-103/104 epic lifecycle, SEC-05-102 policy engine v2 wired into plan review) |
 
 Running the CI pipeline locally before pushing (owner rule) also caught: an unformatted file, **13 new PyJWT advisories** (upgraded 2.13.0 → 2.15.1) and **5 new npm advisories** in ESLint's dev tree (fixed; 1 unpatchable dev-only `braces` advisory ignored explicitly).
 

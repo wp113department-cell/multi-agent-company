@@ -17,10 +17,12 @@ from app.api.budget_gate import require_daily_budget
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.config import get_settings
 from app.db import get_db
 from app.db.models import DevTask, Epic, PipelineState
+from app.db.repository import resolve_epic_repo_path
 from app.event_bus.bus import publish_event
 from app.event_bus.models import GridironEvent
 from app.middleware.rbac import require_approver, require_authenticated
@@ -198,7 +200,16 @@ async def batch_review(
 
     epic_result = await db.execute(
         select(Epic)
-        .where(Epic.status.in_(["ready_for_review", "pending_cost_approval"]))
+        .where(
+            Epic.status.in_(
+                [
+                    "ready_for_review",
+                    "pending_cost_approval",
+                    "pending_plan_approval",
+                    "pending_policy_approval",
+                ]
+            )
+        )
         .order_by(Epic.created_at.asc())
     )
     epics = list(epic_result.scalars().all())
@@ -278,6 +289,13 @@ async def approve_epic(
             detail=f"Epic is in status {epic.status!r}; must be ready_for_review or pending_cost_approval to approve",
         )
 
+    push_requested = False
+    if epic.status == "ready_for_review":
+        # Epic lifecycle (Qoder ORCH-04-104): approving the finished epic now
+        # hands its child task to the same push / PR flow normal tasks use
+        # (a git_push approval in the inbox -> push_and_create_pr on approve).
+        push_requested = await _request_epic_push(epic_id, db)
+
     epic.status = "approved"
     await db.commit()
 
@@ -291,7 +309,12 @@ async def approve_epic(
         db=db,
     )
 
-    return {"epicId": epic_id, "status": "approved", "approvedBy": user_id}
+    return {
+        "epicId": epic_id,
+        "status": "approved",
+        "approvedBy": user_id,
+        "pushApprovalRequested": push_requested,
+    }
 
 
 @router.post("/{epic_id}/reject")
@@ -306,7 +329,13 @@ async def reject_epic(
     if not epic:
         raise HTTPException(status_code=404, detail=f"Epic {epic_id} not found")
 
-    if epic.status not in ("ready_for_review", "pending_cost_approval", "halted"):
+    if epic.status not in (
+        "ready_for_review",
+        "pending_cost_approval",
+        "halted",
+        "pending_plan_approval",
+        "pending_policy_approval",
+    ):
         raise HTTPException(
             status_code=409,
             detail=f"Epic is in status {epic.status!r}; cannot reject",
@@ -314,6 +343,7 @@ async def reject_epic(
 
     epic.status = "rejected"
     await db.commit()
+    await _close_epic_child(epic_id, db)
 
     await publish_event(
         GridironEvent(
@@ -365,6 +395,176 @@ async def approve_epic_cost(
     }
 
 
+async def _epic_child(epic_id: str, db: AsyncSession) -> DevTask | None:
+    result = await db.execute(
+        select(DevTask)
+        .where(DevTask.epic_id == epic_id, DevTask.status != "cancelled")
+        .order_by(DevTask.id.desc())
+    )
+    return result.scalars().first()
+
+
+async def _close_epic_child(epic_id: str, db: AsyncSession) -> None:
+    """Rejected epic: reject its child task, release its file reservations
+    and drop its worktree (Qoder ORCH-04-104: nothing did)."""
+    from app.db.repository import TransitionError, transition_task
+    from app.pipeline.file_locks import release_epic_files
+    from app.repo_tools.worktree import remove_worktree
+
+    task = await _epic_child(epic_id, db)
+    try:
+        await release_epic_files(epic_id, db)
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        logger.warning("Could not release files of epic %s", epic_id, exc_info=True)
+    if task is None:
+        return
+    try:
+        await transition_task(db, task.id, "rejected")
+        await db.commit()
+    except TransitionError:
+        await db.rollback()
+    try:
+        repo_path = resolve_epic_repo_path(
+            (
+                await db.execute(
+                    select(Epic)
+                    .options(selectinload(Epic.repo))
+                    .where(Epic.epic_id == epic_id)
+                )
+            ).scalar_one()
+        )
+        await asyncio.to_thread(remove_worktree, task.id, repo_path)
+    except Exception:
+        logger.warning("Could not remove worktree of epic %s", epic_id, exc_info=True)
+
+
+async def _request_epic_push(epic_id: str, db: AsyncSession) -> bool:
+    """Create the git-push approval for the epic's child task (same helper the
+    task path uses). Returns whether one was created."""
+    from app.api.agents import _record_git_push_approval
+    from app.repo_tools.worktree import get_diff
+
+    task = await _epic_child(epic_id, db)
+    if task is None:
+        return False
+    epic = (
+        await db.execute(
+            select(Epic).options(selectinload(Epic.repo)).where(Epic.epic_id == epic_id)
+        )
+    ).scalar_one()
+    repo_path = resolve_epic_repo_path(epic) or get_settings().target_repo_path
+    ps = (
+        await db.execute(select(PipelineState).where(PipelineState.task_id == task.id))
+    ).scalar_one_or_none()
+    subtasks = list((ps.subtasks_json if ps else None) or [])
+    files = sorted(
+        {
+            str(f.get("path"))
+            for f in ((ps.architect_plan if ps else None) or {}).get(
+                "impacted_files", []
+            )
+            if isinstance(f, dict) and f.get("path")
+        }
+    )
+    try:
+        diff = await asyncio.to_thread(get_diff, task.id, repo_path)
+    except Exception:
+        diff = ""
+    await _record_git_push_approval(
+        db, task.id, repo_path, files, diff, len(subtasks), agent_name="epic_manager"
+    )
+    return True
+
+
+async def _planned_files(epic_id: str, db: AsyncSession) -> list[str]:
+    task = await _epic_child(epic_id, db)
+    if task is None:
+        return []
+    ps = (
+        await db.execute(select(PipelineState).where(PipelineState.task_id == task.id))
+    ).scalar_one_or_none()
+    plan = (ps.architect_plan if ps else None) or {}
+    return [
+        str(f.get("path"))
+        for f in plan.get("impacted_files", [])
+        if isinstance(f, dict) and f.get("path")
+    ]
+
+
+@router.post("/{epic_id}/approve-plan", dependencies=[Depends(require_daily_budget)])
+async def approve_epic_plan(
+    epic_id: EpicId,
+    user_id: str = Depends(require_approver),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Epic lifecycle (Qoder ORCH-04-103): approve the epic's plan; coding
+    then runs from the saved plan (no re-planning)."""
+    epic = (
+        await db.execute(select(Epic).where(Epic.epic_id == epic_id))
+    ).scalar_one_or_none()
+    if not epic:
+        raise HTTPException(status_code=404, detail=f"Epic {epic_id} not found")
+    if epic.status == "pending_policy_approval":
+        raise HTTPException(
+            status_code=409,
+            detail="Protected paths still need policy approval first: "
+            + (epic.halt_reason or ""),
+        )
+    if epic.status != "pending_plan_approval":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Epic is in status {epic.status!r}; must be pending_plan_approval",
+        )
+    epic.status = "plan_approved"
+    epic.halt_reason = None
+    await db.commit()
+    await publish_event(
+        GridironEvent(
+            event_type="epic.plan_approved",
+            epic_id=epic_id,
+            payload={"approved_by": user_id},
+            emitted_by="api",
+        ),
+        db=db,
+    )
+    asyncio.create_task(_launch_epic_after_plan(epic_id))
+    return {"epicId": epic_id, "status": "plan_approved", "approvedBy": user_id}
+
+
+@router.post("/{epic_id}/reject-plan")
+async def reject_epic_plan(
+    epic_id: EpicId,
+    user_id: str = Depends(require_approver),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Reject the epic's plan: the epic and its child task are closed."""
+    epic = (
+        await db.execute(select(Epic).where(Epic.epic_id == epic_id))
+    ).scalar_one_or_none()
+    if not epic:
+        raise HTTPException(status_code=404, detail=f"Epic {epic_id} not found")
+    if epic.status not in ("pending_plan_approval", "pending_policy_approval"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Epic is in status {epic.status!r}; no plan awaiting approval",
+        )
+    epic.status = "rejected"
+    await db.commit()
+    await _close_epic_child(epic_id, db)
+    await publish_event(
+        GridironEvent(
+            event_type="epic.plan_rejected",
+            epic_id=epic_id,
+            payload={"rejected_by": user_id},
+            emitted_by="api",
+        ),
+        db=db,
+    )
+    return {"epicId": epic_id, "status": "rejected", "rejectedBy": user_id}
+
+
 @router.post("/{epic_id}/policy-approval")
 async def record_policy_approval(
     epic_id: EpicId,
@@ -384,6 +584,22 @@ async def record_policy_approval(
         file_path=body.file_path,
     )
     await db.commit()
+
+    # Epic lifecycle (SEC-05-102): once every blocking rule matching the plan
+    # is approved, the plan moves on to plan approval.
+    epic = (
+        await db.execute(select(Epic).where(Epic.epic_id == epic_id))
+    ).scalar_one_or_none()
+    if epic is not None and epic.status == "pending_policy_approval":
+        from app.agents.manager import _epic_policy_blocks
+
+        remaining = await _epic_policy_blocks(
+            await _planned_files(epic_id, db), epic_id, db
+        )
+        if not remaining:
+            epic.status = "pending_plan_approval"
+            epic.halt_reason = None
+            await db.commit()
 
     return {
         "approvalId": approval.id,
@@ -452,6 +668,49 @@ async def _launch_epic_manager(epic_id: str, goal: str) -> None:
                     .values(
                         status="halted",
                         halt_reason=f"Epic pipeline failed: {type(exc).__name__}: {exc}"[
+                            :2000
+                        ],
+                    )
+                )
+                await db2.commit()
+        except Exception:
+            logger.warning("Could not mark epic %s halted", epic_id, exc_info=True)
+
+
+async def _launch_epic_after_plan(epic_id: str) -> None:
+    """Fire-and-forget: coding + finalize for an epic whose plan was approved.
+    A crash marks the epic halted (same as _launch_epic_manager)."""
+    from app.agents.manager import run_epic_after_plan_approval
+    from app.db.session import get_async_session
+
+    try:
+        async with get_async_session() as db:
+            epic = (
+                await db.execute(
+                    select(Epic)
+                    .options(selectinload(Epic.repo))
+                    .where(Epic.epic_id == epic_id)
+                )
+            ).scalar_one()
+            await run_epic_after_plan_approval(
+                epic_id,
+                db,
+                repo_path=resolve_epic_repo_path(epic),
+                repo_id=epic.repo_id,
+            )
+    except Exception as exc:
+        logger.exception("Epic coding after plan approval failed for %s", epic_id)
+        try:
+            from sqlalchemy import update
+
+            async with get_async_session() as db2:
+                await db2.execute(
+                    update(Epic)
+                    .where(Epic.epic_id == epic_id)
+                    .where(Epic.status.in_(["plan_approved", "coding"]))
+                    .values(
+                        status="halted",
+                        halt_reason=f"Epic coding failed: {type(exc).__name__}: {exc}"[
                             :2000
                         ],
                     )

@@ -3,12 +3,22 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useParams } from "next/navigation";
-import { fetchEpic, approveEpic, rejectEpic, approveCost } from "../../../lib/api";
+import {
+  fetchEpic,
+  approveEpic,
+  rejectEpic,
+  approveCost,
+  approveEpicPlan,
+  rejectEpicPlan,
+} from "../../../lib/api";
 import { isApprover } from "../../../lib/auth";
 
 const STATUS_COLORS: Record<string, string> = {
   pending: "bg-gray-100 text-gray-700",
   pending_cost_approval: "bg-yellow-100 text-yellow-800",
+  pending_plan_approval: "bg-blue-100 text-blue-800",
+  pending_policy_approval: "bg-orange-100 text-orange-800",
+  plan_approved: "bg-indigo-100 text-indigo-800",
   planning: "bg-blue-100 text-blue-800",
   coding: "bg-indigo-100 text-indigo-800",
   ready_for_review: "bg-purple-100 text-purple-800",
@@ -32,7 +42,11 @@ export default function EpicDetailPage() {
   const [userId, setUserId] = useState("approver-1");
   const qc = useQueryClient();
 
-  const { data: epic, isLoading, error } = useQuery({
+  const {
+    data: epic,
+    isLoading,
+    error,
+  } = useQuery({
     queryKey: ["epic", epicId],
     queryFn: () => fetchEpic(epicId),
     enabled: Boolean(epicId),
@@ -53,14 +67,23 @@ export default function EpicDetailPage() {
     mutationFn: () => approveCost(epicId, userId),
     onSuccess: invalidate,
   });
+  const approvePlanMutation = useMutation({
+    mutationFn: () => approveEpicPlan(epicId, userId),
+    onSuccess: invalidate,
+  });
+  const rejectPlanMutation = useMutation({
+    mutationFn: () => rejectEpicPlan(epicId, userId),
+    onSuccess: invalidate,
+  });
 
   if (isLoading) return <p className="p-8 text-gray-500">Loading…</p>;
-  if (error || !epic)
-    return <p className="p-8 text-red-600">Failed to load epic.</p>;
+  if (error || !epic) return <p className="p-8 text-red-600">Failed to load epic.</p>;
 
   const canApprove = ["ready_for_review"].includes(epic.status);
   const canReject = ["ready_for_review", "halted", "pending_cost_approval"].includes(epic.status);
   const needsCostApproval = epic.status === "pending_cost_approval";
+  const needsPlanApproval = epic.status === "pending_plan_approval";
+  const needsPolicyApproval = epic.status === "pending_policy_approval";
 
   return (
     <main className="max-w-4xl mx-auto px-4 py-8 space-y-6">
@@ -76,7 +99,9 @@ export default function EpicDetailPage() {
       {/* Description */}
       <section className="rounded-lg border border-gray-200 dark:border-gray-700 p-4 bg-white dark:bg-gray-800">
         <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Goal</h2>
-        <p className="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap">{epic.description}</p>
+        <p className="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap">
+          {epic.description}
+        </p>
       </section>
 
       {/* Halt notice */}
@@ -109,6 +134,16 @@ export default function EpicDetailPage() {
             Cost estimate exceeds approval threshold. Approve below to start agents.
           </p>
         )}
+        {needsPlanApproval && (
+          <p className="mt-3 text-sm text-blue-700 dark:text-blue-300">
+            The plan is ready. Review the subtasks below, then approve the plan to start coding.
+          </p>
+        )}
+        {needsPolicyApproval && (
+          <p className="mt-3 text-sm text-orange-700 dark:text-orange-300">
+            {epic.haltReason ?? "The plan touches protected paths that need policy approval first."}
+          </p>
+        )}
       </section>
 
       {/* Subtasks */}
@@ -136,7 +171,12 @@ export default function EpicDetailPage() {
         <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Actions</h2>
 
         <div className="flex items-center gap-3">
-          <label htmlFor="epic-user-id" className="text-xs text-gray-500 dark:text-gray-400 shrink-0">Your User ID:</label>
+          <label
+            htmlFor="epic-user-id"
+            className="text-xs text-gray-500 dark:text-gray-400 shrink-0"
+          >
+            Your User ID:
+          </label>
           <input
             id="epic-user-id"
             className="rounded border border-gray-300 dark:border-gray-600 px-2 py-1 text-xs w-40 dark:bg-gray-700 dark:text-gray-100"
@@ -156,6 +196,26 @@ export default function EpicDetailPage() {
           >
             {approveCostMutation.isPending ? "Approving…" : "Approve Cost & Start Agents"}
           </button>
+        )}
+
+        {(needsPlanApproval || needsPolicyApproval) && isApprover() && (
+          <div className="flex gap-3">
+            <button
+              onClick={() => approvePlanMutation.mutate()}
+              disabled={approvePlanMutation.isPending || needsPolicyApproval}
+              title={needsPolicyApproval ? "Approve the protected-path policies first" : undefined}
+              className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+            >
+              {approvePlanMutation.isPending ? "Approving…" : "Approve Plan & Start Coding"}
+            </button>
+            <button
+              onClick={() => rejectPlanMutation.mutate()}
+              disabled={rejectPlanMutation.isPending}
+              className="rounded bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+            >
+              {rejectPlanMutation.isPending ? "Rejecting…" : "Reject Plan"}
+            </button>
+          </div>
         )}
 
         {(canApprove || canReject) && !isApprover() && (
@@ -183,11 +243,21 @@ export default function EpicDetailPage() {
           )}
         </div>
 
-        {(approveMutation.isError || rejectMutation.isError || approveCostMutation.isError) && (
+        {(approveMutation.isError ||
+          rejectMutation.isError ||
+          approveCostMutation.isError ||
+          approvePlanMutation.isError ||
+          rejectPlanMutation.isError) && (
           <p className="text-sm text-red-600">
-            {(
-              (approveMutation.error || rejectMutation.error || approveCostMutation.error) as Error
-            )?.message}
+            {
+              (
+                (approveMutation.error ||
+                  rejectMutation.error ||
+                  approveCostMutation.error ||
+                  approvePlanMutation.error ||
+                  rejectPlanMutation.error) as Error
+              )?.message
+            }
           </p>
         )}
       </section>

@@ -1931,6 +1931,7 @@ class EpicManagerState(TypedDict, total=False):
     worktree_path: str
     manager_result: dict[str, Any]
     package: EpicApprovalPackage
+    plan_approved: bool  # epic lifecycle: True only when resuming after approval
 
 
 async def _resource_check_node(state: EpicManagerState) -> dict[str, Any]:
@@ -2445,6 +2446,26 @@ async def _coding_node(state: EpicManagerState) -> dict[str, Any]:
     return {"worktree_path": worktree_path, "manager_result": manager_result}
 
 
+async def _settle_epic_child_task(db: Any, task_id: int, ok: bool) -> None:
+    """Epic lifecycle: the epic's child task follows the epic (ORCH-04-103 —
+    it used to stay "planning"/"coding" forever). Best-effort: a task already
+    moved by someone else is left alone."""
+    from app.db.repository import TransitionError, transition_task
+
+    try:
+        if ok:
+            await transition_task(db, task_id, "testing")
+            await transition_task(db, task_id, "ready_for_review")
+        else:
+            await transition_task(db, task_id, "blocked")
+        await db.commit()
+    except TransitionError:
+        await db.rollback()
+    except Exception:
+        await db.rollback()
+        logger.warning("Could not settle epic child task %s", task_id, exc_info=True)
+
+
 async def _finalize_node(state: EpicManagerState) -> dict[str, Any]:
     """Steps 4/5 — assemble the batched approval package (or halt), store
     the outcome in engineering memory, clear the epic's scratchpad."""
@@ -2547,6 +2568,7 @@ async def _finalize_node(state: EpicManagerState) -> dict[str, Any]:
         from app.pipeline.file_locks import release_epic_files
 
         await release_epic_files(epic_id, db)
+        await _settle_epic_child_task(db, task_id, ok=False)
         return {
             "package": EpicApprovalPackage(
                 epic_id=epic_id,
@@ -2603,6 +2625,7 @@ async def _finalize_node(state: EpicManagerState) -> dict[str, Any]:
     from app.pipeline.file_locks import release_epic_files
 
     await release_epic_files(epic_id, db)
+    await _settle_epic_child_task(db, task_id, ok=True)
 
     return {
         "package": EpicApprovalPackage(
@@ -2636,10 +2659,193 @@ def _route_after_planning(state: EpicManagerState) -> str:
     return "conflict_check"
 
 
+async def _epic_policy_blocks(
+    files: list[str], epic_id: str, db: Any
+) -> list[dict[str, Any]]:
+    """Blocking policy-engine-v2 rules matched by the planned files that have
+    no recorded approval for this epic (SEC-05-102: v2 rules were recorded
+    but never enforced)."""
+    from app.policy.engine_v2 import check_files_against_policies, has_approval
+
+    hits = await check_files_against_policies(files, db, epic_id=epic_id)
+    pending: dict[int, dict[str, Any]] = {}
+    for path, matches in hits.items():
+        for m in matches:
+            if not m.blocking:
+                continue
+            if await has_approval(m.policy_id, db, epic_id=epic_id):
+                continue
+            entry = pending.setdefault(
+                m.policy_id,
+                {
+                    "policyId": m.policy_id,
+                    "policyName": m.policy_name,
+                    "pattern": m.trigger_pattern,
+                    "role": m.required_approval_role,
+                    "files": [],
+                },
+            )
+            entry["files"].append(path)
+    return list(pending.values())
+
+
+async def _plan_review_node(state: EpicManagerState) -> dict[str, Any]:
+    """Epic lifecycle (Qoder cross-check ORCH-04-103, 2026-10-05): the plan is
+    saved on the epic's child task and the epic stops for human plan
+    approval (POST /epics/{id}/approve-plan). Before, the paused planning
+    graph's subtasks were consumed straight into coding — nobody approved an
+    epic's plan. Blocking policy-engine-v2 rules that match the planned files
+    are checked first (SEC-05-102): the epic then waits in
+    pending_policy_approval until each is approved."""
+    from sqlalchemy import update as sa_update
+
+    from app.db.models import DevTask, Epic
+    from app.db.repository import save_subtasks, update_pipeline_state
+    from app.event_bus.bus import publish_event
+    from app.event_bus.models import GridironEvent
+
+    if state.get("plan_approved"):
+        return {"stage": ""}
+
+    epic_id = state["epic_id"]
+    db = state["db"]
+    task_id = state["task_id"]
+    subtasks = state["subtasks"]
+    architect_plan = state.get("architect_plan") or {}
+    files = [
+        str(f.get("path"))
+        for f in architect_plan.get("impacted_files", [])
+        if isinstance(f, dict) and f.get("path")
+    ]
+
+    await save_subtasks(db, task_id, subtasks)
+    await update_pipeline_state(
+        db,
+        task_id,
+        "epic_plan_review",
+        architect_plan=architect_plan,
+        subtasks_json=subtasks,
+    )
+    await db.execute(
+        sa_update(DevTask)
+        .where(DevTask.id == task_id)
+        .values(plan=state.get("plan_text") or "")
+    )
+
+    blocks = await _epic_policy_blocks(files, epic_id, db)
+    if blocks:
+        status = "pending_policy_approval"
+        halt_reason = "Plan touches protected paths; approve each policy first: " + "; ".join(
+            f"{b['policyName']} ({b['pattern']}, {b['role']}): {', '.join(b['files'][:5])}"
+            for b in blocks
+        )
+    else:
+        status = "pending_plan_approval"
+        halt_reason = None
+    await db.execute(
+        sa_update(Epic)
+        .where(Epic.epic_id == epic_id)
+        .values(status=status, halt_reason=halt_reason)
+    )
+    await db.commit()
+    await publish_event(
+        GridironEvent(
+            event_type=f"epic.{status}",
+            epic_id=epic_id,
+            payload={
+                "subtask_count": len(subtasks),
+                "files": files[:50],
+                "policy_blocks": blocks,
+            },
+            emitted_by="manager",
+        ),
+        db=db,
+    )
+    return {
+        "stage": status,
+        "package": EpicApprovalPackage(
+            epic_id=epic_id,
+            status=status,
+            subtask_results=[],
+            total_files_changed=files,
+            all_diffs="",
+            all_qa_summaries=[],
+            all_review_findings=[],
+            cost_actual_usd=0.0,
+            halt_reason=halt_reason,
+        ),
+    }
+
+
+def _route_after_plan_review(state: EpicManagerState) -> str:
+    return "coding" if state.get("plan_approved") else "END"
+
+
+async def run_epic_after_plan_approval(
+    epic_id: str,
+    db: Any,
+    repo_path: str | None = None,
+    repo_id: int | None = None,
+) -> EpicApprovalPackage:
+    """Continue an epic whose plan a human approved: run coding and finalize
+    from the SAVED plan (no re-planning, no second planning cost). Holds the
+    epic slot like run_epic_manager."""
+    from sqlalchemy import select
+
+    from app.db.models import DevTask, Epic, PipelineState
+    from app.db.repository import transition_task
+    from app.pipeline.concurrency import epic_slot
+
+    settings = get_settings()
+    epic = (await db.execute(select(Epic).where(Epic.epic_id == epic_id))).scalar_one()
+    task = (
+        (
+            await db.execute(
+                select(DevTask)
+                .where(DevTask.epic_id == epic_id, DevTask.status != "cancelled")
+                .order_by(DevTask.id.desc())
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if task is None:
+        raise RuntimeError(f"epic {epic_id} has no planned child task")
+    ps = (
+        await db.execute(select(PipelineState).where(PipelineState.task_id == task.id))
+    ).scalar_one()
+    # Same status path as a normal task after plan approval.
+    await transition_task(db, task.id, "ready_for_review")
+    await transition_task(db, task.id, "coding")
+    ps.stage = "dev_running"
+    await db.commit()
+
+    state: dict[str, Any] = {
+        "epic_id": epic_id,
+        "goal": epic.description,
+        "db": db,
+        "repo_path": repo_path,
+        "repo": repo_path or settings.target_repo_path,
+        "repo_id": repo_id,
+        "settings": settings,
+        "task_id": task.id,
+        "plan_text": task.plan or epic.description,
+        "subtasks": list(ps.subtasks_json or []),
+        "architect_plan": dict(ps.architect_plan or {}),
+        "plan_approved": True,
+        "created_by": epic.created_by,
+    }
+    async with epic_slot():
+        state.update(await _coding_node(state))  # type: ignore[arg-type]
+        state.update(await _finalize_node(state))  # type: ignore[arg-type]
+    package: EpicApprovalPackage = state["package"]
+    return package
+
+
 def _route_after_conflict_check(state: EpicManagerState) -> str:
     if state.get("stage") == "halted_conflict":
         return "END"
-    return "coding"
+    return "plan_review"
 
 
 _compiled_epic_manager_graph: Any = None
@@ -2674,6 +2880,7 @@ def build_epic_manager_graph() -> Any:
     graph.add_node("cost_estimate", _cost_estimate_node)
     graph.add_node("planning", _planning_node)
     graph.add_node("conflict_check", _conflict_check_node)
+    graph.add_node("plan_review", _plan_review_node)
     graph.add_node("coding", _coding_node)
     graph.add_node("finalize", _finalize_node)
 
@@ -2696,6 +2903,11 @@ def build_epic_manager_graph() -> Any:
     graph.add_conditional_edges(
         "conflict_check",
         _route_after_conflict_check,
+        {"plan_review": "plan_review", "END": END},
+    )
+    graph.add_conditional_edges(
+        "plan_review",
+        _route_after_plan_review,
         {"coding": "coding", "END": END},
     )
     graph.add_edge("coding", "finalize")
