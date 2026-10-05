@@ -10,6 +10,7 @@ Run slow tests explicitly:
 from __future__ import annotations
 
 import json
+from typing import Any
 from pathlib import Path
 
 import pytest
@@ -177,3 +178,80 @@ class TestAgentEvals:
             f"Average eval score {avg_score:.2f} < 0.60. "
             f"Failed evals: {[r.eval_id for r in failed]}"
         )
+
+
+class TestLLMJudge:
+    """quality_checks judge (PENDING L5): parsing and score folding, LLM mocked."""
+
+    _TASK = {
+        "id": "eval_x",
+        "agent": "a",
+        "description": "do x",
+        "quality_checks": ["is actionable", "names a library"],
+    }
+
+    def _scored(self) -> Any:
+        from tests.evals.eval_runner import EvalResult
+
+        return EvalResult("eval_x", "a", True, 1.0, 3, 3, 0.0, 0, 0)
+
+    def _result(self, status: str = "completed") -> Any:
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            status=status, raw={"summary": "use slowapi"}, summary="s"
+        )
+
+    def test_verdicts_fold_into_score_and_failures(self) -> None:
+        from unittest.mock import patch
+
+        from tests.evals.eval_runner import apply_judge
+
+        reply = 'Sure: [{"check":1,"pass":true,"reason":"ok"},{"check":2,"pass":false,"reason":"none named"}]'
+        scored = self._scored()
+        with patch("tests.evals.eval_runner._judge_call", return_value=reply):
+            apply_judge(self._TASK, self._result(), scored)
+        assert (scored.checks_passed, scored.checks_total) == (4, 5)
+        assert scored.passed is False
+        assert any("names a library" in f for f in scored.failures)
+        assert [c["pass"] for c in scored.judge_checks] == [True, False]
+
+    def test_judge_failure_is_reported_not_counted(self) -> None:
+        from unittest.mock import patch
+
+        from tests.evals.eval_runner import apply_judge
+
+        scored = self._scored()
+        with patch(
+            "tests.evals.eval_runner._judge_call", side_effect=RuntimeError("429")
+        ):
+            apply_judge(self._TASK, self._result(), scored)
+        assert "429" in scored.judge_error
+        assert (scored.checks_passed, scored.checks_total, scored.passed) == (
+            3,
+            3,
+            True,
+        )
+
+    def test_wrong_verdict_count_is_a_judge_error(self) -> None:
+        from unittest.mock import patch
+
+        from tests.evals.eval_runner import apply_judge
+
+        scored = self._scored()
+        with patch(
+            "tests.evals.eval_runner._judge_call", return_value='[{"pass":true}]'
+        ):
+            apply_judge(self._TASK, self._result(), scored)
+        assert "1 verdicts for 2 checks" in scored.judge_error
+        assert scored.checks_total == 3
+
+    def test_blocked_run_is_not_judged(self) -> None:
+        from unittest.mock import patch
+
+        from tests.evals.eval_runner import apply_judge
+
+        scored = self._scored()
+        with patch("tests.evals.eval_runner._judge_call") as call:
+            apply_judge(self._TASK, self._result("blocked"), scored)
+        call.assert_not_called()

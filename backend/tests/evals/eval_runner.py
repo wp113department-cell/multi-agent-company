@@ -75,6 +75,8 @@ class EvalResult:
     failures: list[str] = field(default_factory=list)
     summary: str = ""
     status: str = "completed"
+    judge_checks: list[dict[str, Any]] = field(default_factory=list)
+    judge_error: str = ""
 
 
 def _score_result(task: dict[str, Any], result: Any) -> EvalResult:
@@ -162,6 +164,110 @@ def _score_result(task: dict[str, Any], result: Any) -> EvalResult:
 # ──────────────────────────────────────────────────────────────────────────────
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# LLM judge for quality_checks (audit 07 / PENDING L5, 2026-10-05)
+# ──────────────────────────────────────────────────────────────────────────────
+# Each task's natural-language quality_checks ("recommendations should be
+# actionable") used to be loaded and ignored. With --judge, ONE small call per
+# eval asks a cheap model to grade every check against the agent's output.
+# Backend: Groq when USE_GROQ=true (free tier), else Anthropic Haiku (the
+# process-wide spend guard applies). A judge failure never crashes the run and
+# never counts as a pass: the checks are reported as not evaluated.
+
+_JUDGE_MAX_OUTPUT_CHARS = 6000
+
+
+def _judge_prompt(task: dict[str, Any], output: str) -> str:
+    checks = "\n".join(f"{i + 1}. {c}" for i, c in enumerate(task["quality_checks"]))
+    return (
+        "You grade an AI agent's output against quality checks. Be strict: a check "
+        "passes only if the output clearly satisfies it.\n\n"
+        f"TASK GIVEN TO THE AGENT:\n{task['description']}\n\n"
+        f"AGENT OUTPUT:\n{output[:_JUDGE_MAX_OUTPUT_CHARS]}\n\n"
+        f"QUALITY CHECKS:\n{checks}\n\n"
+        "Reply with ONLY a JSON array, one object per check, in order: "
+        '[{"check": 1, "pass": true, "reason": "<one short sentence>"}]'
+    )
+
+
+def _judge_call(prompt: str) -> str:
+    from app.config import get_settings
+
+    settings = get_settings()
+    if settings.use_groq:
+        import groq
+
+        client = groq.Groq(api_key=settings.groq_api_key, max_retries=0)
+        for attempt in range(4):
+            try:
+                r = client.chat.completions.create(
+                    model=settings.groq_model_router,
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=800,
+                    temperature=0,
+                )
+                return r.choices[0].message.content or ""
+            except groq.RateLimitError:
+                if attempt == 3:
+                    raise
+                time.sleep(25)  # free tier: tokens-per-minute window
+        raise RuntimeError("unreachable")
+    import anthropic
+
+    client_a = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+    msg = client_a.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=800,
+        temperature=0,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return "".join(getattr(b, "text", "") for b in msg.content)
+
+
+def _parse_verdicts(text: str, n: int) -> list[tuple[bool, str]]:
+    start, end = text.find("["), text.rfind("]")
+    if start < 0 or end <= start:
+        raise ValueError(f"judge reply has no JSON array: {text[:200]!r}")
+    items = json.loads(text[start : end + 1])
+    if not isinstance(items, list) or len(items) != n:
+        raise ValueError(
+            f"judge returned {len(items) if isinstance(items, list) else '?'} verdicts for {n} checks"
+        )
+    return [(bool(it.get("pass")), str(it.get("reason", ""))[:200]) for it in items]
+
+
+def judge_quality_checks(
+    task: dict[str, Any], output: str
+) -> list[tuple[str, bool, str]]:
+    """Grade every quality check; raises on a judge/transport/parse failure."""
+    checks: list[str] = task.get("quality_checks", [])
+    if not checks:
+        return []
+    verdicts = _parse_verdicts(_judge_call(_judge_prompt(task, output)), len(checks))
+    return [(c, ok, why) for c, (ok, why) in zip(checks, verdicts)]
+
+
+def apply_judge(task: dict[str, Any], result: Any, scored: "EvalResult") -> None:
+    """Fold judge verdicts into an EvalResult in place (no-op for a blocked run)."""
+    if result.status == "blocked" or not task.get("quality_checks"):
+        return
+    output = json.dumps(result.raw) if result.raw else (result.summary or "")
+    try:
+        verdicts = judge_quality_checks(task, output)
+    except Exception as exc:
+        scored.judge_error = f"{type(exc).__name__}: {exc}"[:300]
+        return
+    for check, ok, why in verdicts:
+        scored.checks_total += 1
+        scored.judge_checks.append({"check": check, "pass": ok, "reason": why})
+        if ok:
+            scored.checks_passed += 1
+        else:
+            scored.failures.append(f"quality: {check} — {why}")
+    scored.score = scored.checks_passed / max(scored.checks_total, 1)
+    scored.passed = not scored.failures
+
+
 def load_tasks(task_id_filter: str | None = None) -> list[dict[str, Any]]:
     try:
         with open(_TASKS_FILE) as f:
@@ -182,6 +288,7 @@ def load_tasks(task_id_filter: str | None = None) -> list[dict[str, Any]]:
 def run_evals(
     tasks: list[dict[str, Any]],
     repo_path: str = ".",
+    judge: bool = False,
 ) -> list[EvalResult]:
     """Run evaluation tasks and return scored results."""
     results: list[EvalResult] = []
@@ -201,6 +308,8 @@ def run_evals(
             elapsed = time.monotonic() - start
 
             eval_result = _score_result(task, result)
+            if judge:
+                apply_judge(task, result, eval_result)
             eval_result.elapsed_seconds = elapsed
 
             icon = "✅" if eval_result.passed else "❌"
@@ -213,6 +322,8 @@ def run_evals(
             if eval_result.failures:
                 for f in eval_result.failures:
                     print(f"          ✗ {f}")
+            if eval_result.judge_error:
+                print(f"          ⚠ judge not evaluated: {eval_result.judge_error}")
 
         except Exception as exc:
             elapsed = time.monotonic() - start
@@ -272,12 +383,17 @@ def main() -> None:
     parser.add_argument(
         "--json-out", metavar="FILE", help="Write results as JSON to file"
     )
+    parser.add_argument(
+        "--judge",
+        action="store_true",
+        help="Grade each task's quality_checks with one cheap LLM call (Groq if USE_GROQ)",
+    )
     args = parser.parse_args()
 
     tasks = load_tasks(args.id)
     print(f"\nRunning {len(tasks)} eval(s) …")
 
-    results = run_evals(tasks, repo_path=args.repo)
+    results = run_evals(tasks, repo_path=args.repo, judge=args.judge)
     print_summary(results)
 
     if args.json_out:
