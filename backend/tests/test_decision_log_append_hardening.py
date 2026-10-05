@@ -66,11 +66,13 @@ def test_decision_log_append_appears_exactly_once_in_chat_tools() -> None:
 @pytest.mark.asyncio
 async def test_chat_agent_dispatch_no_longer_unknown_tool() -> None:
     repo = f"/tmp/td_decision_log_dispatch_{id(object())}"
-    target = _decisions_file(repo)
+    agent = _agent(repo)
+    # The chat agent passes str(Path(repo_path)) — "\\tmp\\..." on Windows —
+    # so derive the file from that exact string, not the raw POSIX literal.
+    target = _decisions_file(str(agent.root))
     if target.exists():
         target.unlink()
     try:
-        agent = _agent(repo)
         result = await agent._execute_tool(
             "decision_log_append", {"decision": "use Redis", "reason": "speed"}
         )
