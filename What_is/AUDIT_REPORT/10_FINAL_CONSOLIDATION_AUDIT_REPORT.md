@@ -134,6 +134,15 @@ After 1–5, re-run this consolidation (`python3 evidence/consolidate.py`). With
 4. **Backup freshness:** age of the newest `.dump`.
 5. **Agent concurrency vs host CPU:** `MAX_CONCURRENT_AGENT_RUNS` (4–6 recommended on a 6-core host).
 
+## Update 2026-10-05: independent cross-checks
+
+| Audit | Real bugs it found that we had missed | Result |
+|---|---|---|
+| Antigravity (`CROSS_CHECK_ANTIGRAVITY.md`) | 0 (4 claims false; 1 phantom manifest entry removed) | 🟢 GREEN |
+| Qoder (`CROSS_CHECK_QODER.md`) | 5 High + 9 Medium + several Low: all fixed, each with a test that fails on the old code | 🟢 GREEN after fixes; 2 owner decisions (ORCH-04-103/104 epic lifecycle, SEC-05-102 policy engine v2) |
+
+Running the CI pipeline locally before pushing (owner rule) also caught: an unformatted file, **13 new PyJWT advisories** (upgraded 2.13.0 → 2.15.1) and **5 new npm advisories** in ESLint's dev tree (fixed; 1 unpatchable dev-only `braces` advisory ignored explicitly).
+
 ## Coverage notes for the next review
 
 - Pattern (e), `task_id`/`trace_id`: add a direct test (audit 04).

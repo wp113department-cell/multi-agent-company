@@ -51,3 +51,5 @@ A flag is never rounded up. A check that needs something not available here is m
 | 14 | Reproducibility / Transfer | `14_REPRODUCIBILITY_TRANSFER_AUDIT_REPORT.md` | 🟡 YELLOW (2026-10-02): clean clone → README → working app, 8,892 tests, 6/6 real journeys; 2 onboarding blockers + 4 fixed; open: enforce must-change-password; owner: independent operator |
 
 The machine-readable JSON sidecars required by `00b_AUDIT_STANDARDS.md` are in `json/`.
+
+**Cross-checks (2026-10-02/05):** Antigravity 🟢 (no real bugs) · Qoder 🟢 after fixing 5 High + 12 Medium + 13 Low (`CROSS_CHECK_QODER.md`); owner decisions pending: epic lifecycle, policy engine v2.

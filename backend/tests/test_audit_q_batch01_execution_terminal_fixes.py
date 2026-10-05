@@ -152,11 +152,13 @@ class TestProcessManager:
         # Marker must not exist immediately — the dependent command is still
         # waiting on dep_pid.
         assert not marker.exists()
-        for _ in range(30):
-            if not marker.exists():
-                time.sleep(0.1)
-            else:
-                break
+        # The waiter polls `kill -0` once a second; under a loaded full-suite
+        # run that plus process start-up exceeded the old 3 s budget (flaky in
+        # 3 full runs, 2026-10-02/05). Ordering is what this test checks, so
+        # allow a generous deadline.
+        deadline = time.monotonic() + 15
+        while not marker.exists() and time.monotonic() < deadline:
+            time.sleep(0.1)
         assert marker.exists()
         for pid in (dep_pid, dependent_pid):
             process_manager.kill(pid, "KILL", procs)
