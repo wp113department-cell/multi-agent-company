@@ -102,8 +102,10 @@ def test_dependency_agent_bash_runs_real_pip_list_through_the_sandbox(
     from app.agents.tools import make_dependency_agent_handlers
 
     handlers = make_dependency_agent_handlers(str(tmp_path))
-    out = handlers["bash"]({"command": "pip list"})
-    assert "pytest" in out.lower()
+    # `pip show`, not `pip list`: the bash tool caps output at 6000 chars and
+    # the full alphabetical list can push "pytest" past it (fresh CI image).
+    out = handlers["bash"]({"command": "pip show pytest"})
+    assert "name: pytest" in out.lower()
 
 
 def test_devops_bash_runs_real_git_through_the_sandbox(tmp_path: Path) -> None:
