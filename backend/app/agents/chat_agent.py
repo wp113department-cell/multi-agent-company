@@ -4445,9 +4445,16 @@ class ChatAgent:
             await self.session.push({"type": "error", "message": msg})
             return {"stop": True, "last_error": msg}
 
+        # COST_MODE applies to chat too: it used to call model_coder (Sonnet)
+        # in every mode, ~39k input tokens per call, ~$0.35 per question in
+        # "economy" (live-AI run 2026-10-05). cap_model maps it to the
+        # profile's tier cap (Haiku in economy), unchanged in quality mode.
+        from app.fleet.cost_mode import cap_model
+
+        chat_model = cap_model(settings.model_coder, "sonnet")
         try:
             async with client.messages.stream(
-                model=settings.model_coder,
+                model=chat_model,
                 max_tokens=8192,
                 system=system_prompt,
                 messages=sdk_messages,

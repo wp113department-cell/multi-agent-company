@@ -17,6 +17,8 @@ const LIVE = process.env.LIVE_AI === "1";
 const REPO = process.env.LIVE_REPO ?? "";
 const USER = process.env.E2E_USER ?? "audit12";
 const PASS = process.env.E2E_PASS ?? "";
+// Re-check D/G against an already-coded task without paying for C+D again.
+const REUSE_TASK = Number(process.env.LIVE_TASK_ID ?? 0);
 
 test.describe.configure({ mode: "serial" });
 test.skip(!LIVE || !REPO, "live-AI journeys: set LIVE_AI=1 and LIVE_REPO (spends real tokens)");
@@ -48,6 +50,10 @@ test("C — Smart Run routes a small task; the plan waits for approval, then cod
   page,
 }) => {
   test.setTimeout(300_000);
+  if (REUSE_TASK) {
+    taskId = REUSE_TASK;
+    test.skip(true, `reusing task ${REUSE_TASK} (LIVE_TASK_ID)`);
+  }
   await login(page);
   await page.goto("/tasks");
   // "backend" + "python" route by keyword rules to ONE backend specialist
@@ -91,7 +97,7 @@ test("C — Smart Run routes a small task; the plan waits for approval, then cod
     .toBe("started");
 });
 
-test("D — the agent codes it in a worktree; the diff reaches review and push needs approval", async ({
+test("D — the agent codes it in a worktree; the committed diff is reviewed and approved", async ({
   page,
 }) => {
   test.setTimeout(600_000);
@@ -109,12 +115,15 @@ test("D — the agent codes it in a worktree; the diff reaches review and push n
   expect(task.status, "coding did not finish").toBe("ready_for_review");
   expect(task.diff ?? "").toContain("subtract");
 
-  await page.goto("/review");
-  await expect(page.getByText("live L8 subtract").first()).toBeVisible({ timeout: 30_000 });
+  // Code review happens on the task page (the Review page lists plans and
+  // epics awaiting approval, not finished diffs): the diff is shown there.
+  await page.goto(`/tasks/${taskId}`);
+  await expect(page.getByText(/def subtract/).first()).toBeVisible({ timeout: 30_000 });
 
-  // Finishing the code records a git-push approval; nothing is pushed by itself.
-  await page.goto("/approvals");
-  await expect(page.getByText(`Task #${taskId}`).first()).toBeVisible({ timeout: 30_000 });
+  // The diff is HEAD...agent/task-<id>, so it is non-empty only when the
+  // agent's work was really committed on the task branch. A git-push approval
+  // is only recorded for GitHub-cloned repos; this throwaway repo has no remote
+  // (tests must never push), so that request is not asserted here.
 
   await page.goto(`/tasks/${taskId}`);
   await page.getByRole("button", { name: "Approve & Complete" }).click();
