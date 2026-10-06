@@ -241,3 +241,22 @@ About **15 batches**. Batches 1–6 (security) are the largest and most importan
 3. A31 (execution worker image and capability health checks).
 4. Full local CI (`scratchpad/ci_full.sh`) → push → confirm GitHub CI.
 5. Batch 2 (A04, A03, A10).
+
+
+## Tomorrow morning, in this order (set by owner 2026-10-06 evening)
+
+### Step 0: finish the testing skipped during today's demo work
+Pushed today without a full local CI run: `1100c832` (UI rebrand, guided tour, Windows launcher), `d47bfc3d` (launcher PowerShell fix), `86454db7` (shallow clone and the `/workspace` folder browser). The "pending" commit `c38ebf81` (A11 part 2) had already failed GitHub CI on one test (`.env.example` missing 3 settings), which `1100c832` fixed.
+1. Start Docker on this PC, then check GitHub CI for `86454db7` and fix any failure.
+2. Run the backend tests for clone and the folder browser that couldn't run without a DB: `tests/test_b7_auth_and_agent_authorization.py` and the other files that reference `/api/repo/clone` / `workspace/browse`.
+   - Add tests for: `--depth 1` by default, `full_history=true` gives a full clone, a non-empty folder → `<folder>/<repo-name>`, and `GET /api/console/workspace/root`.
+3. Docker check of the Windows setup: `docker compose` with `WORKSPACE_DIR` pointing at a temporary folder. A clone lands in the host folder; the browser starts at `/workspace`; git works in the cloned repo (safe.directory).
+4. Full local CI (`scratchpad/ci_full.sh`) all green, then push and confirm GitHub CI is green.
+5. Ask the owner how the Windows laptop run went (launcher, clone speed, folder browser).
+
+### Step 1: continue the 58-item plan
+Resume from the "Resume note" above:
+1. Chat `run_migration` / `seed_database` → sandbox with `migration_database_url`.
+2. A31 (execution worker image).
+3. Batch 2 (A04, A03, A10).
+4. Then Batches 3–15 (the rest of A01–A44 plus G2–G14), one by one, with full CI before each push.
