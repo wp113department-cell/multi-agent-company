@@ -934,6 +934,15 @@ Rules:
 
 **Total: $3.94 of the $4 balance** (owner approved using the reserve on 2026-10-05).
 
-**All pending LLM tests ran**, except **one optional quality-mode run** (Sonnet with reflection/critique/planning, ~$0.20–0.40). It no longer fits the balance and needs a recharge; every quality-mode feature is covered by mocked tests.
+**2026-10-06 (owner topped up the balance; cap $1.00 for the day, $0.67 used):**
+
+| Item | Result | Cost |
+|---|---|---|
+| L1 decision | Owner: strict for code/plan submit tools (`STRICT_SUBMIT_TOOLS`), soft for reports. Implemented with tests | $0 |
+| eval_001 sprint_planner, after the turn-budget prompt fix | **0.55 → 0.91** (10/11) | $0.073 |
+| eval_006 bug_fix, after the turn-budget prompt fix | **0.40 → 0.60**: names the root cause now; "verified" can't pass (the bug isn't in the eval repo, so there are no tests to run), and the summary doesn't spell out the fix | $0.079 |
+| **Quality-mode run** (PM: Sonnet + planning + reflection + critique + lesson) | **3/3 pass**: big-token features verified end to end; **27× the economy cost** of the same run ($0.52 vs $0.019) | $0.517 |
+
+**No LLM test is pending.**
 
 **L1** (schema strictness): across the 22 paid run logs, exactly **one** submission broke its declared schema: `security_architect`'s `submit_threat_model` left out the required `overall_risk` (eval_008). Today it is kept with a warning. Under strict validation the agent would be asked to resubmit. One miss in ~25 agent runs (about 4%) says strict mode is affordable, but it would cost one extra call per miss. Recommendation: strict for submit tools whose output feeds code (patches, plans), soft for reports.

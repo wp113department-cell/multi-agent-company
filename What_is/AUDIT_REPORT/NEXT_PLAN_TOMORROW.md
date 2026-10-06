@@ -26,3 +26,9 @@ State on 2026-10-05 (end of day):
 - Run no paid LLM call without the owner's go.
 - Rehearse every paid test with a fake key first, and never re-run a test that already passed.
 - Never give an agent `/tmp` as a repo; it indexes it and exhausts the RAM.
+
+## Done 2026-10-06
+1. ✅ Quality-mode live run: 3/3 pass (Sonnet + all aux features), $0.52.
+2. ⚠️ Groq key: the owner rotated it in the console, but `backend/.env` still holds the old key and Groq still accepts it. Paste the new key into `.env` and revoke the old one. This is an owner action outside the code.
+3. ✅ L1: strict submit schema for code/plan tools (`STRICT_SUBMIT_TOOLS`), tests added.
+4. ✅ Weak agents: turn budget in their role prompts. sprint_planner 0.55 → 0.91, bug_fix 0.40 → 0.60.
