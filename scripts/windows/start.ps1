@@ -4,7 +4,10 @@
 # Requirements: Windows 10/11 with Docker Desktop (installed automatically
 # through winget if missing). Nothing else is needed on the PC.
 
-$ErrorActionPreference = "Stop"
+# "Continue", not "Stop": in Windows PowerShell 5.1 anything a native program
+# (docker) writes to stderr becomes an error record, and "Stop" would abort the
+# script on docker's normal progress output or on a not-ready engine.
+$ErrorActionPreference = "Continue"
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..\..")
 Set-Location $Root
 $Host.UI.RawUI.WindowTitle = "Multi Agentic Company"
@@ -37,16 +40,25 @@ if (-not $docker) {
     exit 1
 }
 
-function Test-DockerUp { docker info *> $null; return ($LASTEXITCODE -eq 0) }
+function Test-DockerUp {
+    # via cmd so docker's stderr never reaches PowerShell as an error record
+    cmd /c "docker info >nul 2>nul"
+    return ($LASTEXITCODE -eq 0)
+}
 
 if (-not (Test-DockerUp)) {
     Say "Docker Desktop is not running - starting it..." Yellow
     $dd = Join-Path $env:ProgramFiles "Docker\Docker\Docker Desktop.exe"
     if (Test-Path $dd) { Start-Process $dd | Out-Null }
+    Say "Waiting for the Docker engine (up to 5 minutes)..." Yellow
     $waited = 0
     while (-not (Test-DockerUp)) {
-        if ($waited -ge 240) {
-            Say "Docker Desktop did not start within 4 minutes. Open it manually, wait until it says 'Engine running', then run this file again." Red
+        if ($waited -ge 300) {
+            Say "The Docker engine did not become ready within 5 minutes." Red
+            Say "1. Open Docker Desktop and wait until the bottom-left says 'Engine running'." Yellow
+            Say "2. If it stays stuck: Docker Desktop > Troubleshoot (bug icon) > Restart Docker Desktop." Yellow
+            Say "3. Still stuck: open PowerShell as Administrator, run 'wsl --update' then 'wsl --shutdown'," Yellow
+            Say "   start Docker Desktop again, and run this file again." Yellow
             Read-Host "Press Enter to close"
             exit 1
         }
@@ -75,12 +87,11 @@ if (-not (Test-Path $backendEnv)) {
 } else {
     Say "backend\.env found." Green
 }
-$ComposeArgs = @("--env-file", $backendEnv, "--profile", "frontend")
 
 # ---------------------------------------------------------------- 3. Start
 Step "Building and starting the services (first run takes 5-15 minutes)"
 Say "PostgreSQL + pgvector, Redis, migrations, API, web UI"
-docker compose @ComposeArgs up -d --build
+cmd /c "docker compose --env-file backend\.env --profile frontend up -d --build 2>&1"
 if ($LASTEXITCODE -ne 0) {
     Say "Starting the services failed - see the messages above." Red
     Say "Tip: make sure ports 3000, 5432, 6379 and 8000 are free (close other databases/servers)." Yellow
@@ -102,7 +113,7 @@ for ($i = 0; $i -lt 90; $i++) {
 Write-Host ""
 if (-not $ok) {
     Say "The UI is not answering yet. Showing service status:" Yellow
-    docker compose @ComposeArgs ps
+    cmd /c "docker compose --env-file backend\.env --profile frontend ps 2>&1"
     Say "Run 'docker compose logs backend frontend' to see details." Yellow
     Read-Host "Press Enter to close"
     exit 1

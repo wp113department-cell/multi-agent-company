@@ -2,8 +2,11 @@
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..\..")
 Set-Location $Root
 Write-Host "Stopping Multi Agentic Company..." -ForegroundColor DarkYellow
-$envArgs = @()
-if (Test-Path "backend\.env") { $envArgs = @("--env-file", "backend\.env") }
-docker compose @envArgs --profile frontend down
+$ErrorActionPreference = "Continue"
+if (Test-Path "backend\.env") {
+    cmd /c "docker compose --env-file backend\.env --profile frontend down 2>&1"
+} else {
+    cmd /c "docker compose --profile frontend down 2>&1"
+}
 Write-Host "Stopped. Your data is kept; run Start-Multi-Agentic-Company.bat to start again." -ForegroundColor Green
 Read-Host "Press Enter to close"
