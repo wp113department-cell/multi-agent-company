@@ -76,3 +76,4 @@ artifacts/
 
 # Local database backups (docker compose --profile backup)
 backups/
+/workspace/

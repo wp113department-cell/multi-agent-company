@@ -508,6 +508,7 @@ export async function cloneRepo(input: {
   destPath?: string;
   branch?: string;
   token?: string;
+  fullHistory?: boolean;
 }): Promise<RepoRecord> {
   const res = await apiFetch("/api/repo/clone", {
     method: "POST",
@@ -517,6 +518,7 @@ export async function cloneRepo(input: {
       dest_path: input.destPath ?? null,
       branch: input.branch ?? null,
       token: input.token ?? null,
+      full_history: input.fullHistory ?? false,
     }),
   });
   return handleResponse<RepoRecord>(res);

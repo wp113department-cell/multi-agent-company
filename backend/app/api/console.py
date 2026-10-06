@@ -97,6 +97,22 @@ def _decode_path(encoded: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+@router.get("/workspace/root")
+async def workspace_root(
+    _actor: str = Depends(require_authenticated),
+) -> dict[str, Any]:
+    """Where the folder browser starts. `host_label` is the same folder as
+    seen on the user's own computer (e.g. C:\\Users\\me\\Documents\\
+    multi-agent-workspace when the API runs in Docker), shown in the UI."""
+    from app.config import get_settings
+
+    settings = get_settings()
+    return {
+        "root": settings.allowed_workspace_parent,
+        "host_label": settings.workspace_host_label,
+    }
+
+
 @router.post("/workspace/browse")
 async def browse_workspace(
     req: BrowseRequest, _actor: str = Depends(require_authenticated)

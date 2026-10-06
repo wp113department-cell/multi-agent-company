@@ -103,6 +103,13 @@ services:
       DEFAULT_ADMIN_PASSWORD: ${DEFAULT_ADMIN_PASSWORD:-gridiron123}
       CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:-}
       BASH_SANDBOX_ENABLED: ${BASH_SANDBOX_ENABLED:-true}
+      # Repositories live in a folder of the user's computer, mounted at
+      # /workspace (the Windows launcher uses Documents\multi-agent-workspace).
+      ALLOWED_WORKSPACE_PARENT: /workspace
+      REPOS_DIR: /workspace/repos
+      WORKSPACE_HOST_LABEL: ${WORKSPACE_HOST_LABEL:-./workspace}
+    volumes:
+      - ${WORKSPACE_DIR:-./workspace}:/workspace
     depends_on:
       db:
         condition: service_healthy

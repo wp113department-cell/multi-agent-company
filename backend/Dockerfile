@@ -12,6 +12,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN useradd --create-home --uid 10001 appuser
 
+# Repositories live on a folder mounted from the user's computer
+# (/workspace); its files are owned by a different uid than appuser, which
+# makes git refuse every command ("dubious ownership"). The mount is the
+# user's own workspace, so trust it.
+RUN git config --system --add safe.directory '*'
+
 COPY requirements.txt requirements-dev.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 

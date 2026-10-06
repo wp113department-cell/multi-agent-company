@@ -88,6 +88,15 @@ if (-not (Test-Path $backendEnv)) {
     Say "backend\.env found." Green
 }
 
+# ---------------------------------------------------------------- 2b. Workspace
+# The folder on this PC where repositories are cloned. The app sees it as
+# /workspace; the folder browser starts there.
+$Workspace = Join-Path ([Environment]::GetFolderPath("MyDocuments")) "multi-agent-workspace"
+New-Item -ItemType Directory -Force -Path $Workspace | Out-Null
+$env:WORKSPACE_DIR = $Workspace
+$env:WORKSPACE_HOST_LABEL = $Workspace
+Say "Repositories folder: $Workspace" Green
+
 # ---------------------------------------------------------------- 3. Start
 Step "Building and starting the services (first run takes 5-15 minutes)"
 Say "PostgreSQL + pgvector, Redis, migrations, API, web UI"
@@ -124,6 +133,7 @@ Say "Multi Agentic Company is running!" Green
 Say "Open:      http://localhost:3000" Green
 Say "Sign in:   admin  /  DEFAULT_ADMIN_PASSWORD from backend\.env (default: gridiron123)" Green
  Say "           On first sign-in you choose a new password." Green
+Say "Repos:     $Workspace" Green
 Say "Stop it:   double-click Stop-Multi-Agentic-Company.bat" Green
 Start-Process "http://localhost:3000"
 Write-Host ""

@@ -1121,6 +1121,10 @@ class Settings(BaseSettings):
         default="/home",
         description="Workspace paths must start with this prefix (path traversal guard for Repo Console).",
     )
+    workspace_host_label: str = Field(
+        default="",
+        description="Display-only: the host-side path of allowed_workspace_parent when the API runs in a container with that folder mounted (e.g. C:\\Users\\me\\Documents\\multi-agent-workspace). Shown in the folder browser so users know where files land on their computer.",
+    )
     git_allowed_hosts: str = Field(
         default="github.com,gitlab.com,bitbucket.org",
         description="Comma-separated list of git remote hostnames allowed for clone/push in Repo Console.",

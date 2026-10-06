@@ -39,6 +39,27 @@ async function browseDir(path: string): Promise<{ entries: DirEntry[]; is_git_re
   return res.json();
 }
 
+type WorkspaceRoot = { root: string; host_label: string };
+
+async function fetchWorkspaceRoot(): Promise<WorkspaceRoot> {
+  try {
+    const res = await fetch("/api/console/workspace/root", { headers: authHeaders() });
+    if (res.ok) return (await res.json()) as WorkspaceRoot;
+  } catch {
+    // fall through to the historical default
+  }
+  return { root: "/home", host_label: "" };
+}
+
+/** The same folder as seen on the user's computer (Docker setup), else as-is. */
+function hostPath(path: string, ws: WorkspaceRoot | null): string {
+  if (!ws?.host_label || !path.startsWith(ws.root)) return path;
+  const rel = path.slice(ws.root.length).replace(/^\/+/, "");
+  if (!rel) return ws.host_label;
+  const sep = ws.host_label.includes("\\") ? "\\" : "/";
+  return ws.host_label.replace(/[\\/]+$/, "") + sep + rel.split("/").join(sep);
+}
+
 async function makeDir(path: string): Promise<void> {
   const res = await fetch("/api/console/workspace/mkdir", {
     method: "POST",
@@ -52,7 +73,8 @@ async function makeDir(path: string): Promise<void> {
 }
 
 function DirPickerModal({ onSelect, onClose }: { onSelect: (path: string) => void; onClose: () => void }) {
-  const [currentPath, setCurrentPath] = useState("/home");
+  const [currentPath, setCurrentPath] = useState("");
+  const [ws, setWs] = useState<WorkspaceRoot | null>(null);
   const [entries, setEntries] = useState<DirEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -75,7 +97,14 @@ function DirPickerModal({ onSelect, onClose }: { onSelect: (path: string) => voi
     }
   }, []);
 
-  useState(() => { navigate("/home"); });
+  useEffect(() => {
+    void fetchWorkspaceRoot().then((r) => {
+      setWs(r);
+      void navigate(r.root);
+    });
+  }, [navigate]);
+
+  const atRoot = !!ws && currentPath.replace(/\/+$/, "") === ws.root.replace(/\/+$/, "");
 
   function parentOf(path: string) {
     const parts = path.split("/").filter(Boolean);
@@ -111,11 +140,22 @@ function DirPickerModal({ onSelect, onClose }: { onSelect: (path: string) => voi
           <h3 id="dir-picker-modal-title" className="text-sm font-semibold text-slate-900 dark:text-slate-100">Select Folder</h3>
           <button onClick={onClose} aria-label="Close dialog" className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">✕</button>
         </div>
-        <div className="flex items-center gap-1 bg-slate-50 px-4 py-2 font-mono text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-400">
-          <span className="truncate">{currentPath}</span>
+        <div className="bg-orange-50/70 px-4 py-2 dark:bg-slate-800">
+          <p className="truncate font-mono text-xs text-slate-700 dark:text-slate-300" title={hostPath(currentPath, ws)}>
+            📂 {hostPath(currentPath, ws) || "…"}
+          </p>
+          {ws?.host_label && (
+            <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+              This is your repositories folder on this computer. Choose it or any folder inside it.
+            </p>
+          )}
         </div>
         <div className="border-b border-slate-100 px-4 py-1 dark:border-slate-800">
-          <button onClick={() => navigate(parentOf(currentPath))} className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-900 dark:hover:text-slate-200">
+          <button
+            onClick={() => navigate(parentOf(currentPath))}
+            disabled={atRoot}
+            className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:text-slate-200"
+          >
             ↑ Up
           </button>
         </div>
@@ -177,7 +217,16 @@ function CloneForm({
   const [folder, setFolder] = useState("");
   const [branch, setBranch] = useState("");
   const [token, setToken] = useState("");
+  const [fullHistory, setFullHistory] = useState(false);
+  const [ws, setWs] = useState<WorkspaceRoot | null>(null);
   const [showPicker, setShowPicker] = useState(false);
+
+  useEffect(() => {
+    void fetchWorkspaceRoot().then((r) => {
+      setWs(r);
+      setFolder((f) => f || r.root);
+    });
+  }, []);
   const [cloning, setCloning] = useState(false);
   const [error, setError] = useState("");
   const [done, setDone] = useState(false);
@@ -199,6 +248,7 @@ function CloneForm({
         destPath: trimFolder,
         branch: branch.trim() || undefined,
         token: repoType === "private" ? token.trim() : undefined,
+        fullHistory,
       });
       await qc.invalidateQueries({ queryKey: ["repos"] });
       setDone(true);
@@ -282,7 +332,7 @@ function CloneForm({
               type="text"
               value={folder}
               onChange={(e) => setFolder(e.target.value)}
-              placeholder="/home/user/projects/my-project"
+              placeholder="/workspace/my-project"
               className="flex-1 rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
             />
             <button
@@ -293,8 +343,14 @@ function CloneForm({
               Browse
             </button>
           </div>
-          <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">
-            Type the full path, or click Browse to navigate and select / create a folder.
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+            Click <strong>Browse</strong> to pick or create a folder. If the folder already has files, the
+            repository is cloned into a new sub-folder named after it.
+            {ws?.host_label && folder.startsWith(ws.root) && (
+              <>
+                {" "}On this computer: <span className="font-mono">{hostPath(folder, ws)}</span>
+              </>
+            )}
           </p>
         </div>
 
@@ -313,6 +369,25 @@ function CloneForm({
             placeholder="main"
             className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
           />
+        </div>
+
+        <div className="flex items-start gap-2.5 rounded-lg border border-orange-100 bg-orange-50/50 p-3 dark:border-slate-700 dark:bg-slate-800/50">
+          <input
+            id="repo-full-history"
+            type="checkbox"
+            checked={fullHistory}
+            onChange={(e) => setFullHistory(e.target.checked)}
+            className="mt-0.5 h-4 w-4 accent-orange-600"
+          />
+          <div className="text-sm">
+            <label htmlFor="repo-full-history" className="cursor-pointer font-medium text-slate-800 dark:text-slate-200">
+              Full history
+            </label>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Off (recommended): fast clone of the latest version only. Turn on if agents need the
+              whole commit history. Large repositories can then take many minutes.
+            </p>
+          </div>
         </div>
       </div>
 
@@ -333,7 +408,7 @@ function CloneForm({
           disabled={cloning || done}
           className="flex-1 rounded-lg bg-slate-900 py-2.5 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-200"
         >
-          {cloning ? "Cloning… this may take a moment" : "Clone Repository"}
+          {cloning ? "Starting clone…" : "Clone Repository"}
         </button>
         {showCancel && onCancel && (
           <button

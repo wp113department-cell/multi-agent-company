@@ -102,6 +102,7 @@ async def _clone_and_activate(
     local_path: str,
     branch: str | None = None,
     token: str | None = None,
+    full_history: bool = False,
 ) -> None:
     global _active_repo_path
     async with get_async_session() as db:
@@ -127,6 +128,10 @@ async def _clone_and_activate(
                 # Directory doesn't exist or exists but isn't a git repo — clone fresh
                 target.mkdir(parents=True, exist_ok=True)
                 cmd = ["git", "clone"]
+                if not full_history:
+                    # Latest snapshot only: a large repository (tensorflow,
+                    # ~1 GB of history) clones in seconds instead of minutes.
+                    cmd += ["--depth", "1", "--single-branch"]
                 if branch:
                     cmd += ["-b", branch]
                 # `--` so neither the URL nor the destination can ever be
@@ -211,6 +216,7 @@ class CloneRequest(BaseModel):
     dest_path: str | None = None  # optional; auto-computed if omitted
     branch: str | None = None  # optional branch to check out
     token: str | None = None  # optional GitHub PAT for private repos
+    full_history: bool = False  # default: shallow clone (latest snapshot only)
 
 
 class RepoResponse(BaseModel):
@@ -316,6 +322,12 @@ async def clone_repo(
                     f"repos directory ({settings.repos_dir!r})."
                 ),
             )
+        # Picking an existing, non-empty folder that is not itself this
+        # repository means "clone in here": the repository gets its own
+        # sub-folder named after it instead of git refusing the clone.
+        target = Path(local_path)
+        if target.is_dir() and not (target / ".git").exists() and any(target.iterdir()):
+            local_path = str(target / name)
     else:
         local_path = str(Path(settings.repos_dir) / name)
 
@@ -354,7 +366,13 @@ async def clone_repo(
         repo_id = new_repo.id
 
     background_tasks.add_task(
-        _clone_and_activate, repo_id, url, local_path, branch, token
+        _clone_and_activate,
+        repo_id,
+        url,
+        local_path,
+        branch,
+        token,
+        bool(body.full_history),
     )
 
     result = await db.execute(select(Repo).where(Repo.id == repo_id))
