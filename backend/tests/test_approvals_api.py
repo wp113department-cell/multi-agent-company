@@ -20,6 +20,20 @@ from fastapi.testclient import TestClient
 from app.main import app
 
 _SUBMIT_TOOL_STUB_INPUT: dict[str, dict[str, Any]] = {
+    # Valid minimal answers: submit_brief / submit_architect_plan are strict
+    # (STRICT_SUBMIT_TOOLS, 2026-10-06), so a placeholder is rejected.
+    "submit_brief": {
+        "goals": ["Add the endpoint"],
+        "constraints": [],
+        "acceptance_criteria": ["Endpoint returns 200"],
+        "out_of_scope": [],
+    },
+    "submit_architect_plan": {
+        "technical_approach": "Add a route in the existing router.",
+        "impacted_files": [{"path": "backend/app/main.py", "reason": "register route"}],
+        "risks": [],
+        "risk_level": "low",
+    },
     "submit_subtasks": {
         "subtasks": [
             {

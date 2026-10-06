@@ -14,6 +14,8 @@ overrides:
   brace-expansion@1: '>=1.1.17'
   brace-expansion@2: '>=2.1.2'
   brace-expansion@5: '>=5.0.12'
+  source-map-js: '>=1.2.2'
+  postcss-selector-parser: '>=7.1.6'
 
 importers:
 
@@ -2247,8 +2249,8 @@ packages:
     peerDependencies:
       postcss: '>=8.5.25'
 
-  postcss-selector-parser@6.1.4:
-    resolution: {integrity: sha512-bIoJLOmjCO1S9XdY/DcnR5hJxvrDir1PbGChrzXG3vw0/FOliy/fA3dmdhQ441kah4gKv+TwckGzex6wNS5cnQ==}
+  postcss-selector-parser@7.1.6:
+    resolution: {integrity: sha512-7qASPzhKF2l2KLboRZux8CCTRMdGiV08vWmyKzPz22qZ7ZjQBOeY7rNzNoCLSUiftJ7HUq0GERHmxw/t0dCdMw==}
     engines: {node: '>=4'}
 
   postcss-value-parser@4.2.0:
@@ -2429,8 +2431,8 @@ packages:
   siginfo@2.0.0:
     resolution: {integrity: sha512-ybx0WO1/8bSBLEWXZvEd7gMW3Sn3JFlW3TvX1nREbDLRNQNaeNN8WK0meBwPdAaOI7TtRRRJn/Es1zhrrCHu7g==}
 
-  source-map-js@1.2.1:
-    resolution: {integrity: sha512-UXWMKhLOwVKb728IUtQPXxfYU+usdybtUrK/8uGE8CQMvrhOpwvzDBwj0QhSL7MQc7vIsISBG8VQ8+IDQxpfQA==}
+  source-map-js@1.2.2:
+    resolution: {integrity: sha512-KGj/8Y43x35aZVDtt+J4mK1hoLGHULMYfSkODJNQjNDC3oW1PqPoxMwo0pLUsWM/UEGzON/NxeHywEfNXNP3Vw==}
     engines: {node: '>=0.10.0'}
 
   stable-hash@0.0.5:
@@ -3735,7 +3737,7 @@ snapshots:
   css-tree@3.2.1:
     dependencies:
       mdn-data: 2.27.1
-      source-map-js: 1.2.1
+      source-map-js: 1.2.2
 
   css.escape@1.5.1: {}
 
@@ -4850,9 +4852,9 @@ snapshots:
   postcss-nested@6.2.0(postcss@8.5.25):
     dependencies:
       postcss: 8.5.25
-      postcss-selector-parser: 6.1.4
+      postcss-selector-parser: 7.1.6
 
-  postcss-selector-parser@6.1.4:
+  postcss-selector-parser@7.1.6:
     dependencies:
       cssesc: 3.0.0
       util-deprecate: 1.0.2
@@ -4863,7 +4865,7 @@ snapshots:
     dependencies:
       nanoid: 3.3.19
       picocolors: 1.1.1
-      source-map-js: 1.2.1
+      source-map-js: 1.2.2
 
   prelude-ls@1.2.1: {}
 
@@ -5102,7 +5104,7 @@ snapshots:
 
   siginfo@2.0.0: {}
 
-  source-map-js@1.2.1: {}
+  source-map-js@1.2.2: {}
 
   stable-hash@0.0.5: {}
 
@@ -5222,7 +5224,7 @@ snapshots:
       postcss-js: 4.1.0(postcss@8.5.25)
       postcss-load-config: 6.0.1(jiti@1.21.7)(postcss@8.5.25)(tsx@4.22.4)
       postcss-nested: 6.2.0(postcss@8.5.25)
-      postcss-selector-parser: 6.1.4
+      postcss-selector-parser: 7.1.6
       resolve: 1.22.12
       sucrase: 3.35.1
     transitivePeerDependencies:
