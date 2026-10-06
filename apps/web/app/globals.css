@@ -1,3 +1,156 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* ------------------------------------------------------------------ */
+/* Multi Agentic Company theme: white + shiny orange                  */
+/* ------------------------------------------------------------------ */
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  body {
+    background:
+      radial-gradient(1200px 600px at 100% -10%, rgba(251, 146, 60, 0.10), transparent 60%),
+      radial-gradient(900px 500px at -10% 110%, rgba(249, 115, 22, 0.07), transparent 60%),
+      #ffffff;
+    background-attachment: fixed;
+  }
+  html.dark body {
+    background:
+      radial-gradient(1200px 600px at 100% -10%, rgba(249, 115, 22, 0.12), transparent 60%),
+      #0b0f19;
+  }
+  ::selection {
+    background: rgba(249, 115, 22, 0.25);
+  }
+  :focus-visible {
+    outline: 2px solid #f97316;
+    outline-offset: 2px;
+  }
+}
+
+/* Primary (filled orange) buttons: glossy gradient, glow and a moving shine. */
+@layer components {
+  .btn-primary,
+  button[class*="bg-blue-6"],
+  button[class*="bg-indigo-6"],
+  button[class*="bg-violet-6"],
+  button[class*="bg-purple-6"],
+  button[class*="bg-orange-5"],
+  button[class*="bg-orange-6"],
+  a[class*="bg-blue-6"],
+  a[class*="bg-indigo-6"],
+  a[class*="bg-orange-6"] {
+    position: relative;
+    overflow: hidden;
+    color: #fff;
+    background-image: linear-gradient(135deg, #fdba74 0%, #fb923c 22%, #f97316 55%, #ea580c 100%);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.45),
+      0 1px 2px rgba(194, 65, 12, 0.25),
+      0 8px 20px -8px rgba(249, 115, 22, 0.65);
+    transition:
+      transform 0.15s ease,
+      box-shadow 0.2s ease,
+      filter 0.2s ease;
+  }
+  .btn-primary::after,
+  button[class*="bg-blue-6"]::after,
+  button[class*="bg-indigo-6"]::after,
+  button[class*="bg-violet-6"]::after,
+  button[class*="bg-purple-6"]::after,
+  button[class*="bg-orange-5"]::after,
+  button[class*="bg-orange-6"]::after,
+  a[class*="bg-blue-6"]::after,
+  a[class*="bg-indigo-6"]::after,
+  a[class*="bg-orange-6"]::after {
+    content: "";
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 40%;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.45), transparent);
+    transform: translateX(-120%) skewX(-20deg);
+    pointer-events: none;
+  }
+  .btn-primary:hover:not(:disabled)::after,
+  button[class*="bg-blue-6"]:hover:not(:disabled)::after,
+  button[class*="bg-indigo-6"]:hover:not(:disabled)::after,
+  button[class*="bg-violet-6"]:hover:not(:disabled)::after,
+  button[class*="bg-purple-6"]:hover:not(:disabled)::after,
+  button[class*="bg-orange-5"]:hover:not(:disabled)::after,
+  button[class*="bg-orange-6"]:hover:not(:disabled)::after,
+  a[class*="bg-blue-6"]:hover::after,
+  a[class*="bg-indigo-6"]:hover::after,
+  a[class*="bg-orange-6"]:hover::after {
+    animation: shine 0.9s ease-out;
+  }
+  .btn-primary:hover:not(:disabled),
+  button[class*="bg-blue-6"]:hover:not(:disabled),
+  button[class*="bg-indigo-6"]:hover:not(:disabled),
+  button[class*="bg-violet-6"]:hover:not(:disabled),
+  button[class*="bg-purple-6"]:hover:not(:disabled),
+  button[class*="bg-orange-5"]:hover:not(:disabled),
+  button[class*="bg-orange-6"]:hover:not(:disabled),
+  a[class*="bg-blue-6"]:hover,
+  a[class*="bg-indigo-6"]:hover,
+  a[class*="bg-orange-6"]:hover {
+    transform: translateY(-1px);
+    filter: saturate(1.08);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.5),
+      0 2px 4px rgba(194, 65, 12, 0.25),
+      0 14px 28px -10px rgba(249, 115, 22, 0.75);
+  }
+  .btn-primary:active:not(:disabled),
+  button[class*="bg-blue-6"]:active:not(:disabled),
+  button[class*="bg-orange-6"]:active:not(:disabled) {
+    transform: translateY(0);
+  }
+
+  /* Cards and panels: soft elevation on white. */
+  .card,
+  main div.rounded-xl.border,
+  main div.rounded-lg.border.bg-white,
+  div.rounded-xl.border.bg-white {
+    box-shadow:
+      0 1px 2px rgba(15, 23, 42, 0.04),
+      0 10px 28px -16px rgba(15, 23, 42, 0.18);
+  }
+
+  /* Inputs: orange focus. */
+  input:focus,
+  select:focus,
+  textarea:focus {
+    border-color: #fb923c;
+    box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.18);
+    outline: none;
+  }
+
+  .brand-gradient-text {
+    background-image: linear-gradient(135deg, #fb923c, #ea580c 60%, #c2410c);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+}
+
+@keyframes shine {
+  0% {
+    transform: translateX(-120%) skewX(-20deg);
+  }
+  100% {
+    transform: translateX(260%) skewX(-20deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

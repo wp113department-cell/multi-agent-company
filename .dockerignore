@@ -1,0 +1,25 @@
+# Build context for apps/web/Dockerfile (context: repo root).
+# Secrets never enter an image (Sol A05): inject them at runtime instead.
+**/.env
+**/.env.*
+!**/.env.example
+**/secrets/
+# Large or irrelevant to the web build
+**/node_modules
+**/.next
+**/.venv
+**/__pycache__
+**/.mypy_cache
+**/.pytest_cache
+**/.ruff_cache
+**/test-results
+**/playwright-report
+.git
+repos/
+files/
+extracted/
+backups/
+bhaskar_next/
+What_is/
+docs/
+backend/

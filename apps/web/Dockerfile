@@ -19,6 +19,12 @@ FROM base AS build
 COPY --from=deps /repo/node_modules ./node_modules
 COPY --from=deps /repo/apps/web/node_modules ./apps/web/node_modules
 COPY . .
+# next.config.mjs bakes the /api/* proxy target into the build, so it must be
+# known here: inside docker compose the backend is reachable as backend:8000
+# (Sol A29: the default localhost:8000 pointed the proxy at the frontend
+# container itself).
+ARG NEXT_PUBLIC_API_URL=http://backend:8000
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 RUN pnpm --filter @gridiron/web run build
 
 # ---- runtime ----

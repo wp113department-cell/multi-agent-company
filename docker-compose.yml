@@ -13,7 +13,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-gridiron_dev_only}
       POSTGRES_DB: gridiron_dev
     ports:
-      - "127.0.0.1:5432:5432"
+      - "127.0.0.1:${DB_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -26,7 +26,7 @@ services:
     image: redis:7-alpine
     restart: unless-stopped
     ports:
-      - "127.0.0.1:6379:6379"
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -75,13 +75,19 @@ services:
     build:
       context: ./backend
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    # All app settings (API keys, JWT secret, admin password, cost mode...)
+    # come from backend/.env when present; the `environment:` entries below
+    # win over it, so DATABASE_URL/REDIS_URL always point at these containers.
+    env_file:
+      - path: ./backend/.env
+        required: false
     # AUDIT_Q_BATCH08 §97 "Auto-restart on crash": previously only db/redis
     # had a restart policy — the core service disaster recovery is supposed
     # to protect had none, so it stayed down after any crash until an
     # operator noticed and ran `docker compose up` again.
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "127.0.0.1:${API_PORT:-8000}:8000"
     environment:
       DATABASE_URL: postgresql+asyncpg://gridiron:${POSTGRES_PASSWORD:-gridiron_dev_only}@db:5432/gridiron_dev
       REDIS_URL: redis://redis:6379/0
@@ -113,6 +119,9 @@ services:
     build:
       context: ./backend
     command: rq worker gridiron-high gridiron-default --url ${REDIS_URL:-redis://redis:6379/0} --with-scheduler
+    env_file:
+      - path: ./backend/.env
+        required: false
     restart: unless-stopped
     environment:
       DATABASE_URL: postgresql+asyncpg://gridiron:${POSTGRES_PASSWORD:-gridiron_dev_only}@db:5432/gridiron_dev
@@ -136,9 +145,11 @@ services:
       # comment for the same reasoning.
       context: .
       dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://backend:8000
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "${WEB_PORT:-3000}:3000"
     environment:
       NEXT_PUBLIC_API_URL: http://backend:8000
     depends_on:

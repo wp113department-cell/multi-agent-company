@@ -215,9 +215,17 @@ export default function ConsolePage() {
   }, [repoPath, loadGitStatus]);
 
   return (
-    <main style={{ display: "flex", gap: 16, padding: 16, minHeight: "100vh", fontFamily: "inherit" }}>
+    <main className="console-layout" style={{ gap: 16, padding: 16, minHeight: "100vh", fontFamily: "inherit" }}>
       <style>{`
-        .console-panel { border-radius: 8px; border: 1px solid #e5e7eb; padding: 14px; background: #fff; }
+        .console-layout { display: flex; }
+        .console-layout > * { min-width: 0; }
+        .console-side { width: 280px; }
+        @media (max-width: 767px) {
+          .console-layout { flex-direction: column; padding: 0 !important; }
+          .console-side { width: 100%; }
+        }
+        .console-panel { border-radius: 14px; border: 1px solid #fed7aa; padding: 14px; background: #fff;
+                         box-shadow: 0 1px 2px rgba(15,23,42,.04), 0 10px 28px -16px rgba(15,23,42,.18); }
         .console-panel h2 { font-size: 14px; font-weight: 700; margin: 0 0 12px; color: #111827; }
         .console-panel h3 { font-size: 12px; font-weight: 700; color: #6b7280;
                            text-transform: uppercase; letter-spacing: .05em; margin: 12px 0 6px; }
@@ -226,19 +234,23 @@ export default function ConsolePage() {
         .dir-entry:hover { background: #f9fafb; }
         .dir-icon { font-size: 14px; }
         .dir-name { flex: 1; }
-        .dir-action { font-size: 11px; color: #3b82f6; margin-left: auto; }
+        .dir-action { font-size: 11px; color: #ea580c; margin-left: auto; }
         .console-input { width: 100%; border-radius: 6px; border: 1px solid #d1d5db;
                         padding: 7px 10px; font-size: 13px; margin-bottom: 6px; }
-        .console-btn { padding: 6px 14px; border-radius: 6px; border: none; background: #3b82f6;
-                      color: #fff; font-weight: 600; cursor: pointer; font-size: 13px; margin-right: 6px; }
+        .console-btn { padding: 7px 14px; border-radius: 8px; border: none; color: #fff; font-weight: 600;
+                      cursor: pointer; font-size: 13px; margin-right: 6px;
+                      background-image: linear-gradient(135deg, #fdba74 0%, #fb923c 22%, #f97316 55%, #ea580c 100%);
+                      box-shadow: inset 0 1px 0 rgba(255,255,255,.45), 0 8px 20px -8px rgba(249,115,22,.65);
+                      transition: transform .15s ease, box-shadow .2s ease; }
+        .console-btn:hover:not(:disabled) { transform: translateY(-1px); }
         .console-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-        .console-btn.danger { background: #ef4444; }
-        .console-btn.green { background: #22c55e; }
-        .console-btn.orange { background: #f59e0b; }
+        .console-btn.danger { background-image: none; background: #ef4444; box-shadow: none; }
+        .console-btn.green { background-image: none; background: #16a34a; box-shadow: none; }
+        .console-btn.orange { background-image: none; background: #f59e0b; box-shadow: none; }
         .tab-bar { display: flex; gap: 4px; margin-bottom: 10px; }
         .tab { padding: 5px 12px; border-radius: 5px; border: 1px solid #e5e7eb;
                font-size: 12px; cursor: pointer; background: #f9fafb; }
-        .tab.active { background: #3b82f6; color: #fff; border-color: #3b82f6; }
+        .tab.active { background: #f97316; color: #fff; border-color: #f97316; }
         .code-out { background: #1e1e2e; color: #cdd6f4; border-radius: 6px; padding: 10px;
                    font-family: monospace; font-size: 11px; white-space: pre-wrap;
                    max-height: 300px; overflow: auto; }
@@ -252,14 +264,14 @@ export default function ConsolePage() {
           .dir-entry:hover { background: #1f2937; }
           .console-input { background: #1f2937; border-color: #374151; color: #f9fafb; }
           .tab { background: #1f2937; border-color: #374151; color: #d1d5db; }
-          .tab.active { background: #3b82f6; color: #fff; }
+          .tab.active { background: #f97316; color: #fff; }
           .git-msg { background: #022c22; border-color: #15803d; color: #d1fae5; }
           .git-msg.err { background: #450a0a; border-color: #dc2626; color: #fecaca; }
         }
       `}</style>
 
       {/* Left: File Browser + Clone */}
-      <div style={{ width: 280, flexShrink: 0, display: "flex", flexDirection: "column", gap: 12 }}>
+      <div className="console-side" style={{ flexShrink: 0, display: "flex", flexDirection: "column", gap: 12 }}>
         <div className="console-panel">
           <h2>📁 Workspace Browser</h2>
           <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>

@@ -1,0 +1,18 @@
+# Build context for backend/Dockerfile (context: ./backend).
+# Secrets never enter an image (Sol A05): docker-compose passes them at runtime.
+.env
+.env.*
+!.env.example
+secrets/
+.venv/
+venv/
+__pycache__/
+**/__pycache__/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.log
+artifacts/
+.gridiron-sandbox-py/

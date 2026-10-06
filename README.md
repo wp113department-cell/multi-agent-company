@@ -11,6 +11,19 @@ every step, and hands you back verified, ready-to-review work.
 
 **Author:** Bhaskar Barot, AI/ML Engineer
 
+> **UI name:** the web app is branded **Multi Agentic Company**.
+
+## Run on Windows (one click)
+
+1. Copy your `.env` into the project folder (or `backend\.env`; the launcher copies it to the root for you).
+2. Double-click **`Start-Multi-Agentic-Company.bat`**.
+   - If Docker Desktop is missing, it is installed with winget. Restart Windows once, then run the file again.
+   - First start builds everything (PostgreSQL + pgvector, Redis, migrations, API, web UI): 5–15 minutes.
+3. The browser opens **http://localhost:3000**. Sign in as `admin` with `DEFAULT_ADMIN_PASSWORD` (default `gridiron123`). You choose a new password on first sign-in, and a guided tour explains the menu.
+4. To stop, double-click **`Stop-Multi-Agentic-Company.bat`**. Your data is kept.
+
+Ports 3000, 5432, 6379 and 8000 must be free.
+
 ---
 
 ## Table of Contents

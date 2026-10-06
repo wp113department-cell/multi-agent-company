@@ -2,21 +2,22 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { Providers } from "./providers";
 import { NavBar } from "../components/NavBar";
+import { ProductTour } from "../components/ProductTour";
 
 export const metadata: Metadata = {
-  title: "Mission Control — Gridiron Developer Department",
-  description: "Task queue and agent activity for the Gridiron AI Developer Department.",
+  title: "Multi Agentic Company — AI software team",
+  description:
+    "Multi Agentic Company: a team of specialised AI agents that plans, codes, tests and reviews software, with humans approving every important step.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className="min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+      <body className="min-h-screen overflow-x-hidden text-slate-900 dark:text-slate-100">
         <Providers>
-          <div className="mx-auto max-w-6xl px-4 py-6">
-            <NavBar />
-            {children}
-          </div>
+          <NavBar />
+          <ProductTour />
+          <div className="mx-auto max-w-7xl px-4 pb-10 pt-6 sm:px-6">{children}</div>
         </Providers>
       </body>
     </html>
