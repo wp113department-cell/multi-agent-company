@@ -405,30 +405,50 @@ async def _run_apply_phase(
         )
         return
 
+    from app.fleet.enhancement_workspace import (
+        activate,
+        close_workspace,
+        deactivate,
+        merge_back,
+        open_workspace,
+    )
+
+    workspace = None
+    keep_branch = False
     try:
+        # Audit 15: the agent works in its own worktree/branch, never in the
+        # live working copy; a verified commit is merged back below.
+        workspace = await asyncio.to_thread(open_workspace, request_id)
+        activate(workspace)
         result = await asyncio.to_thread(apply_fn, request_id, description, trace_id)
         status = "completed" if result.status == "completed" else "failed"
-        # AUDIT_Q_BATCH18 §69 gap-closure (2026-08-12) — commit_sha existed
-        # on the model but had zero writers anywhere (grepped) until each
-        # APPLY function's own capture_commit_sha_if_verified call; this is
-        # that real write, and quality_check_status="monitoring" (only on a
-        # genuinely completed+committed apply) is what makes this row
-        # eligible for app.fleet.enhancement_rollback's scheduled check.
         commit_sha = (
             (result.raw or {}).get("commit_sha") if status == "completed" else None
         )
+        error = (
+            None if status == "completed" else "Apply phase did not verify successfully"
+        )
+        merged = False
+        if commit_sha:
+            outcome = await asyncio.to_thread(merge_back, workspace)
+            merged = outcome.merged
+            if not merged:
+                keep_branch = True
+                error = (
+                    f"Verified and committed on branch {workspace.branch} "
+                    f"({commit_sha[:10]}), but the automatic merge was refused: "
+                    f"{outcome.detail} — merge that branch yourself."
+                )
         await _mark(
             status=status,
             files_touched=list(result.files_touched or []),
-            restart_required=True,
+            restart_required=merged,
             completed_at=datetime.now(timezone.utc),
-            error=(
-                None
-                if status == "completed"
-                else "Apply phase did not verify successfully"
-            ),
+            error=error,
             commit_sha=commit_sha,
-            quality_check_status="monitoring" if commit_sha else None,
+            # Only a change that actually landed on the live branch can be
+            # monitored and auto-reverted there.
+            quality_check_status="monitoring" if merged else None,
         )
         if status == "completed":
             # Gap-closure (2026-07-23): a human-approved, data-driven fleet
@@ -464,6 +484,9 @@ async def _run_apply_phase(
             completed_at=datetime.now(timezone.utc),
         )
     finally:
+        if workspace is not None:
+            deactivate(workspace)
+            await asyncio.to_thread(close_workspace, workspace, keep_branch=keep_branch)
         _push_dashboard_event("status_changed", {"id": request_id})
 
 

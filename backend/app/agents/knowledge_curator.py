@@ -283,7 +283,10 @@ def run_knowledge_curator_apply(
     needed for that). Occasionally a curation finding also warrants a role-prompt tweak —
     write_file/git_commit_change are available for that, but should be the exception."""
     settings = get_settings()
-    repo = settings.fleet_self_repo_path
+    # Isolated worktree when called from the approve flow (audit 15).
+    from app.fleet.enhancement_workspace import apply_repo_path
+
+    repo = apply_repo_path()
     handlers = make_apply_handlers(repo)
 
     handlers["submit_fix"] = submit_fix_handler

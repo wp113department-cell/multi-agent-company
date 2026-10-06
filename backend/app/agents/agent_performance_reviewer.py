@@ -222,7 +222,10 @@ def run_agent_performance_reviewer_apply(
 ) -> AgentResult:
     """APPLY phase — write-capable, only ever called after a human approves `request_id`."""
     settings = get_settings()
-    repo = settings.fleet_self_repo_path
+    # Isolated worktree when called from the approve flow (audit 15).
+    from app.fleet.enhancement_workspace import apply_repo_path
+
+    repo = apply_repo_path()
     handlers = make_fleet_apply_handlers(repo, agent_name="agent_performance_reviewer")
 
     handlers["record_learning"] = make_record_learning_handler(

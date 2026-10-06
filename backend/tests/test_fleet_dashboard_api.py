@@ -287,7 +287,9 @@ async def test_run_apply_phase_marks_completed_on_verified_result() -> None:
         await _run_apply_phase(1, "agent_debugger", "desc", "trace-1")
 
     assert fake_row.status == "completed"
-    assert fake_row.restart_required is True
+    # No commit was produced (nothing merged), so no restart is needed
+    # (audit 15: restart_required now means "code landed on the live branch").
+    assert fake_row.restart_required is False
 
 
 @pytest.mark.asyncio
