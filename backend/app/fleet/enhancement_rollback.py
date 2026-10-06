@@ -241,7 +241,14 @@ async def check_and_handle_quality_decline(
 
     from app.services.git_service import git_revert
 
-    revert_result = await git_revert(repo_path, request.commit_sha)
+    # Explicit identity: a fresh server/container user has no git identity,
+    # and the revert commit would fail exactly when it is needed.
+    revert_result = await git_revert(
+        repo_path,
+        request.commit_sha,
+        author_name="Gridiron Fleet",
+        author_email="fleet@gridiron.local",
+    )
     if revert_result["ok"]:
         request.quality_check_status = "rolled_back"
         request.rollback_commit_sha = revert_result["revertCommitSha"]

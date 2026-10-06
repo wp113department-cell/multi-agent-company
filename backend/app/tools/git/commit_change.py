@@ -107,6 +107,24 @@ GIT_COMMIT_CHANGE_TOOL: dict[str, Any] = {
 }
 
 
+def _identity_fallback(repo_path: str) -> list[str]:
+    """`-c user.name/-c user.email` only when git has no identity for this
+    repo. A fresh server or container user has none, and every fleet APPLY
+    commit then failed ("Author identity unknown") — found when GitHub CI
+    ran the self-improvement cycle test (audit 15). A configured identity
+    always wins."""
+    probe = subprocess.run(
+        ["git", "config", "user.email"],
+        cwd=repo_path,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    if probe.returncode == 0 and probe.stdout.strip():
+        return []
+    return ["-c", "user.name=Gridiron Agent", "-c", "user.email=agent@gridiron.local"]
+
+
 def make_git_commit_change_handler(repo_path: str) -> Any:
     """Factory shared by all 4 real APPLY-phase agents (agent_debugger,
     knowledge_curator, quality_auditor, agent_performance_reviewer).
@@ -150,7 +168,7 @@ def make_git_commit_change_handler(repo_path: str) -> Any:
             if add_result.returncode != 0:
                 return f"[ERROR] git add failed: {add_result.stderr.strip()}"
             commit_result = subprocess.run(
-                ["git", "commit", "-m", message],
+                ["git", *_identity_fallback(repo_path), "commit", "-m", message],
                 cwd=repo_path,
                 capture_output=True,
                 text=True,
