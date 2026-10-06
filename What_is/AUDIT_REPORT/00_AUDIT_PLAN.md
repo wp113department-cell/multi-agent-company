@@ -50,6 +50,8 @@ A flag is never rounded up. A check that needs something not available here is m
 | 13 | Operations / DR / Lifecycle | `13_OPERATIONS_DR_LIFECYCLE_AUDIT_REPORT.md` | ✅ 🟢 GREEN (2026-10-02): drills pass, 5 fixed; daily backup service running into ./backups (owner's choice) |
 | 14 | Reproducibility / Transfer | `14_REPRODUCIBILITY_TRANSFER_AUDIT_REPORT.md` | ✅ 🟢 GREEN (2026-10-05): clean-room pass + owner set it up independently from the README (works); 6 fixed |
 
+| 15 | Self-Improvement & Meta-Agents (owner request) | `15_SELF_IMPROVEMENT_META_AGENTS_AUDIT_REPORT.md` | ✅ 🟢 GREEN (2026-10-06): barot/bhaskar/sandbox/temporary_agent + the self-improvement loop proven end to end (no Anthropic); 1 critical (sandbox could read .env) + 4 bugs fixed; 6 next tasks listed |
+
 The machine-readable JSON sidecars required by `00b_AUDIT_STANDARDS.md` are in `json/`.
 
 **Cross-checks (2026-10-02/05):** Antigravity 🟢 (no real bugs) · Qoder 🟢 after fixing 5 High + 14 Medium + 13 Low (`CROSS_CHECK_QODER.md`), including the epic lifecycle and policy engine v2 (owner decisions, built 2026-10-05).
