@@ -147,7 +147,20 @@ def test_load_test_bash_routes_through_the_sandbox_even_without_k6(
 # ---------------------------------------------------------------------------
 
 
-def test_migration_bash_reaches_the_real_database_through_the_sandbox() -> None:
+@pytest.fixture()
+def target_db(monkeypatch: pytest.MonkeyPatch) -> str:
+    """Sol A11: migrations need an explicitly configured TARGET database and
+    an explicit network opt-in. Here the test database plays the target, on
+    the host network because the test Postgres is bound to loopback."""
+    settings = get_settings()
+    monkeypatch.setattr(settings, "migration_database_url", settings.database_url)
+    monkeypatch.setattr(settings, "bash_tool_sandbox_network", {"migration": "host"})
+    return settings.database_url
+
+
+def test_migration_bash_reaches_the_real_database_through_the_sandbox(
+    target_db: str,
+) -> None:
     from app.agents.tools import make_migration_agent_handlers
 
     backend_root = str(Path(__file__).resolve().parent.parent)
@@ -163,12 +176,30 @@ def test_migration_bash_reaches_the_real_database_through_the_sandbox() -> None:
     ), f"expected the real, current alembic head ({head}) in sandboxed output, got: {out!r}"
 
 
-def test_migration_bash_network_default_is_host() -> None:
-    settings = get_settings()
-    assert settings.bash_tool_sandbox_network.get("migration") == "host"
+def test_no_bash_variant_defaults_to_host_networking() -> None:
+    """Sol A11: host networking gave repository code the platform's own
+    loopback services; no variant gets it by default any more."""
+    assert get_settings().bash_tool_sandbox_network == {}
 
 
-def test_migration_bash_never_leaks_the_db_password_in_error_output() -> None:
+def test_migration_bash_refuses_without_a_target_database(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sol A11: the platform's own DATABASE_URL is never handed to alembic
+    (repository code); with no target configured nothing runs."""
+    from app.agents.tools import make_migration_agent_handlers
+
+    monkeypatch.setattr(get_settings(), "migration_database_url", "")
+    backend_root = str(Path(__file__).resolve().parent.parent)
+    out = make_migration_agent_handlers(backend_root)["bash"](
+        {"command": "alembic current"}
+    )
+    assert out.startswith("[POLICY DENIED]") and "MIGRATION_DATABASE_URL" in out
+
+
+def test_migration_bash_never_leaks_the_db_password_in_error_output(
+    target_db: str,
+) -> None:
     """migration is the one variant that gets a real secret (DATABASE_URL,
     including the DB password) forwarded as an explicit env var into the
     sandboxed container — real, direct proof it never surfaces in the
@@ -264,9 +295,5 @@ def test_test_runner_bash_fallback_path_still_uses_host_venv(
 def test_toolchain_config_defaults() -> None:
     settings = get_settings()
     assert settings.bash_sandbox_toolchain_image == "gridiron-bash-toolchain:latest"
-    assert settings.bash_tool_sandbox_network == {
-        "test_runner": "host",
-        "qa": "host",
-        "refactor": "host",
-        "migration": "host",
-    }
+    assert settings.bash_tool_sandbox_network == {}
+    assert settings.migration_database_url == ""

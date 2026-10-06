@@ -157,9 +157,9 @@ Each batch groups items that touch the same code, so nothing is fixed twice.
 
 | Batch | Item | Title | Priority | Status | Commit / proof |
 |---|---|---|---|---|---|
-| 1 | G1 | Sweep every executing/writing/network tool | P1 | ⬜ | |
-| 1 | A01 | python_snippet and host executors → Docker | P0 | ⬜ | |
-| 1 | A11 | Job network isolated from control plane | P1 | ⬜ | |
+| 1 | G1 | Sweep every executing/writing/network tool | P1 | 🟡 code-execution part done | f9e2acf6 (local, not pushed); write/network tools left to Batches 2–3 |
+| 1 | A01 | python_snippet and host executors → Docker | P0 | 🟡 done, awaiting full CI | f9e2acf6 (local, not pushed); wiring test 13/13, tool suites 3,562 passed |
+| 1 | A11 | Job network isolated from control plane | P1 | 🟡 in progress | job sandbox no-network in f9e2acf6; bash-variant part uncommitted (see Resume note) |
 | 1 | A31 | Execution worker with toolchain | P1 | ⬜ | |
 | — | A02 | Bhaskar sandbox | P0 | 🟢 | `162f0658` · test_bhaskar_sandbox_docker.py (2026-10-06) |
 | 2 | A04 | Protected paths via symlink | P0 | ⬜ | |
@@ -221,3 +221,23 @@ Each batch groups items that touch the same code, so nothing is fixed twice.
 ## Size
 
 About **15 batches**. Batches 1–6 (security) are the largest and most important. Expect several working sessions per batch for 1, 6, 8, 9 and 11, and one each for the rest. Progress is reported after every item, and pushes happen only after a green local CI.
+
+
+## Resume note (stopped by owner, 2026-10-06 evening)
+
+**Done (committed locally as `f9e2acf6`, NOT pushed, full CI NOT yet run):**
+- A01/G1: every code-running tool (python snippet, node, run_script, run_make, run_tests, single test, type_check, cpu_profile, npm/pip, prettier) runs in a throwaway hardened container. No host fallback. Only the job's own directory is mounted. Allowlisted env, no secrets.
+- A11 (part 1): job containers have no network; only approval-gated installs use the install network.
+- Fleet APPLY self-tests run on the host via `run_trusted_on_host` (scrubbed env). This is a documented residual: they need the platform's DB.
+- New test `backend/tests/test_a01_job_sandbox_wiring.py` (13 tests) fails if any tool starts a non-docker/git process on the host.
+
+**Uncommitted work in progress (A11 part 2):** `config.py`, `agents/tools.py`, `tests/test_bash_toolchain_sandbox.py`
+- `bash_tool_sandbox_network` default is now `{}`, so test_runner/qa/refactor/migration no longer get host networking.
+- New `migration_database_url`: the migration agent never receives the platform `DATABASE_URL` and refuses when it isn't set.
+
+**Next steps tomorrow, in order:**
+1. Apply the same rule to the chat `run_migration` and `seed_database` tools (`chat_agent.py`, around lines 3730 and 3984). They still run repository code on the host via `_run_subprocess` with the platform's environment. Route them through the sandbox with `migration_database_url`.
+2. Run the bash-toolchain and bhaskar tests, then black/ruff/mypy, and commit.
+3. A31 (execution worker image and capability health checks).
+4. Full local CI (`scratchpad/ci_full.sh`) → push → confirm GitHub CI.
+5. Batch 2 (A04, A03, A10).

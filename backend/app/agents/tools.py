@@ -4319,21 +4319,28 @@ def make_migration_agent_handlers(repo_path: str) -> dict[str, Any]:
             return f"[POLICY DENIED] {policy.reason}"
         settings = get_settings()
         timeout = settings.bash_tool_timeout_seconds.get("migration", 60)
+        # Sol A11: alembic runs the repository's migrations/env.py — repo
+        # code. It gets the TARGET project's database (migration_database_url),
+        # never the platform's own DATABASE_URL, and no host networking unless
+        # the owner opts a network in explicitly.
+        if not settings.migration_database_url:
+            return (
+                "[POLICY DENIED] No target database configured for migrations: "
+                "set MIGRATION_DATABASE_URL to the target project's database "
+                "(the platform's own database is never handed to repository code)."
+            )
         try:
             # alembic (migrations/env.py) reads DATABASE_URL from the
             # environment — a sandboxed container does NOT inherit the
-            # host's env automatically (app.policy.sandbox.run_sandboxed's
-            # own docstring), so it must be forwarded explicitly. Reaching
-            # the real Postgres instance at all requires network="host"
-            # (bash_tool_sandbox_network's own default for this variant) —
-            # verified empirically: docker-compose.yml deliberately binds
-            # Postgres to 127.0.0.1 only, unreachable from a bridge-network
-            # container even via host.docker.internal routing.
+            # host's env, so the target URL is forwarded explicitly. The
+            # target DB must be reachable from the sandbox network (a
+            # loopback-only DB needs an explicit "migration" entry in
+            # bash_tool_sandbox_network — an owner decision, not a default).
             stdout, stderr, _returncode, timed_out = _run_bash_command(
                 cmd,
                 str(root),
                 timeout=timeout,
-                extra_env={"DATABASE_URL": settings.database_url},
+                extra_env={"DATABASE_URL": settings.migration_database_url},
                 image=settings.bash_sandbox_toolchain_image,
                 network=settings.bash_tool_sandbox_network.get("migration"),
             )

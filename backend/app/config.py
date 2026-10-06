@@ -1282,18 +1282,26 @@ class Settings(BaseSettings):
     # load_test, migration) — the original 5 denylist-only variants
     # (coder/chat/scoped/ai_engineer/cleanup) keep using the minimal
     # bash_sandbox_image default, unchanged.
+    migration_database_url: str = Field(
+        default="",
+        description="Sol A11: the TARGET project's database URL handed to the "
+        "migration agent's sandboxed alembic. Never the platform's own "
+        "DATABASE_URL. Empty (default): migration commands are refused with an "
+        "explanation instead of running against the control-plane database.",
+    )
     bash_sandbox_toolchain_image: str = Field(
         default="gridiron-bash-toolchain:latest",
         description="Docker image (built from docker/bash-sandbox/Dockerfile) used for the bash-tool variants that need this project's own Python/git toolchain — pytest, mypy, ruff, black, pip-audit, alembic, git all preinstalled at the exact versions this project's own requirements pin. Must be built (`docker build -t gridiron-bash-toolchain:latest -f docker/bash-sandbox/Dockerfile .`) before those variants can run inside the sandbox; app.policy.sandbox's own SandboxUnavailableError-style fail-closed behavior surfaces a clear error rather than silently falling back if the image is missing.",
     )
     bash_tool_sandbox_network: dict[str, str] = Field(
-        default_factory=lambda: {
-            "test_runner": "host",
-            "qa": "host",
-            "refactor": "host",
-            "migration": "host",
-        },
-        description="bash-tool-variant -> Docker --network override for sandboxed execution, when the variant needs to reach this deployment's own Postgres. Real, verified constraint (not a guess): docker-compose.yml deliberately binds Postgres to 127.0.0.1 only (\"host-only, not reachable from the network\" — see that file's own comment), so a default bridge-network sandboxed container cannot reach it at all, even via host.docker.internal (verified: that resolves to the bridge gateway, but the loopback-only bind still refuses the connection from there). network=host was verified to work cleanly with zero DATABASE_URL rewriting. A variant absent from this dict uses bash_sandbox_network's own default (bridge) — this is a narrow, evidence-driven exception for the specific variants whose real, legitimate functionality (running the project's own pytest suite, or applying a real migration) would otherwise break, not a blanket network-isolation downgrade for every sandboxed variant.",
+        # Sol A11 (2026-10-06): was {"test_runner"|"qa"|"refactor"|"migration":
+        # "host"} — host networking hands repository code the whole host
+        # loopback (the platform's own Postgres, Redis and API). Now empty: every
+        # variant uses bash_sandbox_network. An owner who really wants a variant
+        # on another network (e.g. a Docker network holding the TARGET project's
+        # test DB) sets it here explicitly.
+        default_factory=dict,
+        description="Explicit per-variant opt-in overrides only (default: none). Historical note: bash-tool-variant -> Docker --network override for sandboxed execution, when the variant needs to reach this deployment's own Postgres. Real, verified constraint (not a guess): docker-compose.yml deliberately binds Postgres to 127.0.0.1 only (\"host-only, not reachable from the network\" — see that file's own comment), so a default bridge-network sandboxed container cannot reach it at all, even via host.docker.internal (verified: that resolves to the bridge gateway, but the loopback-only bind still refuses the connection from there). network=host was verified to work cleanly with zero DATABASE_URL rewriting. A variant absent from this dict uses bash_sandbox_network's own default (bridge) — this is a narrow, evidence-driven exception for the specific variants whose real, legitimate functionality (running the project's own pytest suite, or applying a real migration) would otherwise break, not a blanket network-isolation downgrade for every sandboxed variant.",
     )
 
     # tool_enhance.md productionization pass, tool #2 (create_pr), P0 review
