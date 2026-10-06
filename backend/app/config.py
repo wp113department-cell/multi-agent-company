@@ -2199,8 +2199,12 @@ class Settings(BaseSettings):
         description="After this many seconds without a further failure an 'unhealthy' agent is offered one trial dispatch again (half-open); a success recovers it, a failure restarts the cooldown. 0 = an unhealthy agent stays excluded until something else recovers it.",
     )
     fleet_scan_interval_hours: float = Field(
-        default=4.0,
-        description="Hours between automatic SCAN-phase runs of the 5 fleet-enhancement agents (background loop). Set to 0 to disable the background loop entirely.",
+        default=24.0,
+        description="Hours between automatic SCAN-phase runs of the fleet self-improvement agents (background loop; 8 LLM scans per cycle). Daily by default (audit 15: every 4 h was ~48 LLM runs/day with nobody using the app). Set to 0 to disable the background loop entirely.",
+    )
+    fleet_scan_budget_fraction: float = Field(
+        default=0.5,
+        description="Background fleet scans only run while today's LLM spend is below this fraction of COST_BUDGET_DAILY_USD, so self-improvement can never use up the budget the owner's own tasks need. 1.0 = scans may use the whole cap.",
     )
 
     # barot_agent — just-in-time meta-agent. When fleet_manager.select() finds

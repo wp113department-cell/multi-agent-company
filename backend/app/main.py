@@ -141,6 +141,33 @@ async def _weekly_reindex_loop() -> None:
             logger.warning("Weekly reindex failed: %s", exc)
 
 
+def _fleet_scan_budget_exhausted(agent_name: str) -> bool:
+    """Audit 15 (2026-10-06): 8 scans every 4 h are ~48 LLM runs a day even
+    when nobody uses the app, and they draw on the same daily cap as the
+    owner's own tasks — so background self-improvement could exhaust the
+    cap and get real work refused. Each scan now runs only while today's
+    spend is below FLEET_SCAN_BUDGET_FRACTION of COST_BUDGET_DAILY_USD."""
+    settings = get_settings()
+    cap = settings.cost_budget_daily_usd
+    if cap <= 0:
+        return False
+    from app.fleet.spend_guard import spent_today
+
+    limit = cap * settings.fleet_scan_budget_fraction
+    spent = spent_today()
+    if spent >= limit:
+        logger.info(
+            "Fleet scan: skipping %s and the rest of this cycle — $%.4f spent "
+            "today >= $%.4f reserved for background scans (%.0f%% of the cap)",
+            agent_name,
+            spent,
+            limit,
+            settings.fleet_scan_budget_fraction * 100,
+        )
+        return True
+    return False
+
+
 async def _fleet_agents_scan_loop() -> None:
     """Day 9 — periodic SCAN phase for the fleet self-improvement agents.
 
@@ -211,6 +238,8 @@ async def _fleet_agents_scan_loop() -> None:
     while True:
         await asyncio.sleep(interval_hours * 60 * 60)
         for agent_name, module_path, fn_name in scan_fns:
+            if _fleet_scan_budget_exhausted(agent_name):
+                break
             try:
                 import importlib
 
