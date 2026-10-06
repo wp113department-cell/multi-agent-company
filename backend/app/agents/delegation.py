@@ -109,6 +109,20 @@ class DelegationResult:
     child_ancestry: tuple[str, ...] = field(default_factory=tuple)
 
 
+NEW_CAPABILITY_TOKEN = "*new*"
+
+
+def _is_genuine_capability_gap(capability: str) -> bool:
+    """True when no registered (static) agent declares `capability`."""
+    from app.fleet.capability_registry import (
+        ensure_all_agents_registered,
+        get_capability_registry,
+    )
+
+    ensure_all_agents_registered()
+    return not get_capability_registry().find_by_capability(capability)
+
+
 def _build_adapter_registry() -> dict[str, Callable[[int, str, str], AgentResult]]:
     """Lazily imports each target agent's real run_*() function — deferred
     so importing this module doesn't eagerly pull in the whole agent
@@ -212,6 +226,16 @@ def delegate(request: DelegationRequest) -> DelegationResult:
         )
 
     allowed_targets = settings.delegation_allowed_matrix.get(request.source_agent, [])
+    if (
+        request.target_capability not in allowed_targets
+        and NEW_CAPABILITY_TOKEN in allowed_targets
+        and _is_genuine_capability_gap(request.target_capability)
+    ):
+        # "*new*" (audit 15): the source may ask for a capability NO static
+        # agent declares — select() then hands that gap to barot_agent, which
+        # spawns a short-lived, read-only temporary_agent for it. Existing
+        # capabilities still need an explicit entry.
+        allowed_targets = [*allowed_targets, request.target_capability]
     if request.target_capability not in allowed_targets:
         raise DelegationNotAllowedError(
             f"{request.source_agent!r} is not allowed to delegate to capability "

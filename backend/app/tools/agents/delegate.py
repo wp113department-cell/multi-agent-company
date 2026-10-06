@@ -83,7 +83,12 @@ DELEGATE_TO_AGENT_TOOL: dict[str, Any] = {
         "properties": {
             "target_capability": {
                 "type": "string",
-                "description": "The capability to delegate to, e.g. 'security_review'.",
+                "description": (
+                    "The capability to delegate to, e.g. 'security_review'. If no "
+                    "agent in the fleet has the capability you need, name it anyway "
+                    "(a short snake_case name, e.g. 'csv_schema_inference'): when "
+                    "allowed, a short-lived read-only specialist is created for it."
+                ),
             },
             "objective": {
                 "type": "string",

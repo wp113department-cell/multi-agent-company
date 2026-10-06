@@ -1495,9 +1495,11 @@ class Settings(BaseSettings):
     )
     delegation_allowed_matrix: dict[str, list[str]] = Field(
         default_factory=lambda: {
-            "backend_dev": ["security_review", "research_spike"],
-            "frontend_dev": ["security_review", "research_spike"],
-            "bug_fix": ["security_review"],
+            # "*new*" = may ask for a capability no static agent has; barot_agent
+            # then spawns a short-lived read-only temporary_agent (audit 15).
+            "backend_dev": ["security_review", "research_spike", "*new*"],
+            "frontend_dev": ["security_review", "research_spike", "*new*"],
+            "bug_fix": ["security_review", "*new*"],
         },
         description="source agent_name -> list of target capabilities (not agent names) it may delegate to. An agent absent from this dict, or requesting a capability not listed for it, is refused (DelegationNotAllowedError). Deliberately a small, explicit allow-list, not all-to-all — expanding it is a config-only change.",
     )
