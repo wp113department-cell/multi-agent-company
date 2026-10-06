@@ -410,6 +410,128 @@ def _build_script(code: str, sandbox_dir: str, allow_network: bool) -> str:
     return fs_guard + "\n" + net_guard + "\n" + code
 
 
+_DOCKER_WORKDIR = "/workspace"
+
+
+def _run_in_docker(
+    script: str,
+    *,
+    timeout: int,
+    allow_network: bool,
+    max_memory_mb: int,
+    max_total_disk_mb: int,
+    max_processes: int,
+    max_output_chars: int,
+) -> dict[str, Any]:
+    """OS-level isolation for synthesized scripts (audit 15, 2026-10-06).
+
+    The in-process mode's file guards are Python-level hooks: `_io.FileIO`
+    and `ctypes` read the project's backend/.env (API keys) straight past
+    them, and with network allowed a script could send them out. Here the
+    script runs in a throwaway container that has NO host path mounted at
+    all — the project, .env and ~/.ssh simply do not exist inside it — as a
+    non-root user, with a read-only root filesystem, every capability
+    dropped, no-new-privileges, and memory/pid/CPU limits enforced by the
+    kernel. Its only writable space is a size-capped tmpfs, so the disk
+    quota is hard rather than polled. The Python guards still run inside the
+    container as a second layer. The code arrives on stdin (nothing is
+    written on the host). Never raises; refuses (success=False) when Docker
+    is unavailable rather than silently falling back to a weaker sandbox.
+    """
+    from app.config import get_settings
+    from app.policy.sandbox import _docker_available
+
+    if not _docker_available():
+        return {
+            "success": False,
+            "output": (
+                "[ERROR] sandbox unavailable: Docker is not reachable, and the "
+                "isolated sandbox refuses to fall back to host execution "
+                "(set BHASKAR_TOOL_SANDBOX_BACKEND=process to opt into the "
+                "weaker in-process sandbox explicitly)."
+            ),
+            "returncode": None,
+        }
+    import uuid
+
+    name = f"gridiron-bhaskar-{uuid.uuid4().hex[:12]}"
+    cmd = [
+        "docker",
+        "run",
+        "--rm",
+        "-i",
+        "--name",
+        name,
+        f"--network={'bridge' if allow_network else 'none'}",
+        f"--memory={max_memory_mb}m",
+        f"--memory-swap={max_memory_mb}m",
+        f"--pids-limit={max(8, max_processes)}",
+        "--cpus=1.0",
+        "--read-only",
+        "--cap-drop=ALL",
+        "--security-opt=no-new-privileges",
+        "--tmpfs",
+        f"{_DOCKER_WORKDIR}:size={max_total_disk_mb}m,mode=1777",
+        "--tmpfs",
+        "/tmp:size=16m,mode=1777",
+        "--user",
+        f"{os.getuid()}:{os.getgid()}" if hasattr(os, "getuid") else "1000:1000",
+        "-e",
+        f"HOME={_DOCKER_WORKDIR}",
+        "-e",
+        f"TMPDIR={_DOCKER_WORKDIR}",
+        "-e",
+        "PYTHONDONTWRITEBYTECODE=1",
+        "-e",
+        "GPG_KEY=",  # the python base image's public signing-key id; not needed
+        "-w",
+        _DOCKER_WORKDIR,
+        get_settings().bash_sandbox_toolchain_image,
+        "timeout",
+        "-s",
+        "KILL",
+        str(timeout),
+        "python",
+        "-",
+    ]
+    started = time.monotonic()
+    try:
+        proc = subprocess.run(
+            cmd,
+            input=script,
+            capture_output=True,
+            text=True,
+            timeout=timeout + 30,  # container start-up on top of the script's own limit
+        )
+    except subprocess.TimeoutExpired:
+        subprocess.run(["docker", "kill", name], capture_output=True, timeout=15)
+        return {
+            "success": False,
+            "output": f"[ERROR] sandboxed script timed out after {timeout}s",
+            "returncode": None,
+        }
+    except Exception as exc:
+        return {
+            "success": False,
+            "output": f"[ERROR] sandbox failed to start: {exc}",
+            "returncode": None,
+        }
+    if proc.returncode in (124, 137) and time.monotonic() - started >= timeout:
+        return {
+            "success": False,
+            "output": f"[ERROR] sandboxed script timed out after {timeout}s",
+            "returncode": proc.returncode,
+        }
+    output = (proc.stdout + proc.stderr)[:max_output_chars] or "(no output)"
+    if proc.returncode == 137:
+        output = "[ERROR] sandboxed script was killed (memory limit)\n" + output
+    return {
+        "success": proc.returncode == 0,
+        "output": output,
+        "returncode": proc.returncode,
+    }
+
+
 def run_sandboxed_python(
     code: str,
     *,
@@ -421,6 +543,7 @@ def run_sandboxed_python(
     max_output_chars: int = 4000,
     max_total_disk_mb: int = 50,
     max_processes: int = 32,
+    backend: str | None = None,
 ) -> dict[str, Any]:
     """Run `code` in an isolated subprocess and return
     {"success": bool, "output": str, "returncode": int | None}. Never
@@ -435,6 +558,20 @@ def run_sandboxed_python(
     breach — not just the direct child, so a script that spawns its own
     subprocess cannot outlive its parent past the deadline."""
     timeout = max(1, int(timeout))
+    if backend is None:
+        from app.config import get_settings
+
+        backend = get_settings().bhaskar_tool_sandbox_backend
+    if backend == "docker":
+        return _run_in_docker(
+            _build_script(code, _DOCKER_WORKDIR, allow_network),
+            timeout=timeout,
+            allow_network=allow_network,
+            max_memory_mb=max_memory_mb,
+            max_total_disk_mb=max_total_disk_mb,
+            max_processes=max_processes,
+            max_output_chars=max_output_chars,
+        )
     sandbox_dir = tempfile.mkdtemp(prefix="bhaskar_tool_")
     try:
         script_path = Path(sandbox_dir) / "script.py"

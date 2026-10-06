@@ -89,6 +89,10 @@ os.environ.setdefault("PIPELINE_MODE", "full")
 # The owner's .env caps real spend at $1/day; the suite was written against
 # the $25 default and must not depend on the local cap.
 os.environ.setdefault("COST_BUDGET_DAILY_USD", "25")
+# bhaskar_tool's sandbox defaults to Docker in production (audit 15). The
+# existing sandbox tests pin the in-process backend they were written for;
+# tests/test_bhaskar_sandbox_docker.py covers the Docker isolation itself.
+os.environ.setdefault("BHASKAR_TOOL_SANDBOX_BACKEND", "process")
 # The owner's .env has a real SENTRY_DSN (2026-10-02). Test runs start the app
 # (TestClient lifespan) and tear connections down abruptly, which sent test
 # noise to the real Sentry project ("unexpected connection_lost() call").

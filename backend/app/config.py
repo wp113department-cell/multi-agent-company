@@ -1852,6 +1852,10 @@ class Settings(BaseSettings):
         default=4000,
         description="Max characters of captured stdout/stderr returned from a sandboxed script run — matches this codebase's existing run_python_snippet truncation convention (5000 chars) at a slightly tighter bound appropriate to a short single-purpose script.",
     )
+    bhaskar_tool_sandbox_backend: str = Field(
+        default="docker",
+        description="Where synthesized scripts run. 'docker' (default): a throwaway container with no host files mounted, non-root, read-only root, all capabilities dropped, kernel memory/pid/CPU limits and a size-capped tmpfs; refuses to run if Docker is unavailable. 'process': the older in-process sandbox (Python-level file/network guards plus rlimits) — audit 15 (2026-10-06) showed its file guard can be bypassed via _io.FileIO/ctypes to read backend/.env, so use it only where Docker cannot run.",
+    )
     bhaskar_tool_sandbox_allow_network: bool = Field(
         default=True,
         description="Whether sandboxed scripts may make outbound HTTP(S) connections at all. When true, every connection attempt is still individually validated by the injected network guard (app/agents/bhaskar_sandbox.py) — resolved once, every address checked (IPv4/IPv6, including IPv4-mapped IPv6) against the same private/loopback/link-local/reserved-range denylist app/agents/tool_security.py's _ssrf_denial_reason already enforces for fetch_url/check_url_status, then connected via a pinned validated IP rather than a second DNS lookup — set false to disable network entirely for an extra-cautious deployment. Left true by default because bhaskar_tool's own stated purpose (e.g. scraping a public site) requires it; the guard itself, not this flag, is what carries the security weight.",
