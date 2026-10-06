@@ -113,8 +113,12 @@ def test_a_verified_script_is_cached_and_replayed_without_the_model() -> None:
         "tokens_in": 0,
         "tokens_out": 0,
     }
+    import uuid
+
+    # Unique per run: the cache is persistent (a fixed task would already be
+    # cached from an earlier run and never reach the generator).
     task = {
-        "task_description": "sum of squares 1..10 (audit15 cache probe)",
+        "task_description": f"sum of squares 1..10 ({uuid.uuid4().hex})",
         "context": "",
     }
     with patch.object(bt, "_run_with_process_bound", return_value=generated) as gen:
