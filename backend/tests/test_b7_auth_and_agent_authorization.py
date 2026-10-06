@@ -912,7 +912,9 @@ def test_code_running_tools_do_not_hand_platform_secrets_to_the_code_they_run(
             "code": "import os\nprint(sorted(k for k in os.environ if 'KEY' in k or 'SECRET' in k or 'DATABASE' in k), os.environ.get('MY_PLAIN_SETTING'), 'PATH' in os.environ)"
         }
     )
-    assert py.strip() == "[] keep-me True", py
+    # A01: the job sandbox gets an allowlisted environment, so unrelated
+    # host variables (here MY_PLAIN_SETTING) no longer reach the code either.
+    assert py.strip() == "[] None True", py
 
 
 def test_safe_env_drops_credential_shaped_names_and_keeps_the_rest() -> None:

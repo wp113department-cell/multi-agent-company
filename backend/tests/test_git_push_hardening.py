@@ -354,7 +354,10 @@ async def test_npm_install_runs_for_real_when_approved(tmp_path: Path) -> None:
 
     with (
         patch.object(agent, "_confirm", new=AsyncMock(return_value=True)),
-        patch("subprocess.run", return_value=_FakeResult()) as mock_run,
+        # A01: npm runs in the job sandbox; stub its entry point
+        patch(
+            "app.tools.execution.safe_subprocess.run", return_value=_FakeResult()
+        ) as mock_run,
     ):
         result = await agent._execute_tool("npm_install", {"directory": "."})
 
@@ -394,7 +397,7 @@ async def test_npm_run_was_previously_unknown_tool_now_dispatches_without_confir
 
     with (
         patch.object(agent, "_confirm", new=AsyncMock()) as mock_confirm,
-        patch("subprocess.run", return_value=_FakeResult()),
+        patch("app.tools.execution.safe_subprocess.run", return_value=_FakeResult()),
     ):
         result = await agent._execute_tool("npm_run", {"script": "build"})
 

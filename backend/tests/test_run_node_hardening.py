@@ -78,8 +78,16 @@ def _spy_timeout_for_node(captured: dict) -> None:
     real_run = subprocess.run
 
     def spy(*args, **kwargs):
-        if args and isinstance(args[0], str) and args[0].startswith("node -e"):
+        cmd = args[0] if args else None
+        if isinstance(cmd, str) and cmd.startswith("node -e"):  # host run
             captured["timeout"] = kwargs.get("timeout")
+        elif (  # A01 job sandbox: the deadline is the in-container `timeout -s KILL N`
+            isinstance(cmd, list)
+            and cmd[:2] == ["docker", "run"]
+            and "node -e" in cmd[-1]
+            and "KILL" in cmd
+        ):
+            captured["timeout"] = int(cmd[cmd.index("KILL") + 1])
         return real_run(*args, **kwargs)
 
     return spy

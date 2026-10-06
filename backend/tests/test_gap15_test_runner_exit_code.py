@@ -17,6 +17,7 @@ under test.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -110,7 +111,7 @@ async def test_run_subprocess_fail_on_nonzero_exit_true_flags_real_failure(
 ) -> None:
     _write_failing_test(tmp_path)
     out = _run_subprocess(
-        "python -m pytest test_fail.py --tb=short -q",
+        f"{sys.executable} -m pytest test_fail.py --tb=short -q",
         str(tmp_path),
         fail_on_nonzero_exit=True,
     )

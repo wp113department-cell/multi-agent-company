@@ -106,6 +106,15 @@ def _build_command(
 
     if runner == "pytest":
         cmd = f"cd {repo_path} && {activate_snippet} && python -m pytest {qpath} {flags} --tb=short -q 2>&1"
+    elif (
+        runner in ("npm_test", "tsc")
+        and path
+        and not _inside_workspace(path, repo_path)
+    ):
+        return None, (
+            "[POLICY DENIED] path must be inside the workspace "
+            f"({Path(repo_path).parent})"
+        )
     elif runner == "npm_test":
         target = web_path if not path else qpath
         cmd = f"cd {target} && npm test {flags} 2>&1"
@@ -115,6 +124,14 @@ def _build_command(
     else:
         return None, f"[ERROR] Unknown runner: {runner}"
     return cmd, None
+
+
+def _inside_workspace(path: str, repo_path: str) -> bool:
+    """npm/tsc runs `cd <path>`; that directory is what the job sandbox
+    mounts, so it must stay inside the workspace (repo + its siblings)."""
+    root = Path(repo_path).parent.resolve()
+    target = (Path(repo_path) / path).resolve()
+    return target == root or root in target.parents
 
 
 def run_tests_handler(

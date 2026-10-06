@@ -7433,9 +7433,18 @@ def make_fleet_apply_handlers(
         # pytest ever runs. `&& ... || true &&` matches
         # make_chat_handlers.run_tests's already-working pattern, which
         # degrades safely on both shells.
-        cmd = f"cd {repo_path} && {_venv_activate_snippet()} && python -m pytest {_shlex.quote(path)} {flags} -q --tb=short 2>&1"
+        # Fleet APPLY re-runs the PLATFORM's own suite (human-approved
+        # change, isolated worktree): it needs the platform's dependencies
+        # and database, so it runs on the host with a scrubbed environment
+        # (run_trusted_on_host), not in the job sandbox. The worktree has no
+        # .venv of its own, so the platform's interpreter is the default.
+        repo_py = Path(repo_path) / ".venv" / "bin" / "python"
+        py = _shlex.quote(str(repo_py) if repo_py.exists() else sys.executable)
+        cmd = f"cd {_shlex.quote(repo_path)} && {_venv_activate_snippet()} && {py} -m pytest {_shlex.quote(path)} {flags} -q --tb=short 2>&1"
+        from app.tools.execution.safe_subprocess import run_trusted_on_host
+
         try:
-            r = subprocess.run(
+            r = run_trusted_on_host(
                 cmd, shell=True, capture_output=True, text=True, timeout=180
             )
             out = (r.stdout or r.stderr or "(no output)")[-3000:]

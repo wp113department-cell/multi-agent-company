@@ -73,7 +73,7 @@ closing finding #3.
 from __future__ import annotations
 
 import shlex
-import subprocess
+from app.tools.execution import safe_subprocess as subprocess
 from typing import Any
 
 
@@ -91,8 +91,10 @@ def cpu_profile_handler(repo_path: str, inp: dict[str, Any]) -> str:
         tokens = tokens[1:]
 
     try:
+        # The profiled script is repository code: job sandbox (Sol A01/G1).
         r = subprocess.run(
-            ["python", "-m", "cProfile", "-s", "cumulative"] + tokens,
+            shlex.join(["python", "-m", "cProfile", "-s", "cumulative"] + tokens),
+            shell=True,
             capture_output=True,
             text=True,
             cwd=repo_path,

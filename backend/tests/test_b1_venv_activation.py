@@ -70,20 +70,29 @@ def test_failed_cd_still_short_circuits_the_command(tmp_path) -> None:
     assert "SHOULD-NOT-RUN" not in r.stdout
 
 
-def test_run_tests_handler_uses_the_target_repos_own_python(tmp_path) -> None:
-    """End to end through the real tool: a repo-local interpreter earlier on
-    PATH (via activation) must be what `python` resolves to."""
+def test_run_tests_handler_runs_in_the_job_sandbox_not_the_host_venv(tmp_path) -> None:
+    """A01: run_tests executes inside the job sandbox. A host-built .venv
+    (whose binaries are linked against the host and may be hostile repo
+    content) is masked; the image's own interpreter runs pytest, and a real
+    test in the repo is collected and passes."""
     from app.agents.tools import _venv_activate_snippet
+    from app.policy.sandbox import _docker_available
     from app.tools.execution.run_tests import run_tests_handler
 
+    if not _docker_available():
+        pytest.skip("needs Docker (job sandbox)")
     _fake_venv(tmp_path)
     fake_python = tmp_path / ".venv" / "bin" / "python"
     fake_python.write_text('#!/bin/sh\necho REPO-VENV-PYTHON-RAN "$@"\n')
     fake_python.chmod(0o755)
+    (tmp_path / "test_ok.py").write_text(
+        "import sys\n\ndef test_ok():\n    assert sys.executable.startswith('/usr/local/bin')\n"
+    )
     out = run_tests_handler(
         str(tmp_path), {"runner": "pytest"}, activate_snippet=_venv_activate_snippet()
     )
-    assert "REPO-VENV-PYTHON-RAN" in out, out
+    assert "REPO-VENV-PYTHON-RAN" not in out, out
+    assert "1 passed" in out, out
 
 
 def test_no_bashism_source_left_in_activation_code() -> None:

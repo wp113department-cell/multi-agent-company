@@ -95,23 +95,14 @@ RUN_NODE_TOOL = {
 }
 
 
-def _node_available() -> bool:
-    for binary in ("node", "nodejs"):
-        check = subprocess.run(["which", binary], capture_output=True, text=True)
-        if check.returncode == 0:
-            return True
-    return False
-
-
 def run_node_handler(repo_path: str, inp: dict[str, Any]) -> str:
     """Core run_node logic shared by both real call sites."""
     code = str(inp["code"])
     raw_timeout = int(inp.get("timeout", 30))
     timeout = max(1, min(raw_timeout, MAX_RUN_NODE_TIMEOUT_SECONDS))
 
-    if not _node_available():
-        return "[ERROR] Node.js not found. Install via nvm or your package manager."
-
+    # Node comes from the job-sandbox image (A01), not the host: no host
+    # `which node` probe any more.
     try:
         r = subprocess.run(
             f"node -e {shlex.quote(code)} 2>&1",

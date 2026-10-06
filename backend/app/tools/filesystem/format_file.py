@@ -69,7 +69,10 @@ structurally rather than by adding more quoting.
 
 from __future__ import annotations
 
+import shlex
 import subprocess
+
+from app.tools.execution import safe_subprocess as _job_sandbox
 import sys
 from pathlib import Path
 from typing import Any
@@ -134,8 +137,11 @@ def format_file_handler(root: Path, worktree_path: str, inp: dict[str, Any]) -> 
                 timeout=30,
             )
         elif formatter == "prettier":
-            r = subprocess.run(
-                ["npx", "prettier", "--write", str(target)],
+            # prettier configs can be JavaScript (repository code): job
+            # sandbox (Sol A01/G1). ruff/black above don't execute repo code.
+            r = _job_sandbox.run(
+                shlex.join(["npx", "prettier", "--write", str(target)]),
+                shell=True,
                 capture_output=True,
                 text=True,
                 cwd=str(root),

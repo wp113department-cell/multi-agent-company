@@ -65,7 +65,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import shlex
 import subprocess
+
+from app.tools.execution import safe_subprocess as _job_sandbox
 import sys
 import threading
 import time
@@ -3076,8 +3079,12 @@ class ChatAgent:
 
             def _run_npm_install() -> str:
                 try:
-                    r = subprocess.run(
-                        ni_cmd,
+                    # Job sandbox (Sol A01/G1): package install scripts are
+                    # repository code — never run them on the host.
+                    r = _job_sandbox.run(
+                        shlex.join(ni_cmd),
+                        shell=True,
+                        job_network="install",
                         capture_output=True,
                         text=True,
                         cwd=ni_target_dir,
@@ -3118,8 +3125,9 @@ class ChatAgent:
 
             def _run_npm_script() -> str:
                 try:
-                    r = subprocess.run(
-                        ["npm", "run", nr_script],
+                    r = _job_sandbox.run(  # job sandbox (Sol A01/G1)
+                        shlex.join(["npm", "run", nr_script]),
+                        shell=True,
                         capture_output=True,
                         text=True,
                         cwd=nr_target_dir,
@@ -3159,13 +3167,21 @@ class ChatAgent:
 
             def _run_pip_install() -> str:
                 try:
-                    r = subprocess.run(
-                        [sys.executable, "-m", "pip", "install", pi_package],
+                    # Was the SERVER's own interpreter (sys.executable, no cwd):
+                    # it installed packages into the running backend. Now a
+                    # user-level install inside the job sandbox (Sol A01/G1).
+                    r = _job_sandbox.run(
+                        shlex.join(
+                            ["python", "-m", "pip", "install", "--user", pi_package]
+                        ),
+                        shell=True,
+                        job_network="install",
                         capture_output=True,
                         text=True,
+                        cwd=str(self.root),
                         timeout=120,
                     )
-                    return (r.stdout + r.stderr).strip()[-2000:]
+                    return str(r.stdout + r.stderr).strip()[-2000:]
                 except Exception as e:
                     return f"[ERROR] pip_install: {e}"
 

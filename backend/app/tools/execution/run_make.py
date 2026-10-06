@@ -92,6 +92,7 @@ separately.
 from __future__ import annotations
 
 from app.tools.execution import safe_subprocess as subprocess
+import shlex
 from pathlib import Path
 from typing import Any
 
@@ -155,8 +156,10 @@ def run_make_handler(root: Path, worktree_path: str, inp: dict[str, Any]) -> str
 
     if not target:
         try:
+            # parsing a Makefile evaluates its $(shell ...) calls: sandboxed too
             r = subprocess.run(
-                ["make", "-pRrq"],
+                "make -pRrq",
+                shell=True,
                 cwd=str(make_dir),
                 capture_output=True,
                 text=True,
@@ -178,7 +181,8 @@ def run_make_handler(root: Path, worktree_path: str, inp: dict[str, Any]) -> str
 
     try:
         r = subprocess.run(
-            ["make", target],
+            shlex.join(["make", target]),  # job sandbox (A01): shell string
+            shell=True,
             cwd=str(make_dir),
             capture_output=True,
             text=True,

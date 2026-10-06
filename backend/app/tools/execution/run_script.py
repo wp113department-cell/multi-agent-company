@@ -95,6 +95,7 @@ existing style.
 from __future__ import annotations
 
 from app.tools.execution import safe_subprocess as subprocess
+import shlex
 from pathlib import Path
 from typing import Any
 
@@ -169,7 +170,8 @@ def run_script_handler(root: Path, worktree_path: str, inp: dict[str, Any]) -> s
 
     try:
         r = subprocess.run(
-            [interpreter, str(script_fp)],
+            shlex.join([interpreter, str(script_fp)]),  # job sandbox (A01)
+            shell=True,
             cwd=str(root),
             capture_output=True,
             text=True,

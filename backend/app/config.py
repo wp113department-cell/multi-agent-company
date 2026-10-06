@@ -1200,6 +1200,21 @@ class Settings(BaseSettings):
         default="bridge",
         description="Docker --network mode for sandboxed bash execution: 'bridge' (default, egress allowed — most real commands, e.g. package installs, need it) or 'none' (strictest, blocks all network egress/exfiltration for deployments that can accept losing network-dependent commands).",
     )
+    job_sandbox_network: str = Field(
+        default="none",
+        description="Sol A11 (2026-10-06): Docker --network for the code-running "
+        "tools' job sandbox (python snippets, node, tests, scripts, make, "
+        "profiler, npm scripts). 'none' (default): job code cannot reach the "
+        "control plane (DB, Redis, the API), the host, cloud metadata or the "
+        "internet. Package installs use job_sandbox_install_network instead.",
+    )
+    job_sandbox_install_network: str = Field(
+        default="bridge",
+        description="Sol A11: Docker --network for the approval-gated package "
+        "installs (pip_install, npm_install) — they need the package index. "
+        "Keep control-plane ports bound to 127.0.0.1 (docker-compose.yml does), "
+        "so the bridge gateway cannot reach them; set 'none' to forbid installs.",
+    )
     bash_sandbox_streaming_enabled: bool = Field(
         default=True,
         description="T2-B9/#12 (2026-09-24, GRIDIRON_PARTIAL 'Monitor streaming "

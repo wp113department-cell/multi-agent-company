@@ -37,7 +37,7 @@
 FROM python:3.12-slim
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends git \
+    && apt-get install -y --no-install-recommends git make nodejs npm \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt requirements-dev.txt /tmp/
@@ -55,6 +55,9 @@ RUN pip install --no-cache-dir -r /tmp/requirements-dev.txt \
 # Safe here specifically because /workspace is always a fresh, ephemeral,
 # single-purpose mount for exactly one sandboxed command — there is no
 # other repository this blanket trust could apply to inside this image.
-RUN git config --global --add safe.directory /workspace
+# Job sandbox (Sol A01/G1): every repository-code tool runs in this image now,
+# with the worktree mounted at its host path — trust it wherever it is mounted.
+RUN git config --global --add safe.directory '*' \
+    && npm install -g pnpm@9 --no-audit --no-fund  # pnpm 10+ needs Node 22; Debian ships 20
 
 WORKDIR /workspace
