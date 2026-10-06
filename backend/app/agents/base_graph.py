@@ -2644,6 +2644,9 @@ def _make_execute_tools_node(
     # passes through for all ~72 agents) instead of duplicating a Pydantic
     # model per tool across dozens of handler files — this reuses the
     # input_schema that already exists on every tool spec.
+    _strict_submit_tools = {
+        n.strip() for n in get_settings().strict_submit_tools.split(",") if n.strip()
+    }
     _schema_by_name: dict[str, dict[str, Any]] = {
         t["name"]: t["input_schema"]
         for t in (tools or [])
@@ -2800,6 +2803,20 @@ def _make_execute_tools_node(
                     f"{tu_name} is refused until '{required_key}' is "
                     "satisfied first (see this agent's expected_verification)."
                 )
+        # Strict submit schema (PENDING L1, owner decision 2026-10-06): a
+        # submission whose output feeds code or plans (STRICT_SUBMIT_TOOLS)
+        # must match its declared input_schema. It is rejected BEFORE its
+        # handler runs (nothing applied), the model gets the reason and
+        # resubmits; reports stay soft (kept with _validation_warning below).
+        # Live runs: 1 miss in ~25 (security_architect left out a field).
+        strict_error: str | None = None
+        if not denial and tu_name in _strict_submit_tools:
+            _strict_schema = _schema_by_name.get(tu_name)
+            if _strict_schema is not None:
+                try:
+                    jsonschema.validate(instance=dict(tu_input), schema=_strict_schema)
+                except jsonschema.ValidationError as exc:
+                    strict_error = exc.message[:300]
         if denial:
             result_content = f"[POLICY DENIED] {denial}"
             logger.warning("Policy denied %s: %s", tu_name, denial)
@@ -2823,6 +2840,12 @@ def _make_execute_tools_node(
                 )
             except Exception:
                 pass
+        elif strict_error is not None:
+            result_content = (
+                f"[ERROR] {tu_name} rejected: {strict_error}. Your submission does "
+                f"not match {tu_name}'s schema; fix it and call {tu_name} again."
+            )
+            logger.warning("Strict submit: %s rejected: %s", tu_name, strict_error)
         else:
             handler = tool_handlers.get(tu_name)
             if handler is None:
@@ -2905,7 +2928,7 @@ def _make_execute_tools_node(
                     for key in verification_cfg.reset_keys:
                         new_verification[key] = False
 
-                if tu_name.startswith("submit_"):
+                if tu_name.startswith("submit_") and strict_error is None:
                     submitted = True
                     raw_result = dict(tu_input)
                     schema = _schema_by_name.get(tu_name)

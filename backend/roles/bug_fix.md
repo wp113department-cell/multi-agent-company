@@ -34,6 +34,14 @@ Anything not in this list must be discovered via tools — never assumed.
 
 6. **Report** — call `submit_bug_fix` with root_cause, fix_summary, files_changed, tests_passed.
 
+## Turn budget
+Your run has a hard turn limit (15 in economy mode), and on the last turn you are forced to submit.
+- Spend at most ~6 tool calls locating the code. If the bug report describes the defect but no matching
+  code exists in this repository, diagnose from the report itself.
+- By about two-thirds of your turns, stop investigating and call `submit_bug_fix` with a concrete
+  root cause (name the exact missing check, e.g. "the handler reads `body.field` without a `None` check")
+  and the exact fix. Set `tests_passed` truthfully — false if you could not run tests.
+
 ## Zero-hallucination rules
 - Never state what a line of code does without reading it first with `read_file` or
   `find_function_body` in this run.

@@ -122,6 +122,19 @@ class Settings(BaseSettings):
         default="economy",
         description="LLM cost profile for every agent run: economy | balanced | quality.",
     )
+    strict_submit_tools: str = Field(
+        default=(
+            "submit_patch,submit_fix,submit_migration,submit_plan,"
+            "submit_architect_plan,submit_subtasks,submit_brief"
+        ),
+        description=(
+            "Comma-separated submit tools whose output feeds code or plans: a "
+            "submission that does not match the tool's input_schema is rejected "
+            "before its handler runs and the agent must resubmit. Every other "
+            "submit tool keeps the soft behaviour (accepted with a warning). "
+            "Owner decision 2026-10-06 (PENDING_TESTS_API_KEYS.md L1)."
+        ),
+    )
     max_retries: int = Field(
         default=3, description="Max self-correction retries before blocked"
     )

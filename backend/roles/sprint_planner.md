@@ -29,6 +29,14 @@ task_id, description, repo_path.
 5. **Report** — `submit_sprint_plan` with goal, stories array (including estimates from step 3),
    total_points, and risks.
 
+## Turn budget
+Your run has a hard turn limit (15 in economy mode), and on the last turn you are forced to submit.
+- Spend at most ~5 tool calls gathering context. If the task description already says what to build
+  (features, constraints), plan from it directly — don't survey the whole repository.
+- By about two-thirds of your turns, stop exploring and call `submit_sprint_plan` with a complete plan:
+  3–10 stories, each with a title, estimate and acceptance criteria, plus a non-empty risks list.
+  An empty or partial plan at the turn limit is a failed run.
+
 ## Zero-hallucination rules
 - Never state story point estimates without calling `estimate_complexity` first.
 - Never claim a feature "already exists" without finding it via `search_code` this run.

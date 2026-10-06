@@ -54,7 +54,7 @@ worker: cd backend && rq worker gridiron-high gridiron-default --url ${REDIS_URL
   needed for a first deploy).
 - Point the platform at `backend/requirements.txt` for dependency install.
 - Set every variable your deployment needs from `backend/.env.example`
-  (305 settings as of 2026-10-05, all listed in `backend/.env.example` and kept in sync by
+  (306 settings as of 2026-10-06, all listed in `backend/.env.example` and kept in sync by
   `tests/test_audit06_env_example_complete.py` — count drifts as
   fields are added, verify with a real Settings-vs-.env.example diff if
   precision matters; all are optional except `DATABASE_URL` and
