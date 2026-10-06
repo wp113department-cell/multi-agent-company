@@ -81,9 +81,18 @@ async def write_entry(
             # this same batch.
             from app.db.models import Epic
 
+            # Only a real epic id is a UUID; namespaces like bhaskar_tool's
+            # "__bhaskar_tool__" cache made this lookup raise (Epic.epic_id is
+            # a UUID column), so every such write failed (audit 15).
             repo_id = (
-                await db.execute(select(Epic.repo_id).where(Epic.epic_id == epic_id))
-            ).scalar_one_or_none()
+                (
+                    await db.execute(
+                        select(Epic.repo_id).where(Epic.epic_id == epic_id)
+                    )
+                ).scalar_one_or_none()
+                if _is_uuid(epic_id)
+                else None
+            )
             db.add(
                 EpicScratchpad(
                     epic_id=epic_id,
@@ -249,9 +258,18 @@ async def write_entry_with_eviction(
             # resolution as write_entry() above.
             from app.db.models import Epic
 
+            # Only a real epic id is a UUID; namespaces like bhaskar_tool's
+            # "__bhaskar_tool__" cache made this lookup raise (Epic.epic_id is
+            # a UUID column), so every such write failed (audit 15).
             repo_id = (
-                await db.execute(select(Epic.repo_id).where(Epic.epic_id == epic_id))
-            ).scalar_one_or_none()
+                (
+                    await db.execute(
+                        select(Epic.repo_id).where(Epic.epic_id == epic_id)
+                    )
+                ).scalar_one_or_none()
+                if _is_uuid(epic_id)
+                else None
+            )
             db.add(
                 EpicScratchpad(
                     epic_id=epic_id,
@@ -301,6 +319,16 @@ async def expire_stale_entries(db: AsyncSession) -> int:
 # handler; base_graph.py's graph.invoke() is sync, matching the same
 # constraint Phase 1.3/1.4/1.5's sync bridges were built for).
 # ---------------------------------------------------------------------------
+
+
+def _is_uuid(value: str) -> bool:
+    import uuid
+
+    try:
+        uuid.UUID(str(value))
+    except ValueError:
+        return False
+    return True
 
 
 def write_entry_sync(
