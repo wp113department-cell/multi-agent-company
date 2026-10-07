@@ -705,11 +705,11 @@ export default function StartPage() {
   return (
     <main className="space-y-8">
       {/* hero */}
-      <section className="relative overflow-hidden rounded-3xl border border-orange-100 bg-gradient-to-br from-white via-orange-50/60 to-orange-100/60 p-6 shadow-soft sm:p-8 dark:border-slate-800 dark:from-slate-900 dark:via-slate-900 dark:to-orange-950/30">
+      <section className="relative overflow-hidden rounded-3xl border border-orange-100 bg-orange-50/70 p-6 shadow-soft sm:p-8 dark:border-slate-800 dark:from-slate-900 dark:via-slate-900 dark:to-orange-950/30">
         <div aria-hidden="true" className="absolute -right-24 -top-24 h-72 w-72 rounded-full bg-orange-300/30 blur-3xl" />
         <div className="relative flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="text-2xl font-extrabold tracking-tight text-slate-900 sm:text-3xl dark:text-white">
+            <h1 className="text-xl leading-relaxed text-slate-900 sm:text-3xl dark:text-white">
               What would you like to work on?
             </h1>
             <p className="mt-2 max-w-xl text-slate-600 dark:text-slate-300">

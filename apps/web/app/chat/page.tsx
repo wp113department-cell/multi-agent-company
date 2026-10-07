@@ -656,7 +656,7 @@ export default function ChatPage() {
       {/* Header */}
       <div className="mb-4 flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold">Chat Agent</h1>
+          <h1 className="text-lg">Chat Agent</h1>
           <p className="text-sm text-slate-500">
             Conversational AI coding assistant — reads, writes, debugs, commits
           </p>

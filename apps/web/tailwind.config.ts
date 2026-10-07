@@ -35,7 +35,9 @@ export default {
         orange: colors.orange,
       },
       fontFamily: {
+        arcade: ["var(--font-arcade)", "ui-monospace", "monospace"],
         sans: [
+          "var(--font-sans)",
           "Inter",
           "ui-sans-serif",
           "system-ui",

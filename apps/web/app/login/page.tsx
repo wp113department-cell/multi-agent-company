@@ -4,6 +4,8 @@ import { useEffect, useState, FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { changePassword, login } from "../../lib/auth";
 import { BrandMark, BRAND_NAME } from "../../components/BrandMark";
+import { PasswordInput } from "../../components/PasswordInput";
+import { AgentNetwork } from "../../components/AgentNetwork";
 import { Icon } from "../../components/Icon";
 
 // TEMPORARY (requested 2026-09-18) — lets a developer skip typing
@@ -92,10 +94,9 @@ export default function LoginPage() {
     <div className="relative -mt-6 ml-[calc(50%-50vw)] min-h-screen w-screen overflow-hidden">
       {/* decorative background */}
       <div aria-hidden="true" className="pointer-events-none absolute inset-0">
-        <div className="absolute -right-40 -top-40 h-[520px] w-[520px] rounded-full bg-gradient-to-br from-orange-300/40 via-orange-400/25 to-transparent blur-3xl" />
-        <div className="absolute -bottom-48 -left-32 h-[460px] w-[460px] rounded-full bg-gradient-to-tr from-orange-200/50 via-amber-100/40 to-transparent blur-3xl" />
+        <AgentNetwork />
         <div
-          className="absolute inset-0 opacity-[0.35] dark:opacity-[0.12]"
+          className="absolute inset-0 opacity-[0.25] dark:opacity-[0.1]"
           style={{
             backgroundImage:
               "radial-gradient(circle at 1px 1px, rgba(234,88,12,0.18) 1px, transparent 0)",
@@ -104,13 +105,13 @@ export default function LoginPage() {
         />
       </div>
 
-      <div className="relative mx-auto max-w-7xl px-4 sm:px-6">
+      <div className="relative mx-auto w-full max-w-[1760px] px-4 sm:px-8 lg:px-12">
         {/* top bar */}
         <header className="flex h-20 items-center justify-between">
           <div className="flex items-center gap-3">
             <BrandMark size={40} />
             <div className="leading-tight">
-              <p className="text-lg font-bold tracking-tight text-slate-900 dark:text-white">{BRAND_NAME}</p>
+              <p className="font-arcade text-sm text-slate-900 dark:text-white">{BRAND_NAME}</p>
               <p className="text-xs font-medium text-orange-600">Your AI software team</p>
             </div>
           </div>
@@ -124,14 +125,14 @@ export default function LoginPage() {
 
         <div className="grid items-start gap-10 pb-16 pt-4 lg:grid-cols-[1.25fr_1fr] lg:gap-14 lg:pt-10">
           {/* ---------------- intro ---------------- */}
-          <section aria-labelledby="intro-title">
+          <section aria-labelledby="intro-title" className="rounded-3xl bg-white/70 p-4 backdrop-blur-[2px] sm:p-6 dark:bg-slate-950/60">
             <span className="inline-flex items-center gap-2 rounded-full border border-orange-200 bg-white/80 px-3 py-1 text-xs font-semibold text-orange-700 shadow-soft dark:border-orange-900 dark:bg-slate-900/80 dark:text-orange-300">
               <span className="h-2 w-2 animate-pulseDot rounded-full bg-orange-500" />
               AI agents · Human approval · Safe by design
             </span>
             <h1
               id="intro-title"
-              className="mt-5 text-4xl font-extrabold leading-[1.1] tracking-tight text-slate-900 sm:text-5xl dark:text-white"
+              className="mt-6 text-2xl leading-[1.55] text-slate-900 sm:text-3xl xl:text-[2.15rem] dark:text-white"
             >
               A whole software company,
               <br className="hidden sm:block" />{" "}
@@ -152,7 +153,7 @@ export default function LoginPage() {
                   className="group relative rounded-2xl border border-orange-100 bg-white/85 p-4 shadow-soft backdrop-blur transition hover:-translate-y-0.5 hover:shadow-glow dark:border-slate-800 dark:bg-slate-900/80"
                 >
                   <div className="flex items-start gap-3">
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-orange-400 to-orange-600 text-sm font-bold text-white shadow-glow">
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-orange-600 text-sm font-bold text-white">
                       {idx + 1}
                     </span>
                     <div>
@@ -227,9 +228,8 @@ export default function LoginPage() {
               >
                 Current password
               </label>
-              <input
+              <PasswordInput
                 id="cp-current"
-                type="password"
                 autoComplete="current-password"
                 required
                 value={currentPw}
@@ -244,9 +244,8 @@ export default function LoginPage() {
               >
                 New password
               </label>
-              <input
+              <PasswordInput
                 id="cp-new"
-                type="password"
                 autoComplete="new-password"
                 required
                 minLength={8}
@@ -262,9 +261,8 @@ export default function LoginPage() {
               >
                 Confirm new password
               </label>
-              <input
+              <PasswordInput
                 id="cp-confirm"
-                type="password"
                 autoComplete="new-password"
                 required
                 value={confirmPw}
@@ -316,9 +314,8 @@ export default function LoginPage() {
               >
                 Password
               </label>
-              <input
+              <PasswordInput
                 id="login-password"
-                type="password"
                 autoComplete="current-password"
                 required
                 value={password}

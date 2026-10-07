@@ -199,6 +199,18 @@ const PATHS: Record<string, ReactNode> = {
       <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5Z" />
     </>
   ),
+  eye: (
+    <>
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" />
+      <circle cx="12" cy="12" r="3" />
+    </>
+  ),
+  "eye-off": (
+    <>
+      <path d="M9.9 4.2A9.6 9.6 0 0 1 12 4c6.5 0 10 7 10 7a17.4 17.4 0 0 1-2.2 3.2M6.6 6.6C3.9 8.4 2 12 2 12s3.5 7 10 7a9.7 9.7 0 0 0 5.4-1.6" />
+      <path d="M14.1 14.1a3 3 0 1 1-4.2-4.2M2 2l20 20" />
+    </>
+  ),
   dot: <circle cx="12" cy="12" r="5" fill="currentColor" />,
 };
 
@@ -236,4 +248,9 @@ export function Icon({
       {path}
     </svg>
   );
+}
+
+/** The raw shapes of an icon, for drawing inside another SVG. */
+export function iconShapes(name: string): ReactNode {
+  return PATHS[name] ?? PATHS.dot;
 }

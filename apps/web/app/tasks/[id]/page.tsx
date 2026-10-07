@@ -226,7 +226,7 @@ export default function TaskDetailPage() {
       {/* Header */}
       <div className="rounded-lg border border-slate-200 bg-white p-5">
         <div className="mb-2 flex items-center justify-between gap-3">
-          <h1 className="text-lg font-semibold">{task.title}</h1>
+          <h1 className="font-sans text-xl font-semibold leading-snug">{task.title}</h1>
           <div className="flex items-center gap-2">
             <Link
               href={`/stream/${params.id}`}

@@ -98,7 +98,7 @@ export function PerformancePanel() {
           {cost.dailyBudgetUsd && (
             <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-orange-100 dark:bg-slate-800" aria-hidden="true">
               <div
-                className={`h-full rounded-full ${pct > 85 ? "bg-red-500" : "bg-gradient-to-r from-orange-400 to-orange-600"}`}
+                className={`h-full rounded-full ${pct > 85 ? "bg-red-500" : "bg-orange-600"}`}
                 style={{ width: `${pct}%` }}
               />
             </div>

@@ -90,7 +90,7 @@ export default function EpicDetailPage() {
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{epic.title}</h1>
+          <h1 className="font-sans text-2xl font-bold text-gray-900 dark:text-gray-100">{epic.title}</h1>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{epicId}</p>
         </div>
         <StatusBadge status={epic.status} />

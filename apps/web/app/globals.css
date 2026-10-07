@@ -3,28 +3,41 @@
 @tailwind utilities;
 
 /* ------------------------------------------------------------------ */
-/* Multi Agentic Company theme: white + shiny orange                  */
+/* Multi Agentic Company theme: white + matte orange                  */
 /* ------------------------------------------------------------------ */
 
 @layer base {
   html {
+    /* everything a little larger (Tailwind sizes are rem-based) */
+    font-size: 106.25%;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
   body {
+    font-family: var(--font-sans), ui-sans-serif, system-ui, "Segoe UI", sans-serif;
     background:
-      radial-gradient(1200px 600px at 100% -10%, rgba(251, 146, 60, 0.10), transparent 60%),
-      radial-gradient(900px 500px at -10% 110%, rgba(249, 115, 22, 0.07), transparent 60%),
-      #ffffff;
+      radial-gradient(1200px 600px at 100% -10%, rgba(251, 146, 60, 0.07), transparent 60%),
+      radial-gradient(900px 500px at -10% 110%, rgba(249, 115, 22, 0.05), transparent 60%), #ffffff;
     background-attachment: fixed;
   }
   html.dark body {
     background:
-      radial-gradient(1200px 600px at 100% -10%, rgba(249, 115, 22, 0.12), transparent 60%),
-      #0b0f19;
+      radial-gradient(1200px 600px at 100% -10%, rgba(249, 115, 22, 0.08), transparent 60%), #0b0f19;
+  }
+  /* arcade pixel font for the logo and page headings; it is wide, so it is
+     set a bit smaller with extra line height */
+  h1,
+  .font-arcade {
+    font-family: var(--font-arcade), ui-monospace, monospace;
+    font-weight: 400;
+    letter-spacing: 0;
+    line-height: 1.45;
+  }
+  h1 {
+    font-size: 1.35rem;
   }
   ::selection {
-    background: rgba(249, 115, 22, 0.25);
+    background: rgba(249, 115, 22, 0.22);
   }
   :focus-visible {
     outline: 2px solid #f97316;
@@ -32,82 +45,153 @@
   }
 }
 
-/* Primary (filled orange) buttons: glossy gradient, glow and a moving shine. */
+/* Buttons: pixel-art arcade style (owner's reference, 2026-10-07): a flat
+   face, a dark outline, a light top edge and a darker bottom bevel, and an
+   arcade-font label; pressing moves the face down onto its shadow. Only
+   real buttons are styled (filled colour, or bordered text buttons with
+   padding); tabs, on/off toggles, pills, cards and icon-only buttons keep
+   their own look. */
 @layer components {
+  :root {
+    --px-ink: #3b1606;
+  }
   .btn-primary,
-  button[class~="bg-blue-600"],
-  button[class~="bg-indigo-600"],
-  button[class~="bg-violet-600"],
-  button[class~="bg-purple-600"],
-  button[class~="bg-orange-500"],
-  button[class~="bg-orange-600"],
-  a[class~="bg-blue-600"],
-  a[class~="bg-indigo-600"],
-  a[class~="bg-orange-600"] {
-    position: relative;
-    overflow: hidden;
-    color: #fff;
-    background-image: linear-gradient(135deg, #fdba74 0%, #fb923c 22%, #f97316 55%, #ea580c 100%);
+  .btn-px,
+  button[class~="bg-blue-600"]:not([role="tab"], [aria-pressed]),
+  button[class~="bg-indigo-600"]:not([role="tab"], [aria-pressed]),
+  button[class~="bg-violet-600"]:not([role="tab"], [aria-pressed]),
+  button[class~="bg-purple-600"]:not([role="tab"], [aria-pressed]),
+  button[class~="bg-orange-500"]:not([role="tab"], [aria-pressed]),
+  button[class~="bg-orange-600"]:not([role="tab"], [aria-pressed]),
+  button[class~="bg-green-600"]:not([role="tab"], [aria-pressed]),
+  button[class~="bg-red-600"]:not([role="tab"], [aria-pressed]),
+  a[class~="bg-blue-600"]:not([role="tab"], [aria-pressed]),
+  a[class~="bg-indigo-600"]:not([role="tab"], [aria-pressed]),
+  a[class~="bg-orange-600"]:not([role="tab"], [aria-pressed]),
+  :is(button, a)[class~="border"][class*="px-"]:is(
+      [class~="rounded"],
+      [class~="rounded-md"],
+      [class~="rounded-lg"]
+    ) {
+    --px-face: #f7f1ea;
+    --px-top: #ffffff;
+    --px-bottom: #dccbbb;
+    --px-text: var(--px-ink);
+    color: var(--px-text);
+    background-color: var(--px-face);
+    background-image: none;
+    border: 2px solid var(--px-ink);
+    border-radius: 4px;
     box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.45),
-      0 1px 2px rgba(194, 65, 12, 0.25),
-      0 8px 20px -8px rgba(249, 115, 22, 0.65);
+      inset 0 3px 0 var(--px-top),
+      inset 0 -4px 0 var(--px-bottom),
+      0 3px 0 var(--px-ink);
+    font-family: var(--font-arcade), ui-monospace, monospace;
+    font-weight: 400;
+    font-size: 0.62rem;
+    line-height: 1.6;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
     transition:
-      transform 0.15s ease,
-      box-shadow 0.2s ease,
-      filter 0.2s ease;
+      transform 0.08s ease,
+      box-shadow 0.08s ease,
+      filter 0.15s ease;
   }
-  .btn-primary::after,
-  button[class~="bg-blue-600"]::after,
-  button[class~="bg-indigo-600"]::after,
-  button[class~="bg-violet-600"]::after,
-  button[class~="bg-purple-600"]::after,
-  button[class~="bg-orange-500"]::after,
-  button[class~="bg-orange-600"]::after,
-  a[class~="bg-blue-600"]::after,
-  a[class~="bg-indigo-600"]::after,
-  a[class~="bg-orange-600"]::after {
-    content: "";
-    position: absolute;
-    inset: 0 auto 0 0;
-    width: 40%;
-    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.45), transparent);
-    transform: translateX(-120%) skewX(-20deg);
-    pointer-events: none;
+  /* filled buttons: orange face (the main action) */
+  .btn-primary,
+  button[class~="bg-blue-600"]:not([role="tab"], [aria-pressed]),
+  button[class~="bg-indigo-600"]:not([role="tab"], [aria-pressed]),
+  button[class~="bg-violet-600"]:not([role="tab"], [aria-pressed]),
+  button[class~="bg-purple-600"]:not([role="tab"], [aria-pressed]),
+  button[class~="bg-orange-500"]:not([role="tab"], [aria-pressed]),
+  button[class~="bg-orange-600"]:not([role="tab"], [aria-pressed]),
+  a[class~="bg-blue-600"]:not([role="tab"], [aria-pressed]),
+  a[class~="bg-indigo-600"]:not([role="tab"], [aria-pressed]),
+  a[class~="bg-orange-600"]:not([role="tab"], [aria-pressed]) {
+    --px-face: #f2711f;
+    --px-top: #ffab6b;
+    --px-bottom: #c4500f;
+    font-size: 0.68rem;
   }
-  .btn-primary:hover:not(:disabled)::after,
-  button[class~="bg-blue-600"]:hover:not(:disabled)::after,
-  button[class~="bg-indigo-600"]:hover:not(:disabled)::after,
-  button[class~="bg-violet-600"]:hover:not(:disabled)::after,
-  button[class~="bg-purple-600"]:hover:not(:disabled)::after,
-  button[class~="bg-orange-500"]:hover:not(:disabled)::after,
-  button[class~="bg-orange-600"]:hover:not(:disabled)::after,
-  a[class~="bg-blue-600"]:hover::after,
-  a[class~="bg-indigo-600"]:hover::after,
-  a[class~="bg-orange-600"]:hover::after {
-    animation: shine 0.9s ease-out;
+  /* approve / reject keep their meaning colour */
+  button[class~="bg-green-600"]:not([role="tab"], [aria-pressed]) {
+    --px-face: #3fae5a;
+    --px-top: #8ddf9f;
+    --px-bottom: #2b8443;
+    --px-text: #0f2a16;
+  }
+  button[class~="bg-red-600"]:not([role="tab"], [aria-pressed]) {
+    --px-face: #e5533d;
+    --px-top: #ff9c8c;
+    --px-bottom: #b23a28;
+    --px-text: #ffffff;
+  }
+  :is(button, a)[class~="border"][class*="px-"]:is(
+      [class~="rounded"],
+      [class~="rounded-md"],
+      [class~="rounded-lg"]
+    ):is([class~="text-red-600"], [class~="text-red-700"]) {
+    --px-text: #b42318;
+  }
+  :is(button, a)[class~="border"][class*="px-"]:is(
+      [class~="rounded"],
+      [class~="rounded-md"],
+      [class~="rounded-lg"]
+    )[class~="text-xs"] {
+    font-size: 0.56rem;
   }
   .btn-primary:hover:not(:disabled),
-  button[class~="bg-blue-600"]:hover:not(:disabled),
-  button[class~="bg-indigo-600"]:hover:not(:disabled),
-  button[class~="bg-violet-600"]:hover:not(:disabled),
-  button[class~="bg-purple-600"]:hover:not(:disabled),
-  button[class~="bg-orange-500"]:hover:not(:disabled),
-  button[class~="bg-orange-600"]:hover:not(:disabled),
-  a[class~="bg-blue-600"]:hover,
-  a[class~="bg-indigo-600"]:hover,
-  a[class~="bg-orange-600"]:hover {
-    transform: translateY(-1px);
-    filter: saturate(1.08);
-    box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.5),
-      0 2px 4px rgba(194, 65, 12, 0.25),
-      0 14px 28px -10px rgba(249, 115, 22, 0.75);
+  .btn-px:hover:not(:disabled),
+  button[class~="bg-blue-600"]:not([role="tab"], [aria-pressed]):hover:not(:disabled),
+  button[class~="bg-indigo-600"]:not([role="tab"], [aria-pressed]):hover:not(:disabled),
+  button[class~="bg-violet-600"]:not([role="tab"], [aria-pressed]):hover:not(:disabled),
+  button[class~="bg-purple-600"]:not([role="tab"], [aria-pressed]):hover:not(:disabled),
+  button[class~="bg-orange-500"]:not([role="tab"], [aria-pressed]):hover:not(:disabled),
+  button[class~="bg-orange-600"]:not([role="tab"], [aria-pressed]):hover:not(:disabled),
+  button[class~="bg-green-600"]:not([role="tab"], [aria-pressed]):hover:not(:disabled),
+  button[class~="bg-red-600"]:not([role="tab"], [aria-pressed]):hover:not(:disabled),
+  a[class~="bg-blue-600"]:not([role="tab"], [aria-pressed]):hover,
+  a[class~="bg-indigo-600"]:not([role="tab"], [aria-pressed]):hover,
+  a[class~="bg-orange-600"]:not([role="tab"], [aria-pressed]):hover,
+  :is(button, a)[class~="border"][class*="px-"]:is(
+      [class~="rounded"],
+      [class~="rounded-md"],
+      [class~="rounded-lg"]
+    ):hover:not(:disabled) {
+    background-color: var(--px-face);
+    filter: brightness(1.06);
   }
   .btn-primary:active:not(:disabled),
-  button[class~="bg-blue-600"]:active:not(:disabled),
-  button[class~="bg-orange-600"]:active:not(:disabled) {
-    transform: translateY(0);
+  .btn-px:active:not(:disabled),
+  button[class~="bg-blue-600"]:not([role="tab"], [aria-pressed]):active:not(:disabled),
+  button[class~="bg-indigo-600"]:not([role="tab"], [aria-pressed]):active:not(:disabled),
+  button[class~="bg-orange-500"]:not([role="tab"], [aria-pressed]):active:not(:disabled),
+  button[class~="bg-orange-600"]:not([role="tab"], [aria-pressed]):active:not(:disabled),
+  button[class~="bg-green-600"]:not([role="tab"], [aria-pressed]):active:not(:disabled),
+  button[class~="bg-red-600"]:not([role="tab"], [aria-pressed]):active:not(:disabled),
+  a[class~="bg-orange-600"]:not([role="tab"], [aria-pressed]):active,
+  :is(button, a)[class~="border"][class*="px-"]:is(
+      [class~="rounded"],
+      [class~="rounded-md"],
+      [class~="rounded-lg"]
+    ):active:not(:disabled) {
+    transform: translateY(3px);
+    box-shadow:
+      inset 0 3px 0 var(--px-top),
+      inset 0 -2px 0 var(--px-bottom),
+      0 0 0 var(--px-ink);
+  }
+  html.dark
+    :is(button, a)[class~="border"][class*="px-"]:is(
+      [class~="rounded"],
+      [class~="rounded-md"],
+      [class~="rounded-lg"]
+    ):not([class*="bg-"][class*="-600"]) {
+    --px-face: #2a2f3d;
+    --px-top: #3b4254;
+    --px-bottom: #1b1f29;
+    --px-text: #fde7d6;
+    --px-ink: #0b0d13;
   }
 
   /* Cards and panels: soft elevation on white. */
@@ -117,7 +201,7 @@
   div.rounded-xl.border.bg-white {
     box-shadow:
       0 1px 2px rgba(15, 23, 42, 0.04),
-      0 10px 28px -16px rgba(15, 23, 42, 0.18);
+      0 8px 24px -16px rgba(15, 23, 42, 0.16);
   }
 
   /* Inputs: orange focus. */
@@ -125,15 +209,13 @@
   select:focus,
   textarea:focus {
     border-color: #fb923c;
-    box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.18);
+    box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.16);
     outline: none;
   }
 
+  /* matte text accent (was a glossy gradient) */
   .brand-gradient-text {
-    background-image: linear-gradient(135deg, #fb923c, #ea580c 60%, #c2410c);
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent;
+    color: #ea580c;
   }
 }
 

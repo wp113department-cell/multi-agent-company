@@ -197,11 +197,11 @@ export function NavBar() {
 
   return (
     <header className="sticky top-0 z-40 border-b border-orange-100/80 bg-white/80 backdrop-blur-md dark:border-slate-800 dark:bg-slate-950/80">
-      <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-3 px-4 sm:px-6">
+      <div className="mx-auto flex h-[72px] w-full max-w-[1760px] items-center justify-between gap-3 px-4 sm:px-8 lg:px-12">
         <Link href="/start" className="flex shrink-0 items-center gap-2.5" aria-label={`${BRAND_NAME} home`}>
           <BrandMark size={34} />
           <span className="leading-tight">
-            <span className="block text-[15px] font-bold tracking-tight text-slate-900 dark:text-white">
+            <span className="font-arcade block text-[11px] text-slate-900 dark:text-white">
               {BRAND_NAME}
             </span>
             <span className="hidden text-[11px] font-medium text-orange-600 sm:block xl:hidden 2xl:block">
@@ -219,7 +219,7 @@ export function NavBar() {
               aria-current={isActive(href) ? "page" : undefined}
               className={`whitespace-nowrap rounded-lg px-2 py-2 text-[13px] font-medium transition-all 2xl:px-2.5 2xl:text-sm ${
                 isActive(href)
-                  ? "bg-gradient-to-b from-orange-50 to-orange-100 text-orange-700 shadow-[inset_0_0_0_1px_rgba(251,146,60,0.35)] dark:from-orange-950 dark:to-orange-900/60 dark:text-orange-300"
+                  ? "bg-orange-100 text-orange-800 dark:bg-orange-950 dark:text-orange-300"
                   : "text-slate-600 hover:bg-orange-50 hover:text-orange-700 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
               }`}
             >

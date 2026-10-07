@@ -65,7 +65,7 @@ function FleetAndApprovals() {
   return (
     <main className="space-y-6">
       <section>
-        <h1 className="text-2xl font-extrabold tracking-tight text-slate-900 dark:text-white">Fleet &amp; Approvals</h1>
+        <h1 className="text-xl leading-relaxed text-slate-900 dark:text-white">Fleet &amp; Approvals</h1>
         <p className="mt-1 text-slate-600 dark:text-slate-300">
           Everything that needs your attention: decisions to make, problems to look at, and the team&apos;s own
           improvement ideas.

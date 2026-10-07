@@ -340,7 +340,7 @@ export default function AgentsPage() {
     <main className="space-y-8">
       <section className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-2xl font-extrabold tracking-tight text-slate-900 dark:text-white">Your AI team</h1>
+          <h1 className="text-xl leading-relaxed text-slate-900 dark:text-white">Your AI team</h1>
           <p className="mt-1 text-slate-600 dark:text-slate-300">
             {catalog ? `${catalog.total} built-in specialists` : "Built-in specialists"}
             {mine.length > 0 ? ` + ${mine.length} of your own` : ""}. The team picks the right ones for each task automatically.
@@ -427,7 +427,7 @@ export default function AgentsPage() {
                   onClick={() => setOpen(open === c.name ? null : c.name)}
                   className="flex w-full items-center gap-3 p-4 text-left"
                 >
-                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-orange-100 to-orange-200 text-xl">
+                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-orange-100 text-xl">
                     <Icon name={CATEGORY_ICON[c.name] ?? "bot"} size={20} className="text-orange-700" />
                   </span>
                   <span className="min-w-0 flex-1">

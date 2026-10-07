@@ -189,7 +189,7 @@ export function ProductTour() {
           {idx === 0 || last ? (
             <BrandMark size={40} />
           ) : (
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-orange-100 to-orange-200 text-orange-700">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-orange-100 text-orange-700">
               <Icon name={step.icon} size={20} />
             </span>
           )}
@@ -206,7 +206,7 @@ export function ProductTour() {
 
         <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-orange-100 dark:bg-slate-800">
           <div
-            className="h-full rounded-full bg-gradient-to-r from-orange-400 to-orange-600 transition-all duration-300"
+            className="h-full rounded-full bg-orange-600 transition-all duration-300"
             style={{ width: `${((idx + 1) / STEPS.length) * 100}%` }}
           />
         </div>

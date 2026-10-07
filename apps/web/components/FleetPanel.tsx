@@ -277,7 +277,7 @@ export function FleetPanel() {
   return (
     <div className="space-y-10">
       <div>
-        <h1 className="text-xl font-semibold text-slate-900 dark:text-slate-100">Fleet Dashboard</h1>
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Team improvements</h2>
         <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
           Self-improvement agents scan this project in the background. Nothing changes on
           disk until you approve a specific request below — some agents (marked
