@@ -131,25 +131,30 @@ async def _pump_pty_to_websocket(pty: PtySession, websocket: WebSocket) -> None:
 @router.websocket("/ws/{chat_session_id}")
 async def terminal_websocket(websocket: WebSocket, chat_session_id: str) -> None:
     settings = get_settings()
+
+    async def refuse(code: int, reason: str) -> None:
+        # Accept first, then close with the specific code: a WebSocket closed
+        # BEFORE accept reaches the browser as a bare HTTP 403 / close code
+        # 1006, so the UI could never tell "terminal disabled" from "not
+        # allowed" from "session gone" (it showed "Connection closed (code
+        # 1006)" for all three). Nothing is sent before the close.
+        await websocket.accept()
+        await websocket.close(code=code, reason=reason)
+
     if not settings.pty_terminal_enabled:
-        await websocket.close(
-            code=_CLOSE_FEATURE_DISABLED, reason="pty_terminal_enabled is False"
-        )
+        await refuse(_CLOSE_FEATURE_DISABLED, "pty_terminal_enabled is False")
         return
 
     chat_session: ChatSession | None = get_session(chat_session_id)
     if chat_session is None:
-        await websocket.close(
-            code=_CLOSE_SESSION_NOT_FOUND,
-            reason=f"Chat session {chat_session_id!r} not found",
-        )
+        await refuse(_CLOSE_SESSION_NOT_FOUND, "Chat session not found")
         return
 
     factory = get_session_factory()
     async with factory() as db:
         user_id = await _authenticate_as_approver(websocket, db)
     if user_id is None:
-        await websocket.close(code=_CLOSE_UNAUTHORIZED, reason="Approver role required")
+        await refuse(_CLOSE_UNAUTHORIZED, "Approver role required")
         return
 
     await websocket.accept()

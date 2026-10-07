@@ -44,10 +44,10 @@ function base64ToBytes(b64: string): Uint8Array {
 
 // Matches the close codes backend/app/api/terminal.py defines.
 const CLOSE_REASONS: Record<number, string> = {
-  4404: "Interactive terminals are disabled on this server (pty_terminal_enabled=false).",
-  4004: "Chat session not found — start a chat session first.",
-  4403: "Approver role required to open an interactive terminal.",
-  4503: "Sandbox is unavailable (Docker unreachable) — cannot start a terminal.",
+  4404: "The terminal is turned off on this server. To use it, set PTY_TERMINAL_ENABLED=true in backend/.env and restart.",
+  4004: "This chat session has ended (the server was restarted). Click “End Session” and start a new one.",
+  4403: "Only approvers and admins can open a terminal.",
+  4503: "The terminal needs Docker, and Docker is not reachable right now.",
 };
 
 type ConnState = "connecting" | "connected" | "closed" | "error";

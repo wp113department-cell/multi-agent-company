@@ -44,15 +44,15 @@ def test_rejects_when_feature_flag_disabled(client: TestClient, monkeypatch, tmp
     monkeypatch.setattr(settings, "pty_terminal_enabled", False)
     session = create_session(repo_path=str(tmp_path))
     with pytest.raises(WebSocketDisconnect) as exc_info:
-        with client.websocket_connect(f"/api/terminal/ws/{session.session_id}"):
-            pass
+        with client.websocket_connect(f"/api/terminal/ws/{session.session_id}") as ws:
+            ws.receive_text()  # the close arrives here, like in a browser
     assert exc_info.value.code == 4404
 
 
 def test_rejects_unknown_chat_session(client: TestClient):
     with pytest.raises(WebSocketDisconnect) as exc_info:
-        with client.websocket_connect("/api/terminal/ws/no-such-session-id"):
-            pass
+        with client.websocket_connect("/api/terminal/ws/no-such-session-id") as ws:
+            ws.receive_text()
     assert exc_info.value.code == 4004
 
 
@@ -65,8 +65,8 @@ def test_rejects_unauthorized_caller_when_rbac_enabled(
     monkeypatch.setattr(settings, "allow_legacy_role_header", False)
     session = create_session(repo_path=str(tmp_path))
     with pytest.raises(WebSocketDisconnect) as exc_info:
-        with client.websocket_connect(f"/api/terminal/ws/{session.session_id}"):
-            pass
+        with client.websocket_connect(f"/api/terminal/ws/{session.session_id}") as ws:
+            ws.receive_text()  # the close arrives here, like in a browser
     assert exc_info.value.code == 4403
 
 

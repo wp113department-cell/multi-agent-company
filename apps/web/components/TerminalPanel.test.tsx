@@ -167,10 +167,10 @@ describe("TerminalPanel", () => {
   });
 
   it.each([
-    [4404, "disabled on this server"],
-    [4004, "Chat session not found"],
-    [4403, "Approver role required"],
-    [4503, "Sandbox is unavailable"],
+    [4404, "turned off on this server"],
+    [4004, "chat session has ended"],
+    [4403, "Only approvers and admins"],
+    [4503, "Docker is not reachable"],
   ])("maps close code %i to a clear user-facing message", async (code, expectedSubstring) => {
     render(<TerminalPanel chatSessionId="s1" visible={true} />);
     const ws = lastInstance();
