@@ -725,6 +725,7 @@ export interface AppSettings {
   githubTokenMasked: string;
   githubTokenSource: "database" | "env" | "none";
   usingGroq: boolean;
+  codeSandboxAvailable?: boolean;
   modelPlanner: string;
   modelCoder: string;
 }

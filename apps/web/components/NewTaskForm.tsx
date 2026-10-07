@@ -1,12 +1,13 @@
 "use client";
 
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   addProjectEpic,
   addProjectGoal,
   createTask,
   extractPdfs,
+  fetchAppSettings,
   uploadTaskImages,
   type PdfFileResult,
   type ProjectDetail,
@@ -170,6 +171,8 @@ export function NewTaskForm({ project }: { project: ProjectDetail | null }) {
   const imageInputRef = useRef<HTMLInputElement>(null);
 
   const queryClient = useQueryClient();
+  const { data: appSettings } = useQuery({ queryKey: ["app-settings"], queryFn: fetchAppSettings, staleTime: 60_000 });
+  const sandboxMissing = appSettings?.codeSandboxAvailable === false;
 
   // a different project: its goals/epics differ
   useEffect(() => {
@@ -503,6 +506,12 @@ export function NewTaskForm({ project }: { project: ProjectDetail | null }) {
               </button>
             ))}
           </div>
+          {mode === "max" && sandboxMissing && (
+            <p role="note" className="mt-2 flex items-start gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900 ring-1 ring-amber-200">
+              <Icon name="info" size={14} className="mt-px text-amber-600" />
+              In this setup the team cannot run tests automatically (the code sandbox needs Docker access), so a Max task may stop at the testing step. Economy is recommended here.
+            </p>
+          )}
         </fieldset>
       </div>
 

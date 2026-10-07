@@ -296,3 +296,21 @@ Bugs found and fixed along the way:
 The wiring is covered by tests with the LLM stubbed.
 
 **Next:** finish full local CI and push. Then resume the "Tomorrow morning" Step 0, followed by the 58 items.
+
+## After the client demo (2026-10-07): first item
+
+**Code sandbox in the Docker/Windows version.** It was verified with a fresh clone, the real Anthropic key and the Docker stack.
+- **Works:** real AI planning and coding. Router → approval → `backend_dev` wrote correct code and a test, for $0.01.
+- **Doesn't work:** running code or tests. `safe_subprocess` and the bash tools return "SANDBOX UNAVAILABLE" because the API container has no Docker.
+- **Effect:** Economy tasks are fine. Max tasks will likely end Blocked at the QA step. Owner decision for the demo: use Economy; the task form shows a note under Max when the sandbox is missing (`/api/settings` → `codeSandboxAvailable`).
+- **Proper fix (planned):**
+  1. Mount the Docker Desktop socket into the backend container and install the docker CLI in the backend image.
+  2. Job containers use `--volumes-from <backend container>`, so `/workspace` and the worktrees have the same paths inside them.
+  3. The worktrees directory becomes a named volume.
+  4. The launcher builds `gridiron-bash-toolchain`.
+  5. Apply the same to the bash tools (`app/policy/sandbox.py`) and bhaskar.
+  6. Verify that a Max task runs tests end to end in Docker.
+
+Also from today:
+- Codex commit `f6b76c2b` was reviewed and is fine (sign-in setup on first run, answer box for questions, demo-safe reject/complete/push).
+- Fixed: reloading the demo data after adding real work to a demo project created a duplicate project with the same name.

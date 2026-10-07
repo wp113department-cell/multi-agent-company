@@ -520,6 +520,64 @@ async def seed(workspace: Path) -> None:
 
         made: list[tuple[Project, list[Goal], list[Epic]]] = []
         for i, spec in enumerate(PROJECTS):
+            # A demo project the user added real work to survives
+            # remove_demo(); reuse it instead of adding a second project with
+            # the same name (its goals/epics are matched by title).
+            kept = (
+                (
+                    await db.execute(
+                        select(Project)
+                        .where(Project.created_by == DEMO_CREATOR)
+                        .where(Project.name == spec["name"])
+                        .where(Project.repo_id.is_not(None))
+                    )
+                )
+                .scalars()
+                .first()
+            )
+            if kept is not None:
+                have_goals = {
+                    g.text: g
+                    for g in (
+                        await db.execute(select(Goal).where(Goal.project_id == kept.id))
+                    ).scalars()
+                }
+                have_epics = {
+                    e.title: e
+                    for e in (
+                        await db.execute(select(Epic).where(Epic.project_id == kept.id))
+                    ).scalars()
+                }
+                goals = [
+                    have_goals.get(g)
+                    or Goal(
+                        goal_id=str(uuid.uuid4()),
+                        text=g,
+                        status="open",
+                        epic_ids=[],
+                        project_id=kept.id,
+                    )
+                    for g in spec["goals"]
+                ]
+                epics = [
+                    have_epics.get(e)
+                    or Epic(
+                        epic_id=str(uuid.uuid4()),
+                        title=e,
+                        description="",
+                        status="open",
+                        repo_id=kept.repo_id,
+                        project_id=kept.id,
+                        created_by=DEMO_CREATOR,
+                    )
+                    for e in spec["epics"]
+                ]
+                db.add_all(
+                    [g for g in goals if g.text not in have_goals]
+                    + [e for e in epics if e.title not in have_epics]
+                )
+                made.append((kept, goals, epics))
+                continue
             folder = _make_folder(workspace, spec, registered_paths)
             repo = Repo(
                 github_url=None,

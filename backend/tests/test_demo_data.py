@@ -421,3 +421,55 @@ def test_remove_leaves_no_demo_rows(tmp_path: Path) -> None:
 
     assert _run(go) == 0
     assert (tmp_path / "shopnow-storefront" / "README.md").exists()  # files kept
+
+
+def test_reloading_keeps_one_project_when_a_demo_project_holds_real_work(
+    demo: Path,
+) -> None:
+    """A real task added to a demo project keeps that project alive through
+    a reload; the reload must reuse it, not add a same-named duplicate."""
+    from scripts.seed_demo_data import seed
+
+    async def project_id(db: Any) -> int:
+        return int(
+            (
+                await db.execute(
+                    select(Project.id).where(
+                        Project.name == "Customer Support Assistant",
+                        Project.created_by == DEMO_CREATOR,
+                    )
+                )
+            ).scalar_one()
+        )
+
+    pid = _q(project_id)
+    real = _call(
+        "POST",
+        "/api/tasks",
+        {"title": "real work", "description": "d", "project_id": pid},
+    ).json()
+    try:
+        _run(lambda: seed(demo))
+
+        async def names(db: Any) -> list[str]:
+            return [
+                n
+                for (n,) in await db.execute(
+                    select(Project.name).where(
+                        Project.name == "Customer Support Assistant"
+                    )
+                )
+            ]
+
+        assert _q(names) == ["Customer Support Assistant"]
+        task = _call("GET", f"/api/tasks/{real['id']}").json()
+        assert task["projectId"] == pid and task["title"] == "real work"
+    finally:
+
+        async def rm(db: Any) -> None:
+            from sqlalchemy import delete
+
+            await db.execute(delete(DevTask).where(DevTask.id == real["id"]))
+            await db.commit()
+
+        _q(rm)

@@ -42,6 +42,17 @@ def _mask(key: str) -> str:
     return "set" if key else ""
 
 
+async def _code_sandbox_available() -> bool:
+    import asyncio
+
+    from app.policy.sandbox import _docker_available
+
+    settings = get_settings()
+    if not settings.bash_sandbox_enabled:
+        return True  # code runs unsandboxed (operator opt-out): it does run
+    return await asyncio.to_thread(_docker_available)
+
+
 @router.get("")
 async def get_settings_view(
     db: AsyncSession = Depends(get_db),
@@ -77,6 +88,10 @@ async def get_settings_view(
         "githubTokenSource": (
             "database" if db_github else ("env" if settings.github_token else "none")
         ),
+        # Whether tasks can run code/tests in the job sandbox here (needs a
+        # reachable Docker; the Docker-compose API container has none). The
+        # task form warns under "Max" when it is False.
+        "codeSandboxAvailable": await _code_sandbox_available(),
         "usingGroq": settings.use_groq,
         "modelPlanner": settings.model_planner,
         "modelCoder": settings.model_coder,
