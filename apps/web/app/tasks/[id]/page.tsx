@@ -22,6 +22,7 @@ import {
   approveTaskPlan,
   triggerPipeline,
   triggerSmartRun,
+  startTask,
   updateTaskStatus,
 } from "../../../lib/api";
 
@@ -122,6 +123,11 @@ export default function TaskDetailPage() {
 
   const runMutation = useMutation({
     mutationFn: () => triggerAgentRun(params.id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["task", params.id] }),
+  });
+
+  const startMutation = useMutation({
+    mutationFn: () => startTask(params.id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["task", params.id] }),
   });
 
@@ -226,51 +232,92 @@ export default function TaskDetailPage() {
             <StatusBadge status={task.status} />
           </div>
         </div>
-        <p className="mb-3 text-sm text-slate-500 flex items-center gap-2 flex-wrap">
-          <span>{task.priority} priority</span>
-          {task.repoName ? (
-            <span className="inline-flex items-center gap-1 rounded bg-indigo-50 border border-indigo-200 px-2 py-0.5 text-xs font-medium text-indigo-700">
-              <span>📁</span> {task.repoName}
-            </span>
-          ) : (
-            <span className="inline-flex items-center gap-1 rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-500">
-              Default repo
-            </span>
-          )}
+        <p className="mb-3 flex flex-wrap items-center gap-2 text-xs">
+          <span className="inline-flex items-center gap-1 rounded-full border border-orange-200 bg-orange-50 px-2.5 py-0.5 font-semibold text-orange-800">
+            📁 {task.projectName ?? task.repoName ?? "No project"}
+          </span>
+          <span
+            className={`rounded-full px-2.5 py-0.5 font-semibold ring-1 ${
+              task.priority === "high" ? "bg-red-50 text-red-700 ring-red-200" : "bg-slate-50 text-slate-600 ring-slate-200"
+            }`}
+          >
+            {task.priority === "high" ? "High" : task.priority === "low" ? "Low" : "Medium"} priority
+          </span>
+          <span
+            className={`rounded-full px-2.5 py-0.5 font-semibold ring-1 ${
+              task.executionMode === "max" ? "bg-orange-50 text-orange-700 ring-orange-200" : "bg-emerald-50 text-emerald-700 ring-emerald-200"
+            }`}
+          >
+            {task.executionMode === "max" ? "Max" : "Economy"}
+          </span>
+          {task.goalTitle && <span className="rounded-full bg-slate-50 px-2.5 py-0.5 text-slate-600 ring-1 ring-slate-200">🎯 {task.goalTitle}</span>}
+          {task.epicTitle && <span className="rounded-full bg-slate-50 px-2.5 py-0.5 text-slate-600 ring-1 ring-slate-200">🧩 {task.epicTitle}</span>}
+          <Link href="/chat" className="ml-auto rounded-full border border-slate-200 px-2.5 py-0.5 font-medium text-slate-600 hover:bg-orange-50">
+            💬 Chat with the team
+          </Link>
         </p>
         {task.description && <p className="mb-4 text-sm text-slate-700">{task.description}</p>}
+
+        {(isPlanReview || isDiffReview || isPipelineAwaitingApproval) && (
+          <div role="status" className="mb-4 flex items-start gap-3 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+            <span className="text-xl" aria-hidden="true">✋</span>
+            <div>
+              <p className="font-semibold">Your decision is needed</p>
+              <p className="mt-0.5">
+                {isDiffReview
+                  ? "The team finished the code. Look at the changes below, then approve to complete the task or reject to send it back."
+                  : "The team made a plan. Read it below, then approve to start coding or reject it."}{" "}
+                Nothing continues until you choose.
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* Agent controls */}
         <div className="flex flex-wrap gap-2">
           {canRunPipeline && (
             <button
-              onClick={() => smartRunMutation.mutate()}
-              disabled={smartRunMutation.isPending}
-              title="Picks the fewest agents for this task — a UI-only change uses only the UI agent; a new project uses the full pipeline."
-              className="rounded bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+              onClick={() => startMutation.mutate()}
+              disabled={startMutation.isPending}
+              title={task.executionMode === "max" ? "Runs the full team pipeline" : "Uses the fewest agents (Economy)"}
+              className="rounded-lg bg-orange-600 px-5 py-2 text-sm font-semibold text-white disabled:opacity-50"
             >
-              {smartRunMutation.isPending ? "Starting…" : "Smart Run (recommended, cheapest)"}
+              {startMutation.isPending ? "Starting…" : `▶ Start (${task.executionMode === "max" ? "Max" : "Economy"})`}
             </button>
           )}
 
           {canRunPipeline && (
-            <button
-              onClick={() => runPipelineMutation.mutate()}
-              disabled={runPipelineMutation.isPending}
-              className="rounded border border-violet-300 px-4 py-1.5 text-sm font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-50"
-            >
-              {runPipelineMutation.isPending ? "Starting…" : "Full Pipeline (PM → Architect → Decompose)"}
-            </button>
-          )}
-
-          {canRun && !isPipelineRunning && !isPipelineAwaitingApproval && (
-            <button
-              onClick={() => runMutation.mutate()}
-              disabled={runMutation.isPending}
-              className="rounded border border-slate-300 px-4 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-            >
-              {runMutation.isPending ? "Starting…" : "Run Planner Agent (quick)"}
-            </button>
+            <details className="w-full text-sm">
+              <summary className="cursor-pointer text-xs font-medium text-slate-500 hover:text-slate-800">
+                Advanced start options
+              </summary>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button
+                  onClick={() => smartRunMutation.mutate()}
+                  disabled={smartRunMutation.isPending}
+                  title="Picks the fewest agents for this task — a UI-only change uses only the UI agent; a new project uses the full pipeline."
+                  className="rounded border border-emerald-300 px-4 py-1.5 text-sm font-medium text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
+                >
+                  {smartRunMutation.isPending ? "Starting…" : "Smart Run (recommended, cheapest)"}
+                </button>
+                <button
+                  onClick={() => runPipelineMutation.mutate()}
+                  disabled={runPipelineMutation.isPending}
+                  className="rounded border border-violet-300 px-4 py-1.5 text-sm font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-50"
+                >
+                  {runPipelineMutation.isPending ? "Starting…" : "Full Pipeline (PM → Architect → Decompose)"}
+                </button>
+                {canRun && !isPipelineRunning && !isPipelineAwaitingApproval && (
+                  <button
+                    onClick={() => runMutation.mutate()}
+                    disabled={runMutation.isPending}
+                    className="rounded border border-slate-300 px-4 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    {runMutation.isPending ? "Starting…" : "Run Planner Agent (quick)"}
+                  </button>
+                )}
+              </div>
+            </details>
           )}
 
           {isPipelineRunning && (

@@ -27,10 +27,50 @@ interface PendingApproval {
   decidedBy: string | null;
 }
 
+// What the agent is waiting for, in plain words.
 const ACTION_LABELS: Record<string, string> = {
-  plan_review: "Plan Review",
-  git_push: "Git Push",
+  plan_review: "Approve the plan",
+  git_push: "Send the finished work to GitHub",
+  chat_confirmation: "Allow an action",
+  clarification: "Answer a question",
+  cost_approval: "Approve the cost",
+  policy_approval: "Allow a protected change",
 };
+
+// Detail keys with a friendlier label (others are shown as written).
+const DETAIL_LABELS: Record<string, string> = {
+  description: "What",
+  details: "Details",
+  question: "Question",
+  context: "Why",
+  options: "Options",
+  recommended_option: "Recommended",
+  branch: "Branch",
+  files_changed: "Files changed",
+  subtask_count: "Steps",
+};
+
+// Internal flags that mean nothing to a user.
+const HIDDEN_DETAILS = new Set(["blocking"]);
+
+/** A detail value as readable text: lists and objects included. */
+function readable(value: unknown): string {
+  if (Array.isArray(value)) {
+    return value
+      .map((v) => (v && typeof v === "object" ? readable(v) : String(v)))
+      .join(" · ");
+  }
+  if (value && typeof value === "object") {
+    const o = value as Record<string, unknown>;
+    const main = o.label ?? o.title ?? o.name ?? o.id ?? o.option;
+    const desc = o.description ?? o.text;
+    if (main !== undefined) return desc !== undefined ? `${String(main)} (${String(desc)})` : String(main);
+    return Object.entries(o)
+      .map(([k, v]) => `${k}: ${typeof v === "object" ? JSON.stringify(v) : String(v)}`)
+      .join(", ");
+  }
+  return String(value);
+}
 
 async function apiFetch<T>(path: string, method = "GET"): Promise<T> {
   const res = await fetch(path, {
@@ -47,15 +87,15 @@ async function apiFetch<T>(path: string, method = "GET"): Promise<T> {
 
 function DetailsPreview({ details }: { details: Record<string, unknown> }) {
   const entries = Object.entries(details).filter(
-    ([, v]) => v !== null && v !== undefined && v !== "",
+    ([k, v]) => v !== null && v !== undefined && v !== "" && !HIDDEN_DETAILS.has(k),
   );
   if (entries.length === 0) return null;
   return (
     <dl className="mt-2 grid grid-cols-1 gap-x-4 gap-y-1 text-xs text-slate-600 dark:text-slate-400 sm:grid-cols-2">
       {entries.map(([key, value]) => (
         <div key={key} className="flex gap-1">
-          <dt className="font-medium text-slate-500 dark:text-slate-500">{key}:</dt>
-          <dd className="truncate">{String(value)}</dd>
+          <dt className="shrink-0 font-medium text-slate-500 dark:text-slate-500">{DETAIL_LABELS[key] ?? key.replace(/_/g, " ")}:</dt>
+          <dd className="line-clamp-3" title={readable(value)}>{readable(value)}</dd>
         </div>
       ))}
     </dl>
@@ -78,8 +118,8 @@ function ApprovalCard({
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-              {ACTION_LABELS[approval.action] ?? approval.action}
+            <span className="text-xs font-semibold uppercase tracking-wide text-orange-700 dark:text-orange-300">
+              {ACTION_LABELS[approval.action] ?? approval.action.replace(/_/g, " ")}
             </span>
             {approval.agentName && (
               <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500 dark:bg-slate-800 dark:text-slate-400">
@@ -88,7 +128,13 @@ function ApprovalCard({
             )}
           </div>
           <h3 className="mt-1.5 text-base font-semibold text-slate-900 dark:text-slate-100">
-            {approval.taskId ? `Task #${approval.taskId}` : approval.threadId}
+            {approval.taskId ? (
+              <a href={`/tasks/${approval.taskId}`} className="hover:text-orange-700 hover:underline">
+                Task #{approval.taskId}
+              </a>
+            ) : (
+              approval.threadId
+            )}
           </h3>
           <DetailsPreview details={approval.details} />
         </div>
