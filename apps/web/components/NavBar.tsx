@@ -76,14 +76,9 @@ function ThemeToggle() {
 const NAV_LINKS = [
   { href: "/start", label: "Start" },
   { href: "/tasks", label: "Tasks" },
-  { href: "/epics", label: "Epics" },
-  { href: "/goals", label: "Goals" },
-  { href: "/roadmap", label: "Roadmap" },
-  { href: "/console", label: "Console" },
   { href: "/agents", label: "Agents" },
-  { href: "/fleet", label: "Fleet" },
-  { href: "/approvals", label: "Approvals" },
-  { href: "/metrics", label: "KPIs" },
+  { href: "/fleet", label: "Fleet & Approvals" },
+  { href: "/roadmap", label: "Roadmap" },
   { href: "/settings", label: "Settings" },
 ];
 
@@ -187,7 +182,7 @@ export function NavBar() {
   }
 
   function badge(href: string) {
-    const n = href === "/fleet" ? fleetPending : href === "/approvals" ? approvalsPending : 0;
+    const n = href === "/fleet" ? fleetPending + approvalsPending : 0;
     if (n <= 0) return null;
     return (
       <span className="ml-1.5 inline-flex min-w-[1.1rem] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-semibold text-white">

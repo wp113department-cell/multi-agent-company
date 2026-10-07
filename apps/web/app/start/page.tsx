@@ -31,6 +31,7 @@ import {
   useEscapeKey,
   type WorkspaceRoot,
 } from "../../components/FolderPicker";
+import { ProjectTools } from "../../components/ProjectTools";
 
 // ---------------------------------------------------------------------------
 // Plain-language labels
@@ -580,6 +581,7 @@ export default function StartPage() {
   const [tab, setTab] = useState<"projects" | "history">("projects");
   const [historyFor, setHistoryFor] = useState<number | null>(null);
   const [opening, setOpening] = useState<number | null>(null);
+  const [tools, setTools] = useState<Project | null>(null);
   const [error, setError] = useState("");
 
   const { data: projects = [], isLoading } = useQuery({
@@ -708,6 +710,16 @@ export default function StartPage() {
                     >
                       {opening === p.id ? "Opening…" : "Continue"}
                     </button>
+                    {p.localPath && p.status === "ready" && (
+                      <button
+                        type="button"
+                        onClick={() => setTools(p)}
+                        title="Changes, versions, branches, sync with GitHub"
+                        className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-orange-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                      >
+                        Tools
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => {
@@ -728,6 +740,10 @@ export default function StartPage() {
         <section aria-label="History" className="rounded-2xl border border-slate-200 bg-white p-5 shadow-soft dark:border-slate-700 dark:bg-slate-900">
           <HistoryPanel key={historyFor ?? "all"} projects={sorted} initial={historyFor} />
         </section>
+      )}
+
+      {tools && tools.localPath && (
+        <ProjectTools name={tools.name} path={tools.localPath} onClose={() => setTools(null)} />
       )}
 
       {wizard && (
