@@ -78,6 +78,7 @@ test("B — create a task in the UI, it is persisted and opens in detail", async
 });
 
 const PAGES = [
+  "/start",
   "/repo",
   "/tasks",
   "/approvals",
