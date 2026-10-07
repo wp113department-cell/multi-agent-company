@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { fetchAppSettings, saveApiKey, saveGithubToken, type AppSettings } from "../../lib/api";
 import { authHeaders } from "../../lib/auth";
+import { Icon } from "../../components/Icon";
 
 // ---------------------------------------------------------------------------
 // API helpers
@@ -114,7 +115,7 @@ function ApiKeyCard({
     phase === "verifying" ? "Verifying…"
     : phase === "verified" ? "Save"
     : phase === "saving" ? "Saving…"
-    : phase === "saved" ? "Saved ✓"
+    : phase === "saved" ? "Saved"
     : "Verify";
 
   const buttonDisabled =
@@ -168,19 +169,19 @@ function ApiKeyCard({
 
         {!skipVerify && phase === "verified" && (
           <div className="flex items-center gap-2 text-sm text-green-700 dark:text-green-400">
-            <span>✓</span>
+            <Icon name="check" size={14} />
             <span>Key verified — click Save to store it.</span>
           </div>
         )}
         {phase === "saved" && (
           <div className="flex items-center gap-2 text-sm text-green-700 dark:text-green-400">
-            <span>✓</span>
+            <Icon name="check" size={14} />
             <span>Key saved and active.</span>
           </div>
         )}
         {errorMsg && (
           <div className="flex items-start gap-2 text-sm text-red-600 dark:text-red-400">
-            <span>✗</span>
+            <Icon name="x" size={14} />
             <span>{errorMsg}</span>
           </div>
         )}

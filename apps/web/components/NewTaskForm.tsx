@@ -11,6 +11,7 @@ import {
   type PdfFileResult,
   type ProjectDetail,
 } from "../lib/api";
+import { Icon } from "./Icon";
 
 const MAX_PDFS = 5;
 const MAX_IMAGES = 20;
@@ -91,7 +92,7 @@ function LabelPicker({
             onClick={() => setAdding(true)}
             className="text-xs font-semibold text-orange-600 hover:text-orange-700"
           >
-            ＋ New {kind.toLowerCase()}
+            <span className="inline-flex items-center gap-1"><Icon name="plus" size={12} /> New {kind.toLowerCase()}</span>
           </button>
         )}
       </div>
@@ -317,7 +318,7 @@ export function NewTaskForm({ project }: { project: ProjectDetail | null }) {
             onClick={() => setShowAttach((s) => !s)}
             className="font-medium text-orange-600 hover:text-orange-700"
           >
-            📎 {showAttach ? "Hide attachments" : "Attach files (PDFs, images)"}
+            <span className="inline-flex items-center gap-1"><Icon name="paperclip" size={13} /> {showAttach ? "Hide attachments" : "Attach files (PDFs, images)"}</span>
             {pdfs.length + images.length > 0 ? ` · ${pdfs.length + images.length} attached` : ""}
           </button>
           <span className={overLimit ? "font-medium text-red-600" : ""}>
@@ -356,7 +357,7 @@ export function NewTaskForm({ project }: { project: ProjectDetail | null }) {
               <ul className="space-y-1">
                 {pdfs.map((f, i) => (
                   <li key={i} className="flex items-center gap-2 rounded bg-white px-3 py-1.5 dark:bg-slate-800">
-                    <span className="text-base">📄</span>
+                    <Icon name="file-text" size={15} className="text-slate-500" />
                     <span className="flex-1 truncate text-xs text-slate-700 dark:text-slate-300">{f.name}</span>
                     {pdfResults[i] && (
                       <span className="text-xs text-slate-400">{pdfResults[i].chars.toLocaleString()} chars</span>
@@ -367,7 +368,7 @@ export function NewTaskForm({ project }: { project: ProjectDetail | null }) {
                       aria-label={`Remove ${f.name}`}
                       className="ml-1 text-xs text-red-400 hover:text-red-600"
                     >
-                      ✕
+                      <Icon name="x" size={12} />
                     </button>
                   </li>
                 ))}
@@ -415,7 +416,7 @@ export function NewTaskForm({ project }: { project: ProjectDetail | null }) {
                       className="absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] text-white hover:bg-red-600"
                       aria-label={`Remove ${f.name}`}
                     >
-                      ✕
+                      <Icon name="x" size={12} />
                     </button>
                   </li>
                 ))}
@@ -513,7 +514,7 @@ export function NewTaskForm({ project }: { project: ProjectDetail | null }) {
             </p>
           )}
           {created && !mutation.isError && (
-            <p className="text-green-700 dark:text-green-400">✓ Task created. Press “Start” on it below when you are ready.</p>
+            <p className="inline-flex items-center gap-1.5 text-green-700 dark:text-green-400"><Icon name="check-circle" size={14} /> Task created. Press “Start” on it below when you are ready.</p>
           )}
         </div>
         <button

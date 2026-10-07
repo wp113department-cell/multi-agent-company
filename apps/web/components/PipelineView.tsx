@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Icon } from "./Icon";
 
 // Backend stores snake_case keys directly from agent tool calls.
 // These interfaces match what the API actually returns.
@@ -400,9 +401,9 @@ export function PipelineView({ pipeline, onSubtaskEditsChange }: Props) {
           </h3>
           <div className="flex items-center gap-2">
             {[
-              { label: "Dev Agent", stage: "dev_running", icon: "💻" },
-              { label: "QA Agent", stage: "qa_running", icon: "🧪" },
-              { label: "Reviewer", stage: "review_running", icon: "🔍" },
+              { label: "Dev Agent", stage: "dev_running", icon: "code" },
+              { label: "QA Agent", stage: "qa_running", icon: "flask" },
+              { label: "Reviewer", stage: "review_running", icon: "search" },
             ].map(({ label, stage, icon }, idx) => {
               const isActive = pipeline.stage === stage;
               const isPast = isCodingDone ||
@@ -420,10 +421,10 @@ export function PipelineView({ pipeline, onSubtaskEditsChange }: Props) {
                         : "border-slate-200 bg-white text-slate-500"
                     }`}
                   >
-                    <span className="mr-1">{icon}</span>
+                    <Icon name={icon} size={13} className="mr-1" />
                     {label}
                     {isActive && <span className="ml-1 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-teal-500 align-middle" />}
-                    {isPast && <span className="ml-1 text-green-600">✓</span>}
+                    {isPast && <Icon name="check" size={12} className="ml-1 text-green-600" />}
                   </div>
                 </div>
               );

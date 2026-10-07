@@ -23,18 +23,19 @@ import {
   type CustomAgentRecord,
 } from "../../lib/api";
 import { useEscapeKey } from "../../components/FolderPicker";
+import { Icon } from "../../components/Icon";
 
 const CATEGORY_ICON: Record<string, string> = {
-  "Leadership & planning": "🧭",
-  Developers: "💻",
-  "Code quality & review": "🔍",
-  Testing: "🧪",
-  "Security & compliance": "🛡️",
-  "DevOps & reliability": "🚀",
-  "Data & databases": "🗄️",
-  Documentation: "📚",
-  "Self-improvement": "📈",
-  "Specialized engineering": "🎯",
+  "Leadership & planning": "compass",
+  Developers: "code",
+  "Code quality & review": "search",
+  Testing: "flask",
+  "Security & compliance": "shield",
+  "DevOps & reliability": "rocket",
+  "Data & databases": "database",
+  Documentation: "book",
+  "Self-improvement": "trending-up",
+  "Specialized engineering": "target",
 };
 
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
@@ -50,7 +51,7 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
         <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4 dark:border-slate-800">
           <h2 className="text-lg font-bold text-slate-900 dark:text-white">{title}</h2>
           <button onClick={onClose} aria-label="Close" className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">
-            ✕
+            <Icon name="x" size={16} />
           </button>
         </div>
         <div className="max-h-[75vh] overflow-y-auto px-6 py-5">{children}</div>
@@ -269,7 +270,7 @@ function AgentDetailDialog({ agent, onClose }: { agent: CustomAgentRecord; onClo
               disabled={run.isPending || pid == null || request.trim().length < 3}
               className="rounded-lg bg-orange-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
             >
-              {run.isPending ? "Starting…" : "▶ Run"}
+              <span className="inline-flex items-center gap-1.5">{!run.isPending && <Icon name="play" size={13} />}{run.isPending ? "Starting…" : "Run"}</span>
             </button>
           </div>
         </form>
@@ -350,7 +351,7 @@ export default function AgentsPage() {
           onClick={() => setCreating(true)}
           className="btn-primary rounded-xl bg-orange-600 px-5 py-3 text-sm font-semibold text-white"
         >
-          ＋ Create Agent
+          <span className="inline-flex items-center gap-1.5"><Icon name="plus" size={16} /> Create Agent</span>
         </button>
       </section>
 
@@ -366,7 +367,7 @@ export default function AgentsPage() {
             {mine.map((a) => (
               <article key={a.id} className="flex flex-col rounded-2xl border border-orange-100 bg-white p-4 shadow-soft dark:border-slate-700 dark:bg-slate-900">
                 <div className="flex items-center gap-2">
-                  <span className="text-xl" aria-hidden="true">🧑‍💼</span>
+                  <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-orange-100 text-orange-700"><Icon name="user" size={16} /></span>
                   <h3 className="font-semibold text-slate-900 dark:text-white">{a.name}</h3>
                 </div>
                 <p className="mt-2 line-clamp-3 text-sm text-slate-600 dark:text-slate-400">{a.purpose}</p>
@@ -427,7 +428,7 @@ export default function AgentsPage() {
                   className="flex w-full items-center gap-3 p-4 text-left"
                 >
                   <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-orange-100 to-orange-200 text-xl">
-                    {CATEGORY_ICON[c.name] ?? "🤖"}
+                    <Icon name={CATEGORY_ICON[c.name] ?? "bot"} size={20} className="text-orange-700" />
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="block font-semibold text-slate-900 dark:text-white">{c.name}</span>

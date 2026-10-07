@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { authHeaders } from "../lib/auth";
 import { useEscapeKey } from "./FolderPicker";
+import { Icon } from "./Icon";
 
 type Tab = "changes" | "history" | "branches" | "save";
 
@@ -119,7 +120,7 @@ export function ProjectTools({
             <p className="truncate font-mono text-xs text-slate-500">{path}</p>
           </div>
           <button onClick={onClose} aria-label="Close" className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800">
-            ✕
+            <Icon name="x" size={16} />
           </button>
         </div>
 
@@ -291,7 +292,7 @@ export function ProjectTools({
                   }
                   className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-orange-50 dark:border-slate-700 dark:text-slate-200"
                 >
-                  ⬇ Get latest from GitHub
+                  <span className="inline-flex items-center gap-1.5"><Icon name="arrow-down" size={14} /> Get latest from GitHub</span>
                 </button>
                 <button
                   type="button"
@@ -303,7 +304,7 @@ export function ProjectTools({
                   }
                   className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-orange-50 dark:border-slate-700 dark:text-slate-200"
                 >
-                  ⬆ Send to GitHub
+                  <span className="inline-flex items-center gap-1.5"><Icon name="arrow-up" size={14} /> Send to GitHub</span>
                 </button>
               </div>
               <p className="text-xs text-slate-500">

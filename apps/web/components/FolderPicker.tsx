@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { authHeaders } from "../lib/auth";
+import { Icon } from "./Icon";
 
 /**
  * Folder picker for the workspace folder the API can see. In Docker that is
@@ -142,11 +143,11 @@ export function DirPickerModal({ onSelect, onClose }: { onSelect: (path: string)
       >
         <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-700">
           <h3 id="dir-picker-modal-title" className="text-sm font-semibold text-slate-900 dark:text-slate-100">Select Folder</h3>
-          <button onClick={onClose} aria-label="Close dialog" className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">✕</button>
+          <button onClick={onClose} aria-label="Close dialog" className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"><Icon name="x" size={16} /></button>
         </div>
         <div className="bg-orange-50/70 px-4 py-2 dark:bg-slate-800">
           <p className="truncate font-mono text-xs text-slate-700 dark:text-slate-300" title={hostPath(currentPath, ws)}>
-            📂 {hostPath(currentPath, ws) || "…"}
+            <span className="inline-flex items-center gap-1.5"><Icon name="folder-open" size={13} className="text-orange-600" /> {hostPath(currentPath, ws) || "…"}</span>
           </p>
           {ws?.host_label && (
             <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
@@ -168,7 +169,7 @@ export function DirPickerModal({ onSelect, onClose }: { onSelect: (path: string)
           {!loading && entries.length === 0 && <p className="px-4 py-3 text-sm text-slate-400">Empty directory</p>}
           {!loading && entries.map((e) => (
             <button key={e.path} onClick={() => navigate(e.path)} className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-800">
-              <span className="text-amber-500">📁</span>
+              <Icon name="folder" size={15} className="text-amber-500" />
               <span className="text-slate-800 dark:text-slate-200">{e.name}</span>
             </button>
           ))}

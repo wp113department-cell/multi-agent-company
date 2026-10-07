@@ -25,6 +25,7 @@ import {
   startTask,
   updateTaskStatus,
 } from "../../../lib/api";
+import { Icon } from "../../../components/Icon";
 
 // #439 (2026-09-22, "User satisfaction — real, not proxy") — the backend
 // endpoint (POST /api/ratings) existed with no way for a user to actually
@@ -53,7 +54,7 @@ function AgentRatingWidget({ agentName, taskId }: { agentName: string; taskId: s
   if (submitted !== null) {
     return (
       <p className="text-xs text-slate-500">
-        Thanks for the feedback {submitted === 1 ? "👍" : "👎"} on {agentName}&apos;s work.
+        <Icon name={submitted === 1 ? "thumbs-up" : "thumbs-down"} size={14} /> Thanks for the feedback on {agentName}&apos;s work.
       </p>
     );
   }
@@ -68,7 +69,7 @@ function AgentRatingWidget({ agentName, taskId }: { agentName: string; taskId: s
         aria-label="Thumbs up"
         className="rounded-full border border-slate-200 px-2 py-1 text-sm hover:bg-green-50 disabled:opacity-50 dark:border-slate-700 dark:hover:bg-green-900/20"
       >
-        👍
+        <Icon name="thumbs-up" size={15} />
       </button>
       <button
         type="button"
@@ -77,7 +78,7 @@ function AgentRatingWidget({ agentName, taskId }: { agentName: string; taskId: s
         aria-label="Thumbs down"
         className="rounded-full border border-slate-200 px-2 py-1 text-sm hover:bg-red-50 disabled:opacity-50 dark:border-slate-700 dark:hover:bg-red-900/20"
       >
-        👎
+        <Icon name="thumbs-down" size={15} />
       </button>
       {error && <span className="text-xs text-red-600">{error}</span>}
     </div>
@@ -234,7 +235,7 @@ export default function TaskDetailPage() {
         </div>
         <p className="mb-3 flex flex-wrap items-center gap-2 text-xs">
           <span className="inline-flex items-center gap-1 rounded-full border border-orange-200 bg-orange-50 px-2.5 py-0.5 font-semibold text-orange-800">
-            📁 {task.projectName ?? task.repoName ?? "No project"}
+            <Icon name="folder" size={12} /> {task.projectName ?? task.repoName ?? "No project"}
           </span>
           <span
             className={`rounded-full px-2.5 py-0.5 font-semibold ring-1 ${
@@ -250,17 +251,17 @@ export default function TaskDetailPage() {
           >
             {task.executionMode === "max" ? "Max" : "Economy"}
           </span>
-          {task.goalTitle && <span className="rounded-full bg-slate-50 px-2.5 py-0.5 text-slate-600 ring-1 ring-slate-200">🎯 {task.goalTitle}</span>}
-          {task.epicTitle && <span className="rounded-full bg-slate-50 px-2.5 py-0.5 text-slate-600 ring-1 ring-slate-200">🧩 {task.epicTitle}</span>}
+          {task.goalTitle && <span className="rounded-full bg-slate-50 px-2.5 py-0.5 text-slate-600 ring-1 ring-slate-200 inline-flex items-center gap-1"><Icon name="target" size={12} /> {task.goalTitle}</span>}
+          {task.epicTitle && <span className="rounded-full bg-slate-50 px-2.5 py-0.5 text-slate-600 ring-1 ring-slate-200 inline-flex items-center gap-1"><Icon name="layers" size={12} /> {task.epicTitle}</span>}
           <Link href="/chat" className="ml-auto rounded-full border border-slate-200 px-2.5 py-0.5 font-medium text-slate-600 hover:bg-orange-50">
-            💬 Chat with the team
+            <Icon name="message" size={12} /> Chat with the team
           </Link>
         </p>
         {task.description && <p className="mb-4 text-sm text-slate-700">{task.description}</p>}
 
         {(isPlanReview || isDiffReview || isPipelineAwaitingApproval) && (
           <div role="status" className="mb-4 flex items-start gap-3 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
-            <span className="text-xl" aria-hidden="true">✋</span>
+            <Icon name="hand" size={22} className="text-amber-600" />
             <div>
               <p className="font-semibold">Your decision is needed</p>
               <p className="mt-0.5">
@@ -282,7 +283,7 @@ export default function TaskDetailPage() {
               title={task.executionMode === "max" ? "Runs the full team pipeline" : "Uses the fewest agents (Economy)"}
               className="rounded-lg bg-orange-600 px-5 py-2 text-sm font-semibold text-white disabled:opacity-50"
             >
-              {startMutation.isPending ? "Starting…" : `▶ Start (${task.executionMode === "max" ? "Max" : "Economy"})`}
+              <span className="inline-flex items-center gap-1.5">{!startMutation.isPending && <Icon name="play" size={13} />}{startMutation.isPending ? "Starting…" : `Start (${task.executionMode === "max" ? "Max" : "Economy"})`}</span>
             </button>
           )}
 
@@ -352,7 +353,7 @@ export default function TaskDetailPage() {
               disabled={restartMutation.isPending}
               className="rounded bg-orange-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-orange-700 disabled:opacity-50"
             >
-              {restartMutation.isPending ? "Restarting…" : "↺ Restart Pipeline"}
+              {restartMutation.isPending ? "Restarting…" : "Restart pipeline"}
             </button>
           )}
 

@@ -19,6 +19,7 @@ import {
   startTask,
   type DevTask,
 } from "../../lib/api";
+import { Icon } from "../../components/Icon";
 
 // The statuses a user sees, in lifecycle order, with plain words.
 const STATUSES: { id: string; label: string; cls: string; hint: string }[] = [
@@ -63,7 +64,7 @@ function TaskAction({ task }: { task: DevTask }) {
           disabled={start.isPending}
           className={`${base} bg-orange-600 text-white disabled:opacity-50`}
         >
-          {start.isPending ? "Starting…" : task.status === "pending" ? "▶ Start" : "↻ Try again"}
+          <span className="inline-flex items-center gap-1.5">{!start.isPending && <Icon name={task.status === "pending" ? "play" : "arrow-right"} size={13} />}{start.isPending ? "Starting…" : task.status === "pending" ? "Start" : "Try again"}</span>
         </button>
         {start.isError && (
           <span className="max-w-[14rem] text-right text-xs text-red-600">
@@ -257,9 +258,9 @@ function TasksInner() {
                 </div>
                 <p className="mt-2 line-clamp-2 text-sm font-semibold text-slate-900 dark:text-white">{task.title}</p>
                 <p className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
-                  <span>📁 {task.projectName ?? project?.name ?? "—"}</span>
-                  {task.goalTitle && <span>🎯 {task.goalTitle}</span>}
-                  {task.epicTitle && <span>🧩 {task.epicTitle}</span>}
+                  <span className="inline-flex items-center gap-1"><Icon name="folder" size={13} /> {task.projectName ?? project?.name ?? "—"}</span>
+                  {task.goalTitle && <span className="inline-flex items-center gap-1"><Icon name="target" size={13} /> {task.goalTitle}</span>}
+                  {task.epicTitle && <span className="inline-flex items-center gap-1"><Icon name="layers" size={13} /> {task.epicTitle}</span>}
                   <span>{STATUS_BY_ID[task.status]?.hint ?? ""}</span>
                 </p>
               </Link>

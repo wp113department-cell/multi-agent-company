@@ -10,6 +10,7 @@ import {
   useEscapeKey,
   type WorkspaceRoot,
 } from "../../components/FolderPicker";
+import { Icon } from "../../components/Icon";
 
 // ---------------------------------------------------------------------------
 // Clone form (used both inline for first-time setup and inside the add modal)
@@ -88,7 +89,7 @@ function CloneForm({
                 : "text-slate-500 hover:text-slate-700 dark:text-slate-400"
             }`}
           >
-            {t === "public" ? "🌐 Public Repository" : "🔒 Private Repository"}
+            <span className="inline-flex items-center gap-1.5"><Icon name={t === "public" ? "globe" : "lock"} size={14} />{t === "public" ? "Public Repository" : "Private Repository"}</span>
           </button>
         ))}
       </div>
@@ -212,7 +213,7 @@ function CloneForm({
       )}
       {done && (
         <div className="rounded-lg bg-green-50 px-4 py-3 text-sm font-medium text-green-700 dark:bg-green-900/20 dark:text-green-400">
-          ✓ Repository cloning… it will appear in the list shortly.
+          <span className="inline-flex items-center gap-1.5"><Icon name="check" size={14} /> Repository cloning… it will appear in the list shortly.</span>
         </div>
       )}
 
@@ -271,7 +272,7 @@ function AddRepoModal({ onClose }: { onClose: () => void }) {
             aria-label="Close dialog"
             className="rounded-md p-1.5 text-slate-400 hover:bg-slate-200 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-300"
           >
-            ✕
+            <Icon name="x" size={16} />
           </button>
         </div>
         <CloneForm onSuccess={onClose} onCancel={onClose} showCancel={true} />

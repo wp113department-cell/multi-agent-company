@@ -4,6 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { isAuthenticated } from "../lib/auth";
 import { BrandMark, BRAND_NAME } from "./BrandMark";
+import { Icon } from "./Icon";
 
 /**
  * First-time guided tour. Shown once per browser after the first sign-in;
@@ -18,48 +19,48 @@ type Step = { target?: string; icon: string; title: string; text: string };
 
 const STEPS: Step[] = [
   {
-    icon: "👋",
+    icon: "sparkles",
     title: `Welcome to ${BRAND_NAME}`,
     text: "This is your AI software team. Specialised agents plan, write, test and review code, and you approve the important steps. This short tour shows you around.",
   },
   {
     target: "/start",
-    icon: "🏁",
+    icon: "flag",
     title: "Start",
     text: "Your starting point. Create a new project (on this computer or on GitHub) or continue one you already have, and see what was done in it.",
   },
   {
     target: "/tasks",
-    icon: "✅",
+    icon: "check-circle",
     title: "Tasks",
     text: "Pick a project and describe what you need in plain words. Optionally link it to a goal or an epic, choose Economy or Max, and press Start.",
   },
   {
     target: "/agents",
-    icon: "🤖",
+    icon: "bot",
     title: "Agents",
     text: "All the specialists on your team, grouped by what they do. You can also create your own agent for a special job.",
   },
   {
     target: "/fleet",
-    icon: "🛡️",
+    icon: "shield-check",
     title: "Fleet & Approvals",
     text: "Anything that needs your OK waits here, together with notifications and the team's own improvement suggestions.",
   },
   {
     target: "/roadmap",
-    icon: "🗺️",
+    icon: "map",
     title: "Roadmap",
     text: "The bigger picture: planned initiatives and their progress.",
   },
   {
     target: "/settings",
-    icon: "⚙️",
+    icon: "settings",
     title: "Settings",
     text: "Add and check your Anthropic API key. You can replay this tour anytime with the Tour button at the top.",
   },
   {
-    icon: "🚀",
+    icon: "rocket",
     title: "You're ready!",
     text: "Tip: go to Start, create or open a project, then describe your first task. The team will ask you when they need a decision.",
   },
@@ -188,8 +189,8 @@ export function ProductTour() {
           {idx === 0 || last ? (
             <BrandMark size={40} />
           ) : (
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-orange-100 to-orange-200 text-xl">
-              {step.icon}
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-orange-100 to-orange-200 text-orange-700">
+              <Icon name={step.icon} size={20} />
             </span>
           )}
           <div className="min-w-0">
@@ -197,7 +198,7 @@ export function ProductTour() {
               Step {idx + 1} of {STEPS.length}
             </p>
             <h2 id="tour-title" className="text-lg font-bold text-slate-900 dark:text-white">
-              {idx === 0 || last ? `${step.icon} ${step.title}` : step.title}
+              {step.title}
             </h2>
           </div>
         </div>

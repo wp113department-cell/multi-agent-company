@@ -21,6 +21,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { authHeaders } from "@/lib/auth";
+import { Icon } from "../../../components/Icon";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -49,7 +50,7 @@ function ThinkingBlock({ event }: { event: Extract<ActivityEvent, { type: "think
   return (
     <div className="event-block thinking-block">
       <button className="event-header" onClick={() => setOpen(o => !o)}>
-        <span className="event-icon">🧠</span>
+        <span className="event-icon"><Icon name="lightbulb" size={14} /></span>
         <span className="event-label">{event.agent} thinking…</span>
         <span className="toggle-arrow">{open ? "▲" : "▼"}</span>
       </button>
@@ -61,7 +62,7 @@ function ThinkingBlock({ event }: { event: Extract<ActivityEvent, { type: "think
 function ToolCallBlock({ event }: { event: Extract<ActivityEvent, { type: "tool_call" }> }) {
   return (
     <div className="event-block tool-call-block">
-      <span className="event-icon">🔧</span>
+      <span className="event-icon"><Icon name="wrench" size={14} /></span>
       <span className="event-label">Calling <code>{event.tool}</code></span>
       <pre className="event-body small">{JSON.stringify(event.input, null, 2).slice(0, 400)}</pre>
     </div>
@@ -71,7 +72,7 @@ function ToolCallBlock({ event }: { event: Extract<ActivityEvent, { type: "tool_
 function ToolResultBlock({ event }: { event: Extract<ActivityEvent, { type: "tool_result" }> }) {
   return (
     <div className={`event-block tool-result-block ${event.ok ? "ok" : "err"}`}>
-      <span className="event-icon">{event.ok ? "✅" : "❌"}</span>
+      <span className="event-icon"><Icon name={event.ok ? "check-circle" : "x-circle"} size={14} /></span>
       <span className="event-label"><code>{event.tool}</code> result</span>
       <pre className="event-body small">{event.preview}</pre>
     </div>
@@ -86,7 +87,7 @@ function FileEditBlock({ event }: { event: Extract<ActivityEvent, { type: "file_
   const color = actionColor[event.action] ?? "#6b7280";
   return (
     <div className="event-block file-edit-block">
-      <span className="event-icon">📝</span>
+      <span className="event-icon"><Icon name="file-text" size={14} /></span>
       <span className="event-label">{event.path}</span>
       <span className="action-badge" style={{ background: color }}>{event.action.replace("_", " ")}</span>
     </div>
@@ -97,7 +98,7 @@ function TerminalBlock({ event }: { event: Extract<ActivityEvent, { type: "termi
   return (
     <div className="event-block terminal-block">
       <div className="terminal-header">
-        <span className="event-icon">💻</span>
+        <span className="event-icon"><Icon name="terminal" size={14} /></span>
         <code className="terminal-cmd">{event.command}</code>
         <span className={`exit-badge ${event.exit_code === 0 ? "ok" : "err"}`}>
           exit {event.exit_code}
@@ -111,7 +112,7 @@ function TerminalBlock({ event }: { event: Extract<ActivityEvent, { type: "termi
 function DoneBlock({ event }: { event: Extract<ActivityEvent, { type: "done" }> }) {
   return (
     <div className="event-block done-block">
-      <span className="event-icon">🎉</span>
+      <span className="event-icon"><Icon name="check-circle" size={14} /></span>
       <strong>Done!</strong>
       <span className="token-pill">{event.tokens_in + event.tokens_out} tokens · ${event.cost_usd.toFixed(4)}</span>
       {event.summary && <p className="done-summary">{event.summary}</p>}
@@ -122,7 +123,7 @@ function DoneBlock({ event }: { event: Extract<ActivityEvent, { type: "done" }> 
 function ErrorBlock({ event }: { event: Extract<ActivityEvent, { type: "error" }> }) {
   return (
     <div className="event-block error-block">
-      <span className="event-icon">🔴</span>
+      <span className="event-icon"><Icon name="x-circle" size={14} /></span>
       <strong>Error:</strong> {event.message}
     </div>
   );
@@ -131,7 +132,7 @@ function ErrorBlock({ event }: { event: Extract<ActivityEvent, { type: "error" }
 function AgentSwitchBlock({ event }: { event: Extract<ActivityEvent, { type: "agent_switch" }> }) {
   return (
     <div className="agent-switch-divider">
-      <span className="event-icon">➡️</span>
+      <span className="event-icon"><Icon name="arrow-right" size={14} /></span>
       <span>
         <strong>{event.agent}</strong>
         {event.phase ? ` — ${event.phase}` : ""}
@@ -457,7 +458,7 @@ export default function ActivityFeedPage() {
               onChange={e => setResumeMsg(e.target.value)}
             />
             <button className="resume-btn" onClick={handleResume} disabled={resumeLoading}>
-              {resumeLoading ? "Resuming…" : "▶ Resume"}
+              <span className="inline-flex items-center gap-1.5">{!resumeLoading && <Icon name="play" size={13} />}{resumeLoading ? "Resuming…" : "Resume"}</span>
             </button>
           </div>
         )}

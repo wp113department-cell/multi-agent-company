@@ -5,6 +5,7 @@ import { confirmChatAction, createChatSession, deleteChatSession, listRepos, sto
 import type { RepoRecord } from "@/lib/api";
 import { authHeaders } from "@/lib/auth";
 import { TerminalTabs } from "@/components/TerminalTabs";
+import { Icon } from "../../components/Icon";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -188,7 +189,7 @@ function ConfirmBlock({
     return (
       <div className="my-1 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800">
         <span className={`font-medium ${msg.answer ? "text-green-600" : "text-red-500"}`}>
-          {msg.answer ? "✓ Approved" : "✕ Denied"}:
+          {msg.answer ? "Approved" : "Denied"}:
         </span>{" "}
         <span className="text-slate-600 dark:text-slate-400">{msg.description}</span>
       </div>
@@ -198,7 +199,7 @@ function ConfirmBlock({
   return (
     <div className="my-2 rounded-xl border-2 border-amber-300 bg-amber-50 p-4 dark:border-amber-600 dark:bg-amber-900/20">
       <div className="mb-2 flex items-center gap-2">
-        <span className="text-lg">⚠️</span>
+        <Icon name="alert" size={18} className="text-amber-600" />
         <span className="font-semibold text-amber-800 dark:text-amber-200">{msg.description}</span>
       </div>
       <pre className="mb-3 overflow-x-auto rounded bg-amber-100 p-2 text-xs text-amber-900 dark:bg-amber-900/40 dark:text-amber-100">
@@ -770,7 +771,7 @@ export default function ChatPage() {
             {messages.length === 0 && (
               <div className="flex h-full items-center justify-center text-center text-slate-400">
                 <div>
-                  <p className="text-4xl mb-3">🤖</p>
+                  <p className="mb-3 flex justify-center text-orange-500"><Icon name="bot" size={40} /></p>
                   <p className="font-medium">Agent ready</p>
                   <p className="text-sm mt-1">
                     Ask me to read files, fix bugs, write code, run tests, commit changes...
@@ -851,7 +852,7 @@ export default function ChatPage() {
 
             {error && (
               <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600 dark:bg-red-900/20 dark:text-red-400">
-                ⚠ {error}
+                <span className="inline-flex items-center gap-1.5"><Icon name="alert" size={14} /> {error}</span>
               </div>
             )}
 

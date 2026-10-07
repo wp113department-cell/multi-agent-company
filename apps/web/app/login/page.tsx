@@ -4,6 +4,7 @@ import { useEffect, useState, FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { changePassword, login } from "../../lib/auth";
 import { BrandMark, BRAND_NAME } from "../../components/BrandMark";
+import { Icon } from "../../components/Icon";
 
 // TEMPORARY (requested 2026-09-18) — lets a developer skip typing
 // credentials on every reload while testing locally. Uses the same
@@ -171,7 +172,7 @@ export default function LoginPage() {
                   key={a.name}
                   className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
                 >
-                  <span aria-hidden="true">{a.icon}</span>
+                  <Icon name={a.icon} size={15} className="text-orange-500" />
                   {a.name}
                 </span>
               ))}
@@ -185,9 +186,7 @@ export default function LoginPage() {
                   className="rounded-2xl border border-slate-200/80 bg-white/70 p-4 backdrop-blur dark:border-slate-800 dark:bg-slate-900/60"
                 >
                   <dt className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
-                    <span aria-hidden="true" className="text-orange-500">
-                      {t.icon}
-                    </span>
+                    <Icon name={t.icon} size={16} className="text-orange-500" />
                     {t.title}
                   </dt>
                   <dd className="mt-1 text-xs leading-relaxed text-slate-600 dark:text-slate-400">{t.text}</dd>
@@ -361,7 +360,7 @@ export default function LoginPage() {
               disabled={devLoading}
               className="flex w-full items-center justify-center gap-2 rounded-lg border-2 border-dashed border-amber-400 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-800 transition-colors hover:bg-amber-100 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2 disabled:opacity-50 dark:border-amber-500/60 dark:bg-amber-950/30 dark:text-amber-300 dark:hover:bg-amber-950/50"
             >
-              <span aria-hidden="true">🛠️</span>
+              <Icon name="wrench" size={16} />
               {devLoading ? "Logging in…" : "Developer Login"}
             </button>
             <p className="mt-1.5 text-center text-[11px] text-amber-600/80 dark:text-amber-400/70">
@@ -411,18 +410,18 @@ const STEPS = [
 ];
 
 const AGENTS = [
-  { icon: "🧭", name: "Planner" },
-  { icon: "💻", name: "Developer" },
-  { icon: "🧪", name: "Tester" },
-  { icon: "🔍", name: "Reviewer" },
-  { icon: "🛡️", name: "Security" },
-  { icon: "🚀", name: "DevOps" },
-  { icon: "📚", name: "Docs" },
-  { icon: "📈", name: "Self-improvement" },
+  { icon: "compass", name: "Planner" },
+  { icon: "code", name: "Developer" },
+  { icon: "flask", name: "Tester" },
+  { icon: "search", name: "Reviewer" },
+  { icon: "shield", name: "Security" },
+  { icon: "rocket", name: "DevOps" },
+  { icon: "book", name: "Docs" },
+  { icon: "trending-up", name: "Self-improvement" },
 ];
 
 const TRUST = [
-  { icon: "✔", title: "Human in control", text: "Risky steps always wait for your approval." },
-  { icon: "🔒", title: "Sandboxed", text: "Code runs in isolated containers with no secrets." },
-  { icon: "💰", title: "Cost-capped", text: "A daily budget keeps AI spend predictable." },
+  { icon: "check-circle", title: "Human in control", text: "Risky steps always wait for your approval." },
+  { icon: "lock", title: "Sandboxed", text: "Code runs in isolated containers with no secrets." },
+  { icon: "coins", title: "Cost-capped", text: "A daily budget keeps AI spend predictable." },
 ];

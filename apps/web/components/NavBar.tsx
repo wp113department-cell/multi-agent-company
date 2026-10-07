@@ -7,6 +7,7 @@ import { logout, isAuthenticated, authHeaders } from "../lib/auth";
 import { NotificationBell } from "./NotificationBell";
 import { BrandMark, BRAND_NAME } from "./BrandMark";
 import { START_TOUR_EVENT } from "./ProductTour";
+import { Icon } from "./Icon";
 
 function ThemeToggle() {
   const [dark, setDark] = useState(false);
@@ -233,7 +234,7 @@ export function NavBar() {
               title="Take the guided tour"
               className="mr-1 hidden items-center gap-1 whitespace-nowrap rounded-full border border-orange-200 bg-orange-50 px-3 py-1.5 text-xs font-semibold text-orange-700 transition hover:bg-orange-100 md:inline-flex dark:border-orange-900 dark:bg-orange-950/40 dark:text-orange-300"
             >
-              <span aria-hidden="true">✨</span> Tour
+              <Icon name="sparkles" size={13} /> Tour
             </button>
           )}
           <NotificationBell authed={authed} />
@@ -301,7 +302,7 @@ export function NavBar() {
               onClick={() => window.dispatchEvent(new Event(START_TOUR_EVENT))}
               className="mt-3 w-full rounded-lg border border-orange-200 bg-orange-50 px-3 py-2.5 text-sm font-semibold text-orange-700 md:hidden dark:border-orange-900 dark:bg-orange-950/40 dark:text-orange-300"
             >
-              ✨ Take the guided tour
+              <span className="inline-flex items-center justify-center gap-1.5"><Icon name="sparkles" size={14} /> Take the guided tour</span>
             </button>
           )}
           {authed && (

@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useState } from "react";
 import { authHeaders, isApprover } from "@/lib/auth";
+import { Icon } from "../../components/Icon";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Types
@@ -160,7 +161,7 @@ function EpicRow({
             </p>
           )}
           {epic.haltReason && (
-            <p className="text-xs text-red-600 dark:text-red-400 mt-0.5">⚠ {epic.haltReason}</p>
+            <p className="text-xs text-red-600 dark:text-red-400 mt-0.5"><span className="inline-flex items-center gap-1"><Icon name="alert" size={12} /> {epic.haltReason}</span></p>
           )}
         </div>
         {/* Gap-closure Stage 1.4 (answers.md) — UI-level role gating, a
@@ -358,7 +359,7 @@ export default function BatchReviewPage() {
       {/* Empty state */}
       {data && total === 0 && (
         <div className="text-center py-16 rounded-xl border border-dashed border-gray-300 dark:border-gray-600">
-          <div className="text-4xl mb-3">✅</div>
+          <div className="mb-3 flex justify-center text-green-600"><Icon name="check-circle" size={40} /></div>
           <p className="font-semibold text-gray-700 dark:text-gray-300">Nothing pending review</p>
           <p className="text-sm text-gray-400 mt-1">All epics and tasks are up to date.</p>
         </div>
