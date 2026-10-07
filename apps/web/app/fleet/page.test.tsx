@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import FleetDashboardPage from "./page";
+import { FleetPanel as FleetDashboardPage } from "../../components/FleetPanel";
 import * as auth from "../../lib/auth";
 
 const EMPTY_REQUESTS_RESPONSE = new Response(JSON.stringify([]), {

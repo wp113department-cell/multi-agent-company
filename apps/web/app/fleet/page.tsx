@@ -1,391 +1,126 @@
 "use client";
 
 /**
- * Fleet Enhancement Dashboard (Day 9, extended by gap-closure Days 48-50
- * and AUDIT_Q_BATCH07 §12/§64).
- *
- * Shows what the fleet self-improvement agents (agent_performance_reviewer,
- * agent_debugger, agent_advisor, knowledge_curator, quality_auditor,
- * architecture_reviewer, dependency_security_agent, monitoring_agent) found
- * during their autonomous background scans. Nothing happens to your project
- * until you approve a specific request here — approve kicks off that agent's
- * write-capable APPLY phase (when it has one — see the "Recommendation only"
- * badge), streamed live at /stream/[taskId]; reject is final.
+ * Fleet & Approvals: everything that needs the user's attention in one place.
+ * - Approvals: decisions agents are waiting for (plans, risky actions)
+ * - Notifications: tasks that got stuck or failed
+ * - Team improvements: the self-improvement agents' suggestions + team health
+ * - Performance: KPIs and cost (still updated live in the backend)
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { authHeaders, isApprover } from "../../lib/auth";
+import { Suspense, useEffect, useState } from "react";
+import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
+import { ApprovalsPanel } from "../../components/ApprovalsPanel";
+import { FleetPanel } from "../../components/FleetPanel";
+import { NotificationsPanel } from "../../components/NotificationsPanel";
+import { authHeaders } from "../../lib/auth";
 
-interface AgentHealthRow {
-  agentName: string;
-  totalRuns: number;
-  failedRuns: number;
-  failureRate: number;
-  activeRuns: number;
-  avgHeartbeatStalenessSeconds: number | null;
-}
+const TABS = [
+  { id: "approvals", label: "Approvals" },
+  { id: "notifications", label: "Notifications" },
+  { id: "improvements", label: "Team improvements" },
+  { id: "performance", label: "Performance" },
+] as const;
+type TabId = (typeof TABS)[number]["id"];
 
-interface EnhancementRequest {
-  id: number;
-  agentName: string;
-  title: string;
-  description: string;
-  category: string;
-  priority: "emergency" | "medium" | "low";
-  evidence: Record<string, unknown>;
-  status: "pending" | "in_progress" | "approved" | "rejected" | "completed" | "failed";
-  filesTouched: string[];
-  commitSha: string | null;
-  restartRequired: boolean;
-  autoApplicable: boolean;
-  error: string | null;
-  traceId: string | null;
-  createdAt: string;
-  decidedAt: string | null;
-  decidedBy: string | null;
-  completedAt: string | null;
-}
-
-const AGENT_LABELS: Record<string, string> = {
-  agent_performance_reviewer: "Performance Reviewer",
-  agent_debugger: "Debugger",
-  agent_advisor: "Advisor",
-  knowledge_curator: "Knowledge Curator",
-  quality_auditor: "Quality Auditor",
-  architecture_reviewer: "Architecture Reviewer",
-  dependency_security_agent: "Dependency Security",
-  monitoring_agent: "Infrastructure Monitor",
-};
-
-const PRIORITY_ORDER: Record<string, number> = { emergency: 0, medium: 1, low: 2 };
-
-const PRIORITY_STYLES: Record<string, string> = {
-  emergency: "bg-red-50 text-red-700 border-red-200 dark:bg-red-950 dark:text-red-300 dark:border-red-800",
-  medium: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800",
-  low: "bg-slate-50 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700",
-};
-
-const STATUS_STYLES: Record<string, string> = {
-  pending: "text-slate-500 dark:text-slate-400",
-  in_progress: "text-blue-600 dark:text-blue-400",
-  completed: "text-green-600 dark:text-green-400",
-  failed: "text-red-600 dark:text-red-400",
-  rejected: "text-slate-400 dark:text-slate-600",
-};
-
-async function apiFetch<T>(path: string, method = "GET", body?: unknown): Promise<T> {
-  const opts: RequestInit = {
-    method,
-    headers: { "Content-Type": "application/json", ...authHeaders() },
-  };
-  if (body !== undefined) opts.body = JSON.stringify(body);
-  const res = await fetch(path, opts);
-  const json = (await res.json()) as T;
-  if (!res.ok) {
-    const detail = (json as { detail?: string })?.detail ?? `HTTP ${res.status}`;
-    throw new Error(detail);
+async function count(url: string, pick: (d: unknown) => number): Promise<number> {
+  try {
+    const res = await fetch(url, { headers: authHeaders() });
+    if (!res.ok) return 0;
+    return pick(await res.json());
+  } catch {
+    return 0;
   }
-  return json;
 }
 
-function PriorityBadge({ priority }: { priority: string }) {
-  return (
-    <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${PRIORITY_STYLES[priority] ?? PRIORITY_STYLES.low}`}>
-      {priority}
-    </span>
-  );
-}
-
-function RequestCard({
-  req,
-  onApprove,
-  onReject,
-  busy,
-}: {
-  req: EnhancementRequest;
-  onApprove: (id: number) => void;
-  onReject: (id: number) => void;
-  busy: boolean;
-}) {
-  return (
-    <div className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-900">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-              {AGENT_LABELS[req.agentName] ?? req.agentName}
-            </span>
-            <PriorityBadge priority={req.priority} />
-            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500 dark:bg-slate-800 dark:text-slate-400">
-              {req.category}
-            </span>
-            {!req.autoApplicable && (
-              <span
-                className="rounded-full border border-slate-300 px-2 py-0.5 text-xs text-slate-500 dark:border-slate-600 dark:text-slate-400"
-                title="This agent has no automated apply phase — approving files it as acknowledged, but no code changes will be made."
-              >
-                Recommendation only
-              </span>
-            )}
-          </div>
-          <h3 className="mt-1.5 text-base font-semibold text-slate-900 dark:text-slate-100">{req.title}</h3>
-          <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">{req.description}</p>
-        </div>
-      </div>
-
-      {req.status === "pending" ? (
-        // Gap-closure Stage 1.4 (answers.md) — UI-level role gating, a
-        // courtesy only; the server (require_approver) is the real
-        // enforcement point.
-        isApprover() ? (
-          <div className="mt-4 flex gap-2">
-            <button
-              disabled={busy}
-              onClick={() => onApprove(req.id)}
-              className="rounded-md bg-green-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
-            >
-              Approve
-            </button>
-            <button
-              disabled={busy}
-              onClick={() => onReject(req.id)}
-              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-800"
-            >
-              Reject
-            </button>
-          </div>
-        ) : (
-          <p className="mt-4 text-xs text-slate-400 dark:text-slate-500">
-            Approver role required to decide on this request.
-          </p>
-        )
-      ) : (
-        <div className="mt-4 flex flex-wrap items-center gap-3 text-sm">
-          <span className={`font-medium ${STATUS_STYLES[req.status] ?? ""}`}>
-            {req.status.replace("_", " ")}
-          </span>
-          {req.traceId && (req.status === "in_progress" || req.status === "completed" || req.status === "failed") && (
-            <a href={`/stream/${req.traceId}`} className="text-blue-600 hover:underline dark:text-blue-400">
-              View progress →
-            </a>
-          )}
-          {req.commitSha && (
-            <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-400">
-              {req.commitSha.slice(0, 12)}
-            </span>
-          )}
-          {req.error && <span className="text-red-600 dark:text-red-400">{req.error}</span>}
-        </div>
-      )}
-
-      {req.status === "completed" && req.restartRequired && (
-        <div className="mt-3 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950 dark:text-amber-300">
-          Restart the backend/frontend to see this change take effect.
-        </div>
-      )}
-
-      {req.status === "completed" && !req.autoApplicable && (
-        <div className="mt-3 rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-400">
-          Acknowledged — {AGENT_LABELS[req.agentName] ?? req.agentName} has no automated
-          apply phase, so no code was changed. Act on this recommendation manually if needed.
-        </div>
-      )}
-    </div>
-  );
-}
-
-export default function FleetDashboardPage() {
-  const [requests, setRequests] = useState<EnhancementRequest[]>([]);
-  const [health, setHealth] = useState<AgentHealthRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [busyIds, setBusyIds] = useState<Set<number>>(new Set());
-  const esRef = useRef<EventSource | null>(null);
-
-  const refresh = useCallback(async () => {
-    try {
-      const data = await apiFetch<EnhancementRequest[]>("/api/fleet/requests");
-      setRequests(data);
-      setError("");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  const refreshHealth = useCallback(async () => {
-    try {
-      const data = await apiFetch<AgentHealthRow[]>("/api/fleet/reports/health");
-      setHealth(data);
-    } catch {
-      // Non-fatal: the pending-review queue above is the primary view — a
-      // failed health-report fetch shouldn't block it or overwrite `error`.
-    }
-  }, []);
-
+function FleetAndApprovals() {
+  const router = useRouter();
+  const params = useSearchParams();
+  const initial = (params.get("tab") as TabId) || "approvals";
+  const [tab, setTab] = useState<TabId>(TABS.some((t) => t.id === initial) ? initial : "approvals");
   useEffect(() => {
-    void refresh();
-    void refreshHealth();
+    const t = params.get("tab") as TabId | null;
+    if (t && TABS.some((x) => x.id === t)) setTab(t);
+  }, [params]);
 
-    const es = new EventSource("/api/fleet/requests/stream");
-    esRef.current = es;
-    es.onmessage = (e: MessageEvent) => {
-      try {
-        const event = JSON.parse(e.data) as { type: string };
-        if (event.type === "new_request" || event.type === "status_changed") {
-          void refresh();
-        }
-      } catch {
-        // ignore parse errors / pings
-      }
-    };
-    es.onerror = () => {
-      // SSE auto-reconnects; nothing to do here
-    };
+  const { data: badges } = useQuery({
+    queryKey: ["fleet-approvals-badges"],
+    queryFn: async () => ({
+      approvals: await count("/api/approvals/pending", (d) =>
+        ((d as { approvals: { status: string }[] }).approvals ?? []).filter((a) => a.status === "pending").length,
+      ),
+      notifications: await count("/api/notifications?days=30&limit=100", (d) => ((d as { items: unknown[] }).items ?? []).length),
+      improvements: await count("/api/fleet/requests?status=pending", (d) => (Array.isArray(d) ? d.length : 0)),
+    }),
+    refetchInterval: 10000,
+  });
 
-    return () => es.close();
-  }, [refresh, refreshHealth]);
-
-  const decide = useCallback(
-    async (id: number, action: "approve" | "reject") => {
-      setBusyIds(prev => new Set(prev).add(id));
-      try {
-        await apiFetch(`/api/fleet/requests/${id}/${action}`, "POST", {});
-        await refresh();
-      } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
-      } finally {
-        setBusyIds(prev => {
-          const next = new Set(prev);
-          next.delete(id);
-          return next;
-        });
-      }
-    },
-    [refresh]
-  );
-
-  const pending = requests
-    .filter(r => r.status === "pending")
-    .sort((a, b) => (PRIORITY_ORDER[a.priority] ?? 9) - (PRIORITY_ORDER[b.priority] ?? 9) || b.createdAt.localeCompare(a.createdAt));
-  const active = requests.filter(r => r.status === "in_progress");
-  const history = requests
-    .filter(r => ["completed", "failed", "rejected"].includes(r.status))
-    .slice(0, 20);
+  function choose(t: TabId) {
+    setTab(t);
+    router.replace(`/fleet?tab=${t}`);
+  }
 
   return (
-    <div className="space-y-10">
-      <div>
-        <h1 className="text-xl font-semibold text-slate-900 dark:text-slate-100">Fleet Dashboard</h1>
-        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-          Self-improvement agents scan this project in the background. Nothing changes on
-          disk until you approve a specific request below — some agents (marked
-          &quot;Recommendation only&quot;) never write code at all.
+    <main className="space-y-6">
+      <section>
+        <h1 className="text-2xl font-extrabold tracking-tight text-slate-900 dark:text-white">Fleet &amp; Approvals</h1>
+        <p className="mt-1 text-slate-600 dark:text-slate-300">
+          Everything that needs your attention: decisions to make, problems to look at, and the team&apos;s own
+          improvement ideas.
         </p>
+      </section>
+
+      <div className="flex gap-1 overflow-x-auto rounded-xl border border-slate-200 bg-white p-1 shadow-sm dark:border-slate-700 dark:bg-slate-900" role="tablist">
+        {TABS.map((t) => {
+          const n = t.id === "performance" ? 0 : (badges?.[t.id] ?? 0);
+          return (
+            <button
+              key={t.id}
+              role="tab"
+              aria-selected={tab === t.id}
+              onClick={() => choose(t.id)}
+              className={`inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-lg px-4 py-2 text-sm font-semibold transition ${
+                tab === t.id ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900" : "text-slate-600 hover:bg-orange-50 dark:text-slate-300 dark:hover:bg-slate-800"
+              }`}
+            >
+              {t.label}
+              {n > 0 && (
+                <span className={`rounded-full px-1.5 text-xs ${t.id === "approvals" ? "bg-red-500 text-white" : "bg-orange-100 text-orange-700"}`}>
+                  {n}
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
 
-      {error && (
-        <div className="rounded-lg bg-red-50 p-4 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-400">
-          {error}
-        </div>
-      )}
-
-      {health.length > 0 && (
-        <section className="space-y-4">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-            Agent Health
-          </h2>
-          <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700">
-            <table className="w-full text-sm">
-              <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-800 dark:text-slate-400">
-                <tr>
-                  <th className="px-4 py-2 font-medium">Agent</th>
-                  <th className="px-4 py-2 font-medium">Active runs</th>
-                  <th className="px-4 py-2 font-medium">Failure rate</th>
-                  <th className="px-4 py-2 font-medium">Heartbeat staleness</th>
-                </tr>
-              </thead>
-              <tbody>
-                {health.map(row => (
-                  <tr key={row.agentName} className="border-t border-slate-100 dark:border-slate-800">
-                    <td className="px-4 py-2 font-medium text-slate-900 dark:text-slate-100">{row.agentName}</td>
-                    <td className="px-4 py-2">{row.activeRuns}</td>
-                    <td
-                      className={
-                        row.failureRate > 0
-                          ? "px-4 py-2 text-red-600 dark:text-red-400"
-                          : "px-4 py-2 text-slate-600 dark:text-slate-400"
-                      }
-                    >
-                      {(row.failureRate * 100).toFixed(1)}%
-                    </td>
-                    <td className="px-4 py-2 text-slate-600 dark:text-slate-400">
-                      {row.avgHeartbeatStalenessSeconds === null ? "—" : `${row.avgHeartbeatStalenessSeconds.toFixed(1)}s`}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      <section role="tabpanel">
+        {tab === "approvals" && <ApprovalsPanel />}
+        {tab === "notifications" && <NotificationsPanel />}
+        {tab === "improvements" && <FleetPanel />}
+        {tab === "performance" && (
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Link href="/metrics" className="rounded-2xl border border-slate-200 bg-white p-5 shadow-soft transition hover:border-orange-300 dark:border-slate-700 dark:bg-slate-900">
+              <p className="text-lg font-semibold text-slate-900 dark:text-white">📊 KPIs</p>
+              <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">Success rates, speed, quality and test results, updated live.</p>
+            </Link>
+            <Link href="/cost" className="rounded-2xl border border-slate-200 bg-white p-5 shadow-soft transition hover:border-orange-300 dark:border-slate-700 dark:bg-slate-900">
+              <p className="text-lg font-semibold text-slate-900 dark:text-white">💰 AI cost</p>
+              <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">What the AI work costs, against your daily budget.</p>
+            </Link>
           </div>
-        </section>
-      )}
+        )}
+      </section>
+    </main>
+  );
+}
 
-      {loading ? (
-        <div className="flex h-32 items-center justify-center text-sm text-slate-400">Loading…</div>
-      ) : (
-        <>
-          <section className="space-y-4">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-              Pending Review ({pending.length})
-            </h2>
-            {pending.length === 0 ? (
-              <p className="text-sm text-slate-400 dark:text-slate-500">
-                Nothing to review right now — the agents will file a request here when they
-                find something real.
-              </p>
-            ) : (
-              <div className="space-y-3">
-                {pending.map(r => (
-                  <RequestCard
-                    key={r.id}
-                    req={r}
-                    onApprove={id => void decide(id, "approve")}
-                    onReject={id => void decide(id, "reject")}
-                    busy={busyIds.has(r.id)}
-                  />
-                ))}
-              </div>
-            )}
-          </section>
-
-          {active.length > 0 && (
-            <section className="space-y-4">
-              <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                In Progress ({active.length})
-              </h2>
-              <div className="space-y-3">
-                {active.map(r => (
-                  <RequestCard key={r.id} req={r} onApprove={() => {}} onReject={() => {}} busy={false} />
-                ))}
-              </div>
-            </section>
-          )}
-
-          {history.length > 0 && (
-            <section className="space-y-4">
-              <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                History
-              </h2>
-              <div className="space-y-3">
-                {history.map(r => (
-                  <RequestCard key={r.id} req={r} onApprove={() => {}} onReject={() => {}} busy={false} />
-                ))}
-              </div>
-            </section>
-          )}
-        </>
-      )}
-    </div>
+export default function FleetAndApprovalsPage() {
+  return (
+    <Suspense fallback={<p className="p-4 text-sm text-slate-500">Loading…</p>}>
+      <FleetAndApprovals />
+    </Suspense>
   );
 }
