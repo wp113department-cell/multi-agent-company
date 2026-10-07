@@ -17,6 +17,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.tasks import router as tasks_router
 from app.api.repo import router as repo_router, init_active_repo
+from app.api.projects import router as projects_router
 from app.api.artifacts import router as artifacts_router
 from app.api.auth import router as auth_router
 from app.api.epics import router as epics_router
@@ -1948,6 +1949,7 @@ app.add_middleware(
 
 app.include_router(tasks_router)
 app.include_router(repo_router)
+app.include_router(projects_router)
 app.include_router(artifacts_router)
 app.include_router(auth_router)
 app.include_router(epics_router)

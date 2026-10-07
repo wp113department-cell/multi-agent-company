@@ -35,15 +35,15 @@
 /* Primary (filled orange) buttons: glossy gradient, glow and a moving shine. */
 @layer components {
   .btn-primary,
-  button[class*="bg-blue-6"],
-  button[class*="bg-indigo-6"],
-  button[class*="bg-violet-6"],
-  button[class*="bg-purple-6"],
-  button[class*="bg-orange-5"],
-  button[class*="bg-orange-6"],
-  a[class*="bg-blue-6"],
-  a[class*="bg-indigo-6"],
-  a[class*="bg-orange-6"] {
+  button[class~="bg-blue-600"],
+  button[class~="bg-indigo-600"],
+  button[class~="bg-violet-600"],
+  button[class~="bg-purple-600"],
+  button[class~="bg-orange-500"],
+  button[class~="bg-orange-600"],
+  a[class~="bg-blue-600"],
+  a[class~="bg-indigo-600"],
+  a[class~="bg-orange-600"] {
     position: relative;
     overflow: hidden;
     color: #fff;
@@ -58,15 +58,15 @@
       filter 0.2s ease;
   }
   .btn-primary::after,
-  button[class*="bg-blue-6"]::after,
-  button[class*="bg-indigo-6"]::after,
-  button[class*="bg-violet-6"]::after,
-  button[class*="bg-purple-6"]::after,
-  button[class*="bg-orange-5"]::after,
-  button[class*="bg-orange-6"]::after,
-  a[class*="bg-blue-6"]::after,
-  a[class*="bg-indigo-6"]::after,
-  a[class*="bg-orange-6"]::after {
+  button[class~="bg-blue-600"]::after,
+  button[class~="bg-indigo-600"]::after,
+  button[class~="bg-violet-600"]::after,
+  button[class~="bg-purple-600"]::after,
+  button[class~="bg-orange-500"]::after,
+  button[class~="bg-orange-600"]::after,
+  a[class~="bg-blue-600"]::after,
+  a[class~="bg-indigo-600"]::after,
+  a[class~="bg-orange-600"]::after {
     content: "";
     position: absolute;
     inset: 0 auto 0 0;
@@ -76,27 +76,27 @@
     pointer-events: none;
   }
   .btn-primary:hover:not(:disabled)::after,
-  button[class*="bg-blue-6"]:hover:not(:disabled)::after,
-  button[class*="bg-indigo-6"]:hover:not(:disabled)::after,
-  button[class*="bg-violet-6"]:hover:not(:disabled)::after,
-  button[class*="bg-purple-6"]:hover:not(:disabled)::after,
-  button[class*="bg-orange-5"]:hover:not(:disabled)::after,
-  button[class*="bg-orange-6"]:hover:not(:disabled)::after,
-  a[class*="bg-blue-6"]:hover::after,
-  a[class*="bg-indigo-6"]:hover::after,
-  a[class*="bg-orange-6"]:hover::after {
+  button[class~="bg-blue-600"]:hover:not(:disabled)::after,
+  button[class~="bg-indigo-600"]:hover:not(:disabled)::after,
+  button[class~="bg-violet-600"]:hover:not(:disabled)::after,
+  button[class~="bg-purple-600"]:hover:not(:disabled)::after,
+  button[class~="bg-orange-500"]:hover:not(:disabled)::after,
+  button[class~="bg-orange-600"]:hover:not(:disabled)::after,
+  a[class~="bg-blue-600"]:hover::after,
+  a[class~="bg-indigo-600"]:hover::after,
+  a[class~="bg-orange-600"]:hover::after {
     animation: shine 0.9s ease-out;
   }
   .btn-primary:hover:not(:disabled),
-  button[class*="bg-blue-6"]:hover:not(:disabled),
-  button[class*="bg-indigo-6"]:hover:not(:disabled),
-  button[class*="bg-violet-6"]:hover:not(:disabled),
-  button[class*="bg-purple-6"]:hover:not(:disabled),
-  button[class*="bg-orange-5"]:hover:not(:disabled),
-  button[class*="bg-orange-6"]:hover:not(:disabled),
-  a[class*="bg-blue-6"]:hover,
-  a[class*="bg-indigo-6"]:hover,
-  a[class*="bg-orange-6"]:hover {
+  button[class~="bg-blue-600"]:hover:not(:disabled),
+  button[class~="bg-indigo-600"]:hover:not(:disabled),
+  button[class~="bg-violet-600"]:hover:not(:disabled),
+  button[class~="bg-purple-600"]:hover:not(:disabled),
+  button[class~="bg-orange-500"]:hover:not(:disabled),
+  button[class~="bg-orange-600"]:hover:not(:disabled),
+  a[class~="bg-blue-600"]:hover,
+  a[class~="bg-indigo-600"]:hover,
+  a[class~="bg-orange-600"]:hover {
     transform: translateY(-1px);
     filter: saturate(1.08);
     box-shadow:
@@ -105,8 +105,8 @@
       0 14px 28px -10px rgba(249, 115, 22, 0.75);
   }
   .btn-primary:active:not(:disabled),
-  button[class*="bg-blue-6"]:active:not(:disabled),
-  button[class*="bg-orange-6"]:active:not(:disabled) {
+  button[class~="bg-blue-600"]:active:not(:disabled),
+  button[class~="bg-orange-600"]:active:not(:disabled) {
     transform: translateY(0);
   }
 

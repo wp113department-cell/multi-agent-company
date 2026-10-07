@@ -77,6 +77,13 @@ export interface DevTask {
   finalSummary: string | null;
   repoId: number | null;
   repoName: string | null;
+  projectId?: number | null;
+  projectName?: string | null;
+  goalId?: string | null;
+  goalTitle?: string | null;
+  epicId?: string | null;
+  epicTitle?: string | null;
+  executionMode?: "economy" | "max";
   createdAt: string;
   updatedAt: string;
   logs: TaskLog[];
@@ -112,10 +119,17 @@ export interface ArtifactRecord {
 // Task CRUD
 // ---------------------------------------------------------------------------
 
-export async function fetchTasks(status?: string, repoId?: number | null): Promise<DevTask[]> {
+export async function fetchTasks(
+  status?: string,
+  repoId?: number | null,
+  projectId?: number | null,
+  limit?: number,
+): Promise<DevTask[]> {
   const params = new URLSearchParams();
   if (status && status !== "all") params.set("status", status);
   if (repoId != null) params.set("repo_id", String(repoId));
+  if (projectId != null) params.set("project_id", String(projectId));
+  if (limit != null) params.set("limit", String(limit));
   const qs = params.toString() ? `?${params.toString()}` : "";
   const res = await apiFetch(`/api/tasks${qs}`, { cache: "no-store" });
   const data = await handleResponse<{ tasks: DevTask[] }>(res);
@@ -131,6 +145,11 @@ export async function createTask(input: {
   title: string;
   description: string;
   repoId?: number | null;
+  projectId?: number | null;
+  goalId?: string | null;
+  epicId?: string | null;
+  priority?: "low" | "medium" | "high";
+  executionMode?: "economy" | "max";
 }): Promise<DevTask> {
   const res = await apiFetch(`/api/tasks`, {
     method: "POST",
@@ -139,9 +158,25 @@ export async function createTask(input: {
       title: input.title,
       description: input.description,
       repo_id: input.repoId ?? null,
+      project_id: input.projectId ?? null,
+      goal_id: input.goalId ?? null,
+      epic_id: input.epicId ?? null,
+      priority: input.priority ?? "medium",
+      execution_mode: input.executionMode ?? "economy",
     }),
   });
   return handleResponse<DevTask>(res);
+}
+
+/** Start a task the way its own execution mode says (Economy: the smart
+ * router picks the fewest agents; Max: the full pipeline). */
+export async function startTask(taskId: number | string): Promise<{ triggered: boolean; mode: string }> {
+  const res = await apiFetch(`/api/tasks/${taskId}/run`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  return handleResponse(res);
 }
 
 export interface PdfFileResult {
@@ -793,4 +828,141 @@ export async function stopChatTurn(sessionId: string): Promise<{ status: string 
     method: "POST",
   });
   return handleResponse(res);
+}
+
+
+// ---------------------------------------------------------------------------
+// Projects (UI redesign): the user's main identity for work
+// ---------------------------------------------------------------------------
+
+export type ProjectSetup = "local_existing" | "local_new" | "github_existing" | "github_new";
+
+export interface Project {
+  id: number;
+  name: string;
+  description: string | null;
+  setup: ProjectSetup | "imported";
+  localPath: string | null;
+  githubUrl: string | null;
+  visibility: "public" | "private" | null;
+  repoId: number | null;
+  status: "cloning" | "ready" | "error" | "none";
+  error: string | null;
+  createdAt: string | null;
+  lastOpenedAt: string | null;
+  taskCounts: Record<string, number>;
+}
+
+export interface ProjectLabel {
+  id: string;
+  title: string;
+  status: string;
+}
+
+export interface ProjectHistoryItem {
+  id: number;
+  title: string;
+  status: string;
+  priority: string;
+  executionMode: "economy" | "max";
+  summary: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+export interface ProjectDetail extends Project {
+  goals: ProjectLabel[];
+  epics: ProjectLabel[];
+  history: ProjectHistoryItem[];
+}
+
+export interface CreateProjectInput {
+  name: string;
+  setup: ProjectSetup;
+  description?: string;
+  path?: string;
+  parentPath?: string;
+  folderName?: string;
+  githubUrl?: string;
+  branch?: string;
+  fullHistory?: boolean;
+  repoName?: string;
+  visibility?: "public" | "private";
+  githubToken?: string;
+}
+
+export async function listProjects(): Promise<Project[]> {
+  const res = await apiFetch("/api/projects", { cache: "no-store" });
+  return (await handleResponse<{ projects: Project[] }>(res)).projects;
+}
+
+export async function getProject(id: number): Promise<ProjectDetail> {
+  const res = await apiFetch(`/api/projects/${id}`, { cache: "no-store" });
+  return handleResponse<ProjectDetail>(res);
+}
+
+export async function createProject(input: CreateProjectInput): Promise<Project> {
+  const res = await apiFetch("/api/projects", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name: input.name,
+      setup: input.setup,
+      description: input.description || null,
+      path: input.path || null,
+      parent_path: input.parentPath || null,
+      folder_name: input.folderName || null,
+      github_url: input.githubUrl || null,
+      branch: input.branch || null,
+      full_history: input.fullHistory ?? false,
+      repo_name: input.repoName || null,
+      visibility: input.visibility ?? "private",
+      github_token: input.githubToken || null,
+    }),
+  });
+  return handleResponse<Project>(res);
+}
+
+export async function openProject(id: number): Promise<Project> {
+  const res = await apiFetch(`/api/projects/${id}/open`, { method: "POST" });
+  return handleResponse<Project>(res);
+}
+
+export async function addProjectGoal(id: number, title: string): Promise<ProjectLabel> {
+  const res = await apiFetch(`/api/projects/${id}/goals`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title }),
+  });
+  return handleResponse<ProjectLabel>(res);
+}
+
+export async function addProjectEpic(id: number, title: string): Promise<ProjectLabel> {
+  const res = await apiFetch(`/api/projects/${id}/epics`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title }),
+  });
+  return handleResponse<ProjectLabel>(res);
+}
+
+const CURRENT_PROJECT_KEY = "mac_current_project";
+
+/** The project the user is working on (remembered per browser). */
+export function getCurrentProjectId(): number | null {
+  try {
+    const v = localStorage.getItem(CURRENT_PROJECT_KEY);
+    return v ? Number(v) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function setCurrentProjectId(id: number | null): void {
+  try {
+    if (id == null) localStorage.removeItem(CURRENT_PROJECT_KEY);
+    else localStorage.setItem(CURRENT_PROJECT_KEY, String(id));
+  } catch {
+    // private mode: the choice simply isn't remembered
+  }
 }

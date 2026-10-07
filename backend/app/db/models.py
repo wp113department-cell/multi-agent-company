@@ -149,6 +149,20 @@ class DevTask(Base):
     depends_on: Mapped[Any] = mapped_column(ARRAY(BigInteger), nullable=True)
     assigned_agent: Mapped[str | None] = mapped_column(String(100), nullable=True)
     project: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # UI redesign (migration 064): the project this task belongs to (the
+    # user's main identity for work; repo_id is only where its code lives),
+    # an optional goal label, and the per-task execution mode.
+    project_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("projects.id", ondelete="SET NULL"), nullable=True
+    )
+    goal_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("goals.goal_id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    execution_mode: Mapped[str] = mapped_column(
+        String(10), default="economy", server_default="economy"
+    )
     final_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     # AUDIT_Q_BATCH18 §51 gap-closure (2026-08-12) — "Repeat Task &
     # Historical Context": real, deterministic reference to the specific
@@ -212,6 +226,10 @@ class DevTask(Base):
         "Epic", back_populates="tasks", foreign_keys=[epic_id]
     )
     repo: Mapped["Repo | None"] = relationship("Repo", foreign_keys=[repo_id])
+    project_ref: Mapped["Project | None"] = relationship(
+        "Project", foreign_keys=[project_id]
+    )
+    goal: Mapped["Goal | None"] = relationship("Goal", foreign_keys=[goal_id])
 
 
 class TaskLog(Base):
@@ -560,6 +578,13 @@ class Epic(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
+    # UI redesign (migration 064): owning project; a "label" epic created
+    # from the Tasks screen has status "open" and never starts the AI epic
+    # manager.
+    project_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("projects.id", ondelete="SET NULL"), nullable=True
+    )
+
     tasks: Mapped[list["DevTask"]] = relationship("DevTask", back_populates="epic")
     repo: Mapped["Repo | None"] = relationship("Repo", foreign_keys=[repo_id])
 
@@ -681,6 +706,11 @@ class Goal(Base):
     status: Mapped[str] = mapped_column(String(50), default="pending")
     epic_ids: Mapped[Any] = mapped_column(ARRAY(Text), nullable=False, default=list)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # UI redesign (migration 064): owning project; a "label" goal created
+    # from the Tasks screen has status "open" and runs no executive agent.
+    project_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("projects.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -689,13 +719,51 @@ class Goal(Base):
     )
 
 
+class Project(Base):
+    """What the user works on (UI redesign, migration 064). Its identity is
+    the user's project name; the code may live in a local folder, a GitHub
+    repository, both, or (briefly, during setup) neither. When a folder
+    exists, `repo_id` points at the repos row every task-execution path
+    already resolves its working directory from."""
+
+    __tablename__ = "projects"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(200))
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    local_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    repo_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("repos.id", ondelete="SET NULL"), nullable=True
+    )
+    github_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    visibility: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    # local_existing | local_new | github_existing | github_new | imported
+    source: Mapped[str] = mapped_column(
+        String(30), default="imported", server_default="imported"
+    )
+    created_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    last_opened_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    repo: Mapped["Repo | None"] = relationship("Repo", foreign_keys=[repo_id])
+
+
 class Repo(Base):
     """GitHub repos that have been cloned for agents to work on."""
 
     __tablename__ = "repos"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    github_url: Mapped[str] = mapped_column(Text, unique=True)
+    # Nullable since migration 064: a local-only project's folder is a repos
+    # row with no GitHub repository.
+    github_url: Mapped[str | None] = mapped_column(Text, unique=True, nullable=True)
     name: Mapped[str] = mapped_column(String(200))
     local_path: Mapped[str] = mapped_column(Text)
     status: Mapped[str] = mapped_column(

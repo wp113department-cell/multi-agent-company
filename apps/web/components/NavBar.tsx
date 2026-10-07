@@ -74,7 +74,7 @@ function ThemeToggle() {
 }
 
 const NAV_LINKS = [
-  { href: "/repo", label: "Repository" },
+  { href: "/start", label: "Start" },
   { href: "/tasks", label: "Tasks" },
   { href: "/epics", label: "Epics" },
   { href: "/goals", label: "Goals" },
@@ -199,7 +199,7 @@ export function NavBar() {
   return (
     <header className="sticky top-0 z-40 border-b border-orange-100/80 bg-white/80 backdrop-blur-md dark:border-slate-800 dark:bg-slate-950/80">
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-3 px-4 sm:px-6">
-        <Link href="/tasks" className="flex shrink-0 items-center gap-2.5" aria-label={`${BRAND_NAME} home`}>
+        <Link href="/start" className="flex shrink-0 items-center gap-2.5" aria-label={`${BRAND_NAME} home`}>
           <BrandMark size={34} />
           <span className="leading-tight">
             <span className="block text-[15px] font-bold tracking-tight text-slate-900 dark:text-white">

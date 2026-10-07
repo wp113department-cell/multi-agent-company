@@ -45,6 +45,10 @@ async def create_task(
     project: str | None = None,
     depends_on: list[int] | None = None,
     created_by: str | None = None,
+    project_id: int | None = None,
+    goal_id: str | None = None,
+    epic_id: str | None = None,
+    execution_mode: str = "economy",
 ) -> DevTask:
     task = DevTask(
         title=title,
@@ -55,6 +59,10 @@ async def create_task(
         project=project,
         depends_on=depends_on,
         created_by=created_by,
+        project_id=project_id,
+        goal_id=goal_id,
+        epic_id=epic_id,
+        execution_mode=execution_mode,
     )
     db.add(task)
     await db.commit()
@@ -103,9 +111,18 @@ async def repeat_task(
     return created
 
 
+# Relations every task read returns (repo, project, epic and goal names).
+_TASK_RELATIONS = (
+    selectinload(DevTask.repo),
+    selectinload(DevTask.project_ref),
+    selectinload(DevTask.epic),
+    selectinload(DevTask.goal),
+)
+
+
 async def get_task(db: AsyncSession, task_id: int) -> DevTask | None:
     result = await db.execute(
-        select(DevTask).options(selectinload(DevTask.repo)).where(DevTask.id == task_id)
+        select(DevTask).options(*_TASK_RELATIONS).where(DevTask.id == task_id)
     )
     return result.scalar_one_or_none()
 
@@ -371,12 +388,15 @@ async def list_tasks(
     repo_id: int | None = None,
     cursor: int | None = None,
     limit: int = 20,
+    project_id: int | None = None,
 ) -> tuple[list[DevTask], int | None]:
-    q = select(DevTask).options(selectinload(DevTask.repo)).order_by(DevTask.id.desc())
+    q = select(DevTask).options(*_TASK_RELATIONS).order_by(DevTask.id.desc())
     if status:
         q = q.where(DevTask.status == status)
     if repo_id is not None:
         q = q.where(DevTask.repo_id == repo_id)
+    if project_id is not None:
+        q = q.where(DevTask.project_id == project_id)
     if cursor is not None:
         q = q.where(DevTask.id < cursor)
     q = q.limit(limit + 1)

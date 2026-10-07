@@ -84,6 +84,13 @@ class CreateTaskRequest(BaseModel):
     # AUDIT_Q_BATCH16 §86 gap-closure (2026-08-11) — real cross-task
     # dependency IDs (other dev_tasks.id values); enforced by /run below.
     depends_on: list[int] | None = None
+    # UI redesign (2026-10-07): the project this task belongs to (its repo
+    # and name are taken from the project), optional goal/epic labels of
+    # that project, and the per-task execution mode.
+    project_id: int | None = None
+    goal_id: str | None = None
+    epic_id: str | None = None
+    execution_mode: Literal["economy", "max"] = "economy"
 
 
 class TransitionRequest(BaseModel):
@@ -142,8 +149,24 @@ def _log_to_dict(log: Any) -> dict[str, Any]:
     }
 
 
+def _loaded(obj: Any, attr: str) -> Any:
+    """A relationship's value only if already loaded (never a lazy load,
+    which raises on an async session)."""
+    from sqlalchemy import inspect as sa_inspect
+
+    try:
+        if attr in sa_inspect(obj).unloaded:
+            return None
+    except Exception:
+        pass
+    return getattr(obj, attr, None)
+
+
 def _task_to_dict(task: Any, logs: list[Any] | None = None) -> dict[str, Any]:
     repo = getattr(task, "repo", None)
+    project_ref = _loaded(task, "project_ref")
+    goal = _loaded(task, "goal")
+    epic = _loaded(task, "epic")
     return {
         "id": task.id,
         "title": task.title,
@@ -160,6 +183,13 @@ def _task_to_dict(task: Any, logs: list[Any] | None = None) -> dict[str, Any]:
         "finalSummary": task.final_summary,
         "repoId": task.repo_id,
         "repoName": repo.name if repo else None,
+        "projectId": getattr(task, "project_id", None),
+        "projectName": project_ref.name if project_ref else task.project,
+        "goalId": getattr(task, "goal_id", None),
+        "goalTitle": goal.text if goal else None,
+        "epicId": getattr(task, "epic_id", None),
+        "epicTitle": epic.title if epic else None,
+        "executionMode": getattr(task, "execution_mode", None) or "economy",
         "repeatedFromTaskId": task.repeated_from_task_id,
         "createdBy": task.created_by,
         "createdAt": task.created_at.isoformat() if task.created_at else None,
@@ -185,15 +215,46 @@ async def create(
     if cached is not None:
         return cached
 
+    repo_id = body.repo_id
+    project_name = body.project
+    if body.project_id is not None:
+        from app.db.models import Epic, Goal, Project
+
+        proj = await db.get(Project, body.project_id)
+        if proj is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+        repo_id = proj.repo_id
+        project_name = proj.name
+        if body.goal_id:
+            goal_row = await db.get(Goal, body.goal_id)
+            if goal_row is None or goal_row.project_id != proj.id:
+                raise HTTPException(
+                    status_code=400, detail="That goal does not belong to this project"
+                )
+        if body.epic_id:
+            epic_row = await db.get(Epic, body.epic_id)
+            if epic_row is None or epic_row.project_id != proj.id:
+                raise HTTPException(
+                    status_code=400, detail="That epic does not belong to this project"
+                )
+    elif body.goal_id or body.epic_id:
+        raise HTTPException(
+            status_code=400, detail="A goal or epic needs a project_id as well"
+        )
+
     task = await create_task(
         db,
         body.title,
         body.description,
-        repo_id=body.repo_id,
+        repo_id=repo_id,
         priority=body.priority,
-        project=body.project,
+        project=project_name,
         depends_on=body.depends_on,
         created_by=_actor,
+        project_id=body.project_id,
+        goal_id=body.goal_id or None,
+        epic_id=body.epic_id or None,
+        execution_mode=body.execution_mode,
     )
     result = _task_to_dict(task)
     await store_response(db, request, "create_task", result)
@@ -204,13 +265,19 @@ async def create(
 async def list_all(
     status: str | None = Query(None),
     repo_id: int | None = Query(None),
+    project_id: int | None = Query(None),
     cursor: int | None = Query(None),
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     _actor: str = Depends(require_authenticated),
 ) -> dict[str, Any]:
     tasks, next_cursor = await list_tasks(
-        db, status=status, repo_id=repo_id, cursor=cursor, limit=limit
+        db,
+        status=status,
+        repo_id=repo_id,
+        cursor=cursor,
+        limit=limit,
+        project_id=project_id,
     )
     return {"tasks": [_task_to_dict(t) for t in tasks], "nextCursor": next_cursor}
 
@@ -400,7 +467,16 @@ async def run_task(
     await append_log(db, task_id, "pipeline", "Planning triggered")
 
     settings = get_settings()
-    mode = body.mode or settings.pipeline_mode
+    # UI redesign: Max always runs the full pipeline (its quality cost profile
+    # is applied by launch_*'s @task_cost_mode); Economy uses the configured
+    # mode (default "auto": the smart router picks the fewest agents). An
+    # explicit `mode` in the request still wins, as before.
+    if body.mode:
+        mode = body.mode
+    elif (getattr(task, "execution_mode", None) or "economy") == "max":
+        mode = "full"
+    else:
+        mode = settings.pipeline_mode
 
     if mode == "auto":
         from app.api.agents import launch_router

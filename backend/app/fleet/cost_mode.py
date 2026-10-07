@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import contextlib
 from collections.abc import Iterator
+from typing import Any
 from contextvars import ContextVar
 from dataclasses import dataclass
 
@@ -112,3 +113,37 @@ def cap_model(model: str, tier: str | None) -> str:
     if cap == "sonnet" and tier == "opus":
         return s.model_coder
     return model
+
+
+# Per-task execution mode (UI redesign, 2026-10-07): the user picks Economy
+# (default) or Max on each task; it maps onto the existing profiles above.
+EXECUTION_MODE_PROFILE = {"economy": "economy", "max": "quality"}
+
+
+def task_cost_mode(launch_fn: Any) -> Any:
+    """Decorator for the task launch functions (first argument: task_id).
+
+    Reads the task's `execution_mode` and runs the whole launch, including
+    every agent it starts in worker threads, under the matching profile via
+    `use_cost_mode()`. Works on both queue backends: the override is set
+    inside the job itself, not by the request that enqueued it. A task that
+    cannot be read keeps the global COST_MODE."""
+    import functools
+
+    @functools.wraps(launch_fn)
+    async def wrapper(task_id: int, *args: Any, **kwargs: Any) -> Any:
+        mode: str | None = None
+        try:
+            from app.db.models import DevTask
+            from app.db.session import get_async_session
+
+            async with get_async_session() as db:
+                task = await db.get(DevTask, task_id)
+                if task is not None:
+                    mode = EXECUTION_MODE_PROFILE.get(str(task.execution_mode))
+        except Exception:
+            mode = None
+        with use_cost_mode(mode):
+            return await launch_fn(task_id, *args, **kwargs)
+
+    return wrapper

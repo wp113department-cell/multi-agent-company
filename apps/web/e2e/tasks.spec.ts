@@ -7,8 +7,15 @@ test.describe("Task list and detail", () => {
   });
 
   test("task list renders a task and links to its detail page", async ({ page }) => {
-    await page.route("**/api/repo", (route) =>
-      route.fulfill(json({ repos: [], activeRepoPath: "." }))
+    // Tasks are shown per project (UI redesign): one project, its detail.
+    const project = {
+      id: 7, name: "Demo Project", description: null, setup: "local_new",
+      localPath: "/w/demo", githubUrl: null, visibility: null, repoId: 1,
+      status: "ready", error: null, createdAt: null, lastOpenedAt: null, taskCounts: {},
+    };
+    await page.route("**/api/projects", (route) => route.fulfill(json({ projects: [project] })));
+    await page.route("**/api/projects/7", (route) =>
+      route.fulfill(json({ ...project, goals: [], epics: [], history: [] }))
     );
     await page.route("**/api/tasks?*", (route) =>
       route.fulfill(json({ tasks: [SAMPLE_TASK], nextCursor: null }))
@@ -24,9 +31,7 @@ test.describe("Task list and detail", () => {
 
     const taskLink = page.getByRole("link", { name: SAMPLE_TASK.title });
     await expect(taskLink).toBeVisible();
-    // Scoped to the task row itself — NewTaskForm's priority <select> also
-    // has a "High priority" option, which Playwright's case-insensitive
-    // getByText would otherwise also match.
+    // Scoped to the task row itself, so the form's own controls never match.
     await expect(taskLink.getByText("high priority")).toBeVisible();
   });
 

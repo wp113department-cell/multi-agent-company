@@ -24,6 +24,7 @@ from app.db.repository import (
     update_task_plan,
 )
 from app.db.session import get_session_factory
+from app.fleet.cost_mode import task_cost_mode
 from app.repo_tools.worktree import create_worktree, get_diff, preserve_worktree
 from app.services.alert import send_task_alert
 
@@ -84,6 +85,7 @@ def _estimate_cost(tokens_in: int, tokens_out: int, agent_name: str) -> float:
 # ---- Planning pipeline (PM → Architect → Decomposer, with interrupt) ----
 
 
+@task_cost_mode
 async def launch_planning_pipeline(
     task_id: int, title: str, description: str, repo_path: str | None = None
 ) -> None:
@@ -530,6 +532,7 @@ async def _record_git_push_approval(
         )
 
 
+@task_cost_mode
 async def launch_manager(
     task_id: int,
     subtasks: list[dict[str, Any]],
@@ -708,6 +711,7 @@ async def _task_images(db: AsyncSession, task_id: int) -> list[dict[str, str]]:
     return [{"media_type": r.mime_type, "data": r.base64_data} for r in rows]
 
 
+@task_cost_mode
 async def launch_router(
     task_id: int, title: str, description: str, repo_path: str | None = None
 ) -> None:
@@ -758,6 +762,7 @@ async def launch_router(
             await append_log(db, task_id, "error", f"Routing failed: {exc}")
 
 
+@task_cost_mode
 async def launch_planner(
     task_id: int, title: str, description: str, repo_path: str | None = None
 ) -> None:
@@ -938,6 +943,7 @@ async def _run_executors(
     return list(dict.fromkeys(files)), None, tokens_in, tokens_out
 
 
+@task_cost_mode
 async def launch_coder(
     task_id: int,
     plan: str,

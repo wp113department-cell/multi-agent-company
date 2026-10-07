@@ -23,10 +23,10 @@ const STEPS: Step[] = [
     text: "This is your AI software team. Specialised agents plan, write, test and review code, and you approve the important steps. This short tour shows you around the menu.",
   },
   {
-    target: "/repo",
-    icon: "📁",
-    title: "Repository",
-    text: "Start here. Connect the code repository the agents should work on and browse its files and history.",
+    target: "/start",
+    icon: "🏁",
+    title: "Start",
+    text: "Your starting point. Create a new project (on this computer or on GitHub) or continue an existing one, and see its history.",
   },
   {
     target: "/tasks",

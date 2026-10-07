@@ -54,7 +54,7 @@ export default function LoginPage() {
     const result = await changePassword(currentPw, newPw);
     setLoading(false);
     if (result.ok) {
-      router.push("/repo");
+      router.push("/start");
     } else {
       setError(result.error ?? "Password change failed");
     }
@@ -67,7 +67,7 @@ export default function LoginPage() {
       setCurrentPw(pass);
       setStage("change");
     } else if (result.ok) {
-      router.push("/repo");
+      router.push("/start");
     } else {
       setError(result.error ?? "Login failed");
     }

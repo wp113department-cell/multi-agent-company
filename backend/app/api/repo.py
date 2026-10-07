@@ -141,6 +141,19 @@ async def _clone_and_activate(
             rc, _, stderr_bytes, timed_out = await git_service.run_git_process(
                 cmd, cwd, git_env, timeout=_CLONE_TIMEOUT_SECONDS
             )
+            if (
+                rc != 0
+                and not timed_out
+                and "--depth" in cmd
+                and b"shallow" in stderr_bytes.lower()
+            ):
+                # A server without shallow support (e.g. plain "dumb" HTTP):
+                # fall back to the full clone instead of failing.
+                i = cmd.index("--depth")
+                full_cmd = cmd[:i] + cmd[i + 3 :]  # drop --depth 1 --single-branch
+                rc, _, stderr_bytes, timed_out = await git_service.run_git_process(
+                    full_cmd, cwd, git_env, timeout=_CLONE_TIMEOUT_SECONDS
+                )
 
             if rc != 0:
                 raw = (
