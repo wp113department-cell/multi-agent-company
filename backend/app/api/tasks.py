@@ -413,6 +413,10 @@ async def run_task(
         raise HTTPException(
             status_code=400, detail=f"Cannot start planning from status {task.status!r}"
         )
+    from app.services import demo
+
+    if await demo.simulate(db, task_id, "start"):
+        return {"triggered": True, "mode": "demo"}
 
     # AUDIT_Q_BATCH16 §86 gap-closure (2026-08-11) — "Detect dependencies /
     # optimize order" (org-wide): the one real place a DevTask enters its
@@ -555,6 +559,10 @@ async def restart_task(
                 "rejected) before restarting."
             ),
         )
+    from app.services import demo
+
+    if await demo.simulate(db, task_id, "restart"):
+        return {"restarted": True, "taskId": task_id}
 
     # Force-reset to pending regardless of current status
     # Production audit 2026-09-29: the status check above and this reset used
@@ -765,6 +773,10 @@ async def approve_task(
                 "the git-push flow instead of re-approving."
             ),
         )
+    from app.services import demo
+
+    if await demo.simulate(db, task_id, "plan_approved"):
+        return {"triggered": True, "mode": "demo"}
 
     # Gap-closure (Days 11-15 audit, 2026-07-22): this endpoint never resolved
     # the task's assigned repo (task.repo_id), unlike /run, /restart, and

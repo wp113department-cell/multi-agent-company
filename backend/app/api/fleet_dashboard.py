@@ -524,6 +524,18 @@ async def approve_request(
             detail=f"Request #{request_id} is already {row.status!r}, not pending",
         )
 
+    from app.services.demo import DEMO_CREATOR
+
+    if row.trace_id == DEMO_CREATOR:
+        # Demo suggestion (scripts/seed_demo_data.py): mark it applied without
+        # starting the APPLY agent, which would edit real code.
+        row.status = "applied"
+        row.decided_at = row.completed_at = datetime.now(timezone.utc)
+        row.decided_by = _decider(_approver, payload)
+        await db.commit()
+        _push_dashboard_event("status_changed", {"id": request_id, "status": "applied"})
+        return {"ok": True, "id": request_id, "status": "applied", "traceId": None}
+
     trace_id = uuid.uuid4().hex[:12]
     row.status = "in_progress"
     row.decided_at = datetime.now(timezone.utc)
@@ -628,6 +640,82 @@ async def cost_report(
             {"tier": tier, "costUsd": cost}
             for tier, cost in sorted(tier_totals.items(), key=lambda kv: -kv[1])
         ],
+    }
+
+
+@router.get("/reports/summary")
+async def summary_report(
+    db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
+) -> dict[str, Any]:
+    """Plain-language KPIs for the Performance tab: how many tasks finished
+    and how well, how long they take, and what the AI work costs against the
+    daily budget. Computed from dev_tasks and agent_runs; nothing stored."""
+    from app.config import get_settings
+    from app.db.models import DevTask
+    from app.fleet import spend_guard
+
+    status_rows = await db.execute(
+        select(DevTask.status, func.count(DevTask.id)).group_by(DevTask.status)
+    )
+    by_status = {str(st): int(n) for st, n in status_rows.all()}
+    completed = by_status.get("completed", 0)
+    failed = by_status.get("failed", 0)
+    in_progress = sum(by_status.get(s, 0) for s in ("planning", "coding", "testing"))
+    waiting = by_status.get("ready_for_review", 0)
+    blocked = by_status.get("blocked", 0)
+    finished = completed + failed
+
+    avg_minutes = (
+        await db.execute(
+            select(
+                func.avg(
+                    func.extract("epoch", DevTask.updated_at - DevTask.created_at)
+                    / 60.0
+                )
+            ).where(DevTask.status == "completed")
+        )
+    ).scalar()
+
+    since = datetime.now(timezone.utc) - timedelta(days=30)
+    spend_30d, runs_30d = (
+        await db.execute(
+            select(
+                func.coalesce(func.sum(AgentRun.cost_estimate), 0),
+                func.count(AgentRun.id),
+            ).where(AgentRun.started_at >= since)
+        )
+    ).one()
+    top = await db.execute(
+        select(AgentRun.agent_type, func.count(AgentRun.id).label("n"))
+        .where(AgentRun.started_at >= since)
+        .group_by(AgentRun.agent_type)
+        .order_by(func.count(AgentRun.id).desc())
+        .limit(5)
+    )
+    try:
+        spent_today = float(await spend_guard.spent_today_with_db_floor())
+    except Exception:
+        spent_today = 0.0
+    budget = float(get_settings().cost_budget_daily_usd)
+    return {
+        "tasks": {
+            "total": sum(by_status.values()),
+            "completed": completed,
+            "failed": failed,
+            "inProgress": in_progress,
+            "waitingForYou": waiting,
+            "blocked": blocked,
+            "successRate": (completed / finished) if finished else None,
+            "avgMinutesToComplete": float(avg_minutes) if avg_minutes else None,
+        },
+        "cost": {
+            "spentTodayUsd": round(spent_today, 4),
+            "dailyBudgetUsd": budget if budget > 0 else None,
+            "spent30dUsd": round(float(spend_30d or 0), 4),
+            "agentRuns30d": int(runs_30d or 0),
+        },
+        "busiestAgents": [{"agentName": str(a), "runs": int(n)} for a, n in top.all()],
     }
 
 

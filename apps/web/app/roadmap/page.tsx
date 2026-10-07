@@ -4,9 +4,10 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import {
   fetchRoadmap,
-  listRepos,
+  getCurrentProjectId,
+  listProjects,
   updateRoadmapItemStatus,
-  type RepoRecord,
+  type Project,
   type RoadmapItem,
 } from "../../lib/api";
 
@@ -83,15 +84,19 @@ function RoadmapItemRow({
 
 export default function RoadmapPage() {
   const qc = useQueryClient();
-  const [selectedRepo, setSelectedRepo] = useState<number | null>(null);
+  const [selectedProject, setSelectedProject] = useState<number | null>(null);
 
-  const { data: reposData } = useQuery({
-    queryKey: ["repos"],
-    queryFn: listRepos,
-    staleTime: 30_000,
-  });
-  const readyRepos: RepoRecord[] = (reposData?.repos ?? []).filter((r) => r.status === "ready");
-  const repoId = selectedRepo ?? readyRepos[0]?.id ?? null;
+  // Projects (not raw repositories): a deleted project disappears here too,
+  // and the roadmap shown is the one of the project's code location.
+  const { data: projects = [] } = useQuery({ queryKey: ["projects"], queryFn: listProjects });
+  const readyProjects: Project[] = projects.filter((p) => p.status === "ready" && p.repoId != null);
+  const remembered = getCurrentProjectId();
+  const project =
+    readyProjects.find((p) => p.id === selectedProject) ??
+    readyProjects.find((p) => p.id === remembered) ??
+    readyProjects[0] ??
+    null;
+  const repoId = project?.repoId ?? null;
 
   const { data: roadmap, isLoading } = useQuery({
     queryKey: ["roadmap", repoId],
@@ -111,18 +116,19 @@ export default function RoadmapPage() {
         <div>
           <h1 className="text-xl font-semibold text-slate-900 dark:text-slate-100">Roadmap</h1>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-            The latest tracked roadmap for a repository, sequenced by the roadmap agent.
+            The planned initiatives for a project and how far along each one is.
           </p>
         </div>
-        {readyRepos.length > 0 && (
+        {readyProjects.length > 0 && (
           <select
-            value={repoId ?? ""}
-            onChange={(e) => setSelectedRepo(Number(e.target.value))}
-            className="rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-800"
+            aria-label="Project"
+            value={project?.id ?? ""}
+            onChange={(e) => setSelectedProject(Number(e.target.value))}
+            className="rounded-lg border border-orange-200 bg-orange-50/50 px-3 py-2 text-sm font-semibold dark:border-slate-600 dark:bg-slate-800"
           >
-            {readyRepos.map((r) => (
-              <option key={r.id} value={r.id}>
-                {r.name}
+            {readyProjects.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
               </option>
             ))}
           </select>
@@ -130,7 +136,7 @@ export default function RoadmapPage() {
       </div>
 
       {repoId === null ? (
-        <p className="text-sm text-slate-400">No ready repositories yet.</p>
+        <p className="text-sm text-slate-400">No project yet. Create one in Start first.</p>
       ) : isLoading ? (
         <p className="text-sm text-slate-400">Loading…</p>
       ) : !roadmap ? (

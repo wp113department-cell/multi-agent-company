@@ -166,9 +166,12 @@ export function NavBar() {
   const fleetPending = useFleetPendingCount(authed);
   const approvalsPending = useApprovalsPendingCount(authed);
 
+  // Re-checked on every navigation: signing in happens on /login and then
+  // moves to Start without reloading the page, so a mount-only check left
+  // the Tour, bell and Sign out buttons hidden until a manual refresh.
   useEffect(() => {
     setAuthed(isAuthenticated());
-  }, []);
+  }, [pathname]);
 
   useEffect(() => {
     setMenuOpen(false);

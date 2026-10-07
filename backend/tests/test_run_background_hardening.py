@@ -213,12 +213,21 @@ def test_kill_sandboxed_background_process_stops_container(tmp_path: Path) -> No
     procs: dict[int, "subprocess.Popen[str]"] = {}
     result = pm.spawn("sleep 300", str(tmp_path), procs)
     pid = int(result.split("PID ")[1].split(":")[0])
-    time.sleep(2)
-    mine = _bg_containers() - before
+    # Wait for the container to appear (a fixed sleep was flaky on a busy
+    # machine: `docker run` can take several seconds to create it).
+    mine: set[str] = set()
+    for _ in range(60):
+        mine = _bg_containers() - before
+        if mine:
+            break
+        time.sleep(0.5)
     assert mine, "precondition: the sandbox container should be running"
     kill_result = pm.kill(pid, "TERM", procs)
     assert "Sent TERM" in kill_result
-    time.sleep(3)
+    for _ in range(40):
+        if not (mine & _bg_containers()):
+            break
+        time.sleep(0.5)
     assert not (mine & _bg_containers()), "sandboxed container must not be left running"
 
 

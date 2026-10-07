@@ -1,6 +1,9 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  // Hide the Next.js dev-tools badge (the round "N" in the corner): it only
+  // exists under `next dev`, but local demos run that way too.
+  devIndicators: false,
   // Real bug found live (2026-09-25, Q12/#12 UI gap-closure verification):
   // Next.js's own default compression (gzip, enabled by `compress: true`
   // implicitly) applies to EVERY proxied response, including the chat

@@ -1,8 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { confirmChatAction, createChatSession, deleteChatSession, listRepos, stopChatTurn } from "@/lib/api";
-import type { RepoRecord } from "@/lib/api";
+import {
+  confirmChatAction,
+  createChatSession,
+  deleteChatSession,
+  getCurrentProjectId,
+  listProjects,
+  stopChatTurn,
+} from "@/lib/api";
+import type { Project } from "@/lib/api";
 import { authHeaders } from "@/lib/auth";
 import { TerminalTabs } from "@/components/TerminalTabs";
 import { Icon } from "../../components/Icon";
@@ -228,7 +235,7 @@ function ConfirmBlock({
 // ---------------------------------------------------------------------------
 
 export default function ChatPage() {
-  const [repos, setRepos] = useState<RepoRecord[]>([]);
+  const [repos, setRepos] = useState<Project[]>([]);
   const [selectedRepo, setSelectedRepo] = useState<string>("");
   const [customPath, setCustomPath] = useState<string>("");
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -264,13 +271,15 @@ export default function ChatPage() {
   const assistantContentRef = useRef<string>("");
   const hasAssistantMsgRef = useRef(false);
 
-  // Load repos on mount
+  // Load the user's projects on mount (not raw repositories: a deleted
+  // project must not linger here); preselect the one being worked on.
   useEffect(() => {
-    listRepos()
-      .then((data) => {
-        setRepos(data.repos.filter((r) => r.status === "ready"));
-        const active = data.repos.find((r) => r.isActive);
-        if (active) setSelectedRepo(active.localPath);
+    listProjects()
+      .then((projects) => {
+        const ready = projects.filter((p) => p.status === "ready" && p.localPath);
+        setRepos(ready);
+        const current = ready.find((p) => p.id === getCurrentProjectId()) ?? ready[0];
+        if (current?.localPath) setSelectedRepo(current.localPath);
       })
       .catch(() => {});
   }, []);
@@ -703,7 +712,7 @@ export default function ChatPage() {
           <div className="w-full max-w-md space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800">
             <h2 className="font-semibold text-slate-800 dark:text-slate-200">Start a Chat Session</h2>
             <p className="text-sm text-slate-500">
-              Select a repository to chat about. The agent will read, write, and run code in that repo.
+              Choose the project to talk about. The team can read, change and run its code, and asks you before anything risky.
             </p>
 
             {repos.length > 0 && (
@@ -712,7 +721,7 @@ export default function ChatPage() {
                   htmlFor="chat-repo-select"
                   className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400"
                 >
-                  Repository
+                  Project
                 </label>
                 <select
                   id="chat-repo-select"
@@ -720,9 +729,9 @@ export default function ChatPage() {
                   onChange={(e) => setSelectedRepo(e.target.value)}
                   className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-700"
                 >
-                  <option value="">— select a repo —</option>
+                  <option value="">Choose a project</option>
                   {repos.map((r) => (
-                    <option key={r.id} value={r.localPath}>
+                    <option key={r.id} value={r.localPath ?? ""}>
                       {r.name}
                     </option>
                   ))}
@@ -732,7 +741,7 @@ export default function ChatPage() {
 
             <div>
               <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">
-                {repos.length > 0 ? "Or enter a custom path" : "Repo path"}
+                {repos.length > 0 ? "Or a folder path (advanced)" : "Folder path"}
               </label>
               <input
                 type="text"

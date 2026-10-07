@@ -89,6 +89,24 @@ async def _dispatch_decision(
     planner with the human's answer (AUDIT_Q_BATCH12 §27 gap-closure,
     2026-08-11) — previously the only action with no branch here at all, so
     approving one only flipped the row's own status and nothing else."""
+    if row.task_id is not None:
+        # Demo data (app.services.demo): move the task along without AI.
+        from app.db.session import get_session_factory as _gsf
+        from app.services import demo
+
+        event = {
+            ("plan_review", True): "plan_approved",
+            ("plan_review", False): "plan_rejected",
+            ("git_push", True): "push_approved",
+            ("git_push", False): "push_rejected",
+            ("clarification", True): "answered",
+            ("clarification", False): "declined",
+        }.get((row.action, approved))
+        async with _gsf()() as demo_db:
+            if await demo.is_demo_task(demo_db, row.task_id):
+                if event:
+                    await demo.simulate(demo_db, row.task_id, event)
+                return
     if row.action == "plan_review" and row.task_id is not None:
         from app.api.agents import resume_planning_pipeline
         from app.db.repository import get_task, resolve_task_repo_path

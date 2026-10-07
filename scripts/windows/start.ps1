@@ -134,6 +134,7 @@ Say "Open:      http://localhost:3000" Green
 Say "Sign in:   admin  /  DEFAULT_ADMIN_PASSWORD from backend\.env (default: gridiron123)" Green
  Say "           On first sign-in you choose a new password." Green
 Say "Repos:     $Workspace" Green
+Say "Demo:      double-click Load-Demo-Data.bat for ready-made demo projects" Green
 Say "Stop it:   double-click Stop-Multi-Agentic-Company.bat" Green
 Start-Process "http://localhost:3000"
 Write-Host ""

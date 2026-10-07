@@ -9,14 +9,13 @@
  */
 
 import { Suspense, useEffect, useState } from "react";
-import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { ApprovalsPanel } from "../../components/ApprovalsPanel";
 import { FleetPanel } from "../../components/FleetPanel";
 import { NotificationsPanel } from "../../components/NotificationsPanel";
+import { PerformancePanel } from "../../components/PerformancePanel";
 import { authHeaders } from "../../lib/auth";
-import { Icon } from "../../components/Icon";
 
 const TABS = [
   { id: "approvals", label: "Approvals" },
@@ -101,18 +100,7 @@ function FleetAndApprovals() {
         {tab === "approvals" && <ApprovalsPanel />}
         {tab === "notifications" && <NotificationsPanel />}
         {tab === "improvements" && <FleetPanel />}
-        {tab === "performance" && (
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Link href="/metrics" className="rounded-2xl border border-slate-200 bg-white p-5 shadow-soft transition hover:border-orange-300 dark:border-slate-700 dark:bg-slate-900">
-              <p className="flex items-center gap-2 text-lg font-semibold text-slate-900 dark:text-white"><Icon name="bar-chart" size={18} className="text-orange-600" /> KPIs</p>
-              <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">Success rates, speed, quality and test results, updated live.</p>
-            </Link>
-            <Link href="/cost" className="rounded-2xl border border-slate-200 bg-white p-5 shadow-soft transition hover:border-orange-300 dark:border-slate-700 dark:bg-slate-900">
-              <p className="flex items-center gap-2 text-lg font-semibold text-slate-900 dark:text-white"><Icon name="coins" size={18} className="text-orange-600" /> AI cost</p>
-              <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">What the AI work costs, against your daily budget.</p>
-            </Link>
-          </div>
-        )}
+        {tab === "performance" && <PerformancePanel />}
       </section>
     </main>
   );

@@ -20,7 +20,8 @@ every step, and hands you back verified, ready-to-review work.
    - If Docker Desktop is missing, it is installed with winget. Restart Windows once, then run the file again.
    - First start builds everything (PostgreSQL + pgvector, Redis, migrations, API, web UI): 5–15 minutes.
 3. The browser opens **http://localhost:3000**. Sign in as `admin` with `DEFAULT_ADMIN_PASSWORD` (default `gridiron123`). You choose a new password on first sign-in, and a guided tour explains the menu.
-4. To stop, double-click **`Stop-Multi-Agentic-Company.bat`**. Your data is kept.
+4. For a client demo, double-click **`Load-Demo-Data.bat`** (3 projects with tasks in every stage, approvals, suggestions and a roadmap; acting on demo items never calls the AI). **`Remove-Demo-Data.bat`** removes it again.
+5. To stop, double-click **`Stop-Multi-Agentic-Company.bat`**. Your data is kept.
 
 Ports 3000, 5432, 6379 and 8000 must be free.
 
