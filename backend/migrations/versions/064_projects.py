@@ -113,29 +113,23 @@ def upgrade() -> None:
     op.alter_column("repos", "github_url", existing_type=sa.Text(), nullable=True)
 
     # Backfill: one project per existing repository, then link its work.
-    op.execute(
-        """
+    op.execute("""
         INSERT INTO projects (name, local_path, repo_id, github_url, source,
                               created_at, updated_at, last_opened_at)
         SELECT r.name, r.local_path, r.id, r.github_url, 'imported',
                r.created_at, now(), r.cloned_at
         FROM repos r
-        """
-    )
-    op.execute(
-        """
+        """)
+    op.execute("""
         UPDATE dev_tasks t SET project_id = p.id
         FROM projects p
         WHERE t.repo_id IS NOT NULL AND p.repo_id = t.repo_id
-        """
-    )
-    op.execute(
-        """
+        """)
+    op.execute("""
         UPDATE epics e SET project_id = p.id
         FROM projects p
         WHERE e.repo_id IS NOT NULL AND p.repo_id = e.repo_id
-        """
-    )
+        """)
 
 
 def downgrade() -> None:

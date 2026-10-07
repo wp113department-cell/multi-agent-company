@@ -260,3 +260,39 @@ Resume from the "Resume note" above:
 2. A31 (execution worker image).
 3. Batch 2 (A04, A03, A10).
 4. Then Batches 3–15 (the rest of A01–A44 plus G2–G14), one by one, with full CI before each push.
+
+## UI + backend redesign (owner request, 2026-10-07): done before resuming the 58 items
+
+Owner decisions:
+- Goals and Epics are simple project labels (no AI run on create).
+- Roadmap stays in the menu.
+- Custom agents are read-only for now.
+- Delivered phase by phase.
+
+| Phase | What | Commit |
+|---|---|---|
+| 2 | `projects` table (migration 064, additive, reversible, backfilled from repos); project/goal/epic/execution_mode on tasks; Economy/Max reuse the existing cost profiles per task | 7f39a554 |
+| 3–4 | Start page (4 setups, projects, history); new Tasks page and form | 7f39a554 |
+| 5 | Menu: Start, Tasks, Agents, Fleet & Approvals, Roadmap, Settings. Console's git tools moved to Start → project → Tools | edb3ef6f |
+| 6 | Agents: all 85 by category; real custom agents (migration 065) run on a project through the read-only temporary-agent runtime | d8c9f43f |
+| 7 | Fleet & Approvals merged, with Notifications and Performance tabs | 191f0192 |
+| 8 | Settings: Anthropic key (plus a collapsed GitHub token box) | ff9b790d |
+| 9 | Task page: one Start (uses Economy/Max), decision banner, readable approval cards | bef38e75 |
+
+Bugs found and fixed along the way:
+- task priority was never sent;
+- a shallow clone failed on servers without shallow support (now falls back to a full clone);
+- an unwritable folder returned 500 (now 400);
+- a GitHub copy landed in the wrong folder;
+- the shiny-button CSS matched hover classes;
+- approval options showed "[object Object]".
+
+**Not verified live,** because the owner asked for no Anthropic spend:
+- a real Economy/Max task run (planning → coding → testing);
+- a real custom-agent answer;
+- creating a new GitHub repository (needs a GitHub token);
+- a private GitHub clone.
+
+The wiring is covered by tests with the LLM stubbed.
+
+**Next:** finish full local CI and push. Then resume the "Tomorrow morning" Step 0, followed by the 58 items.
