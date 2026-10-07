@@ -558,6 +558,7 @@ class TestChangePasswordEndpoint:
                         body=ChangePasswordRequest(
                             current_password="whatever", new_password="short"
                         ),
+                        request=MagicMock(),  # unused: a JWT user is passed
                         current_user=user,
                         db=db,
                     )

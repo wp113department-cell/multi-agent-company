@@ -216,9 +216,36 @@ async def logout() -> Response:
     return response
 
 
+def _session_username(request: Request) -> str | None:
+    """The user named by the signed session token that POST /login issued
+    (cookie or Bearer header), or None.
+
+    Used by change-password when JWT_AUTH_ENABLED is off: login still issues
+    the signed token and still forces a password change for a new account,
+    but get_current_user() ignores tokens in that mode, so the change was
+    refused ("A real JWT is required") and never saved. The user then had to
+    sign in with the default password and "change" it again every time, and
+    the new password never worked (reported on the Windows Docker setup)."""
+    from jwt import PyJWTError as JWTError
+
+    from app.auth.jwt import decode_access_token
+
+    auth = request.headers.get("Authorization", "")
+    token = auth[len("Bearer ") :] if auth.startswith("Bearer ") else None
+    token = token or request.cookies.get("gridiron_token")
+    if not token:
+        return None
+    try:
+        sub = decode_access_token(token).get("sub")
+    except JWTError:
+        return None
+    return str(sub) if sub else None
+
+
 @router.post("/change-password")
 async def change_password(
     body: ChangePasswordRequest,
+    request: Request,
     current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, str]:
@@ -230,7 +257,11 @@ async def change_password(
     CurrentUser from the X-User-Role fallback or anonymous default has
     is_authenticated=False) and to know their current password, then
     persists the new hash and clears must_change_password."""
-    if not current_user.is_authenticated:
+    username = current_user.username if current_user.is_authenticated else None
+    if username is None and not get_settings().jwt_auth_enabled:
+        # JWT mode off: the signed login session still proves who this is.
+        username = _session_username(request)
+    if username is None:
         raise HTTPException(
             status_code=401,
             detail="A real JWT is required to change a password "
@@ -239,7 +270,7 @@ async def change_password(
 
     from app.auth.jwt import hash_password
 
-    user = await get_user(db, current_user.username)
+    user = await get_user(db, username)
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
 
@@ -251,13 +282,9 @@ async def change_password(
             status_code=400, detail="New password must be at least 8 characters"
         )
 
-    await update_user_password(
-        db, current_user.username, hash_password(body.new_password)
-    )
-    logger.info("Password changed for user: %s", current_user.username)
+    await update_user_password(db, username, hash_password(body.new_password))
+    logger.info("Password changed for user: %s", username)
     from app.middleware.password_change import forget
 
-    forget(
-        current_user.username
-    )  # the API unlocks immediately, not after the cache TTL
-    return {"status": "changed", "username": current_user.username}
+    forget(username)  # the API unlocks immediately, not after the cache TTL
+    return {"status": "changed", "username": username}
