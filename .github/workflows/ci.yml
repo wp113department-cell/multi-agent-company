@@ -203,6 +203,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Windows launcher first-run login settings
+        shell: powershell
+        run: powershell -NoProfile -File ../scripts/windows/settings.tests.ps1
+
       - name: Set up Python 3.11
         uses: actions/setup-python@v7
         with:

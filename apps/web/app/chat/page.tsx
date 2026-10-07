@@ -278,7 +278,9 @@ export default function ChatPage() {
       .then((projects) => {
         const ready = projects.filter((p) => p.status === "ready" && p.localPath);
         setRepos(ready);
-        const current = ready.find((p) => p.id === getCurrentProjectId()) ?? ready[0];
+        const requested = Number(new URLSearchParams(window.location.search).get("project"));
+        const current = ready.find((p) => p.id === requested) ??
+          ready.find((p) => p.id === getCurrentProjectId()) ?? ready[0];
         if (current?.localPath) setSelectedRepo(current.localPath);
       })
       .catch(() => {});

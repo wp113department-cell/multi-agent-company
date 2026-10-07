@@ -15,9 +15,9 @@ COPY apps/web/package.json ./apps/web/package.json
 RUN pnpm install --frozen-lockfile
 
 # ---- build ----
-FROM base AS build
-COPY --from=deps /repo/node_modules ./node_modules
-COPY --from=deps /repo/apps/web/node_modules ./apps/web/node_modules
+# Keep the dependency stage's pinned Corepack/pnpm cache as well as its
+# node_modules, so building does not download the package manager again.
+FROM deps AS build
 COPY . .
 # next.config.mjs bakes the /api/* proxy target into the build, so it must be
 # known here: inside docker compose the backend is reachable as backend:8000
@@ -30,6 +30,7 @@ RUN pnpm --filter @gridiron/web run build
 # ---- runtime ----
 FROM base AS runtime
 ENV NODE_ENV=production
+COPY --from=deps /root/.cache/node/corepack /root/.cache/node/corepack
 # Root package.json (packageManager: pnpm@11.9.0) and pnpm-workspace.yaml
 # are required here too, not just at install time: `pnpm --filter` run from
 # WORKDIR /repo resolves the pinned pnpm version and workspace membership

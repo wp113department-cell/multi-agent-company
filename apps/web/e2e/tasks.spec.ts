@@ -43,4 +43,33 @@ test.describe("Task list and detail", () => {
     await expect(page.getByText(SAMPLE_TASK.title)).toBeVisible();
     await expect(page.getByText(/ready.for.review/i)).toBeVisible();
   });
+
+  test("a failed Start shows the server error on the task page", async ({ page }) => {
+    await mockTaskDetailApis(page);
+    await page.route("**/api/tasks/42", (route) =>
+      route.fulfill(json({ ...SAMPLE_TASK, status: "pending", plan: null, diff: null }))
+    );
+    await page.route("**/api/tasks/42/run", (route) =>
+      route.fulfill(json({ detail: "The task could not start. Try again." }, 503))
+    );
+    await page.goto("/tasks/42");
+    await page.getByRole("button", { name: /^Start \(/ }).click();
+    await expect(page.getByRole("alert").filter({ hasText: "The task could not start" }))
+      .toHaveText("The task could not start. Try again.");
+  });
+
+  test("Chat from a task selects that task's project", async ({ page }) => {
+    await mockTaskDetailApis(page);
+    await page.route("**/api/tasks/42", (route) =>
+      route.fulfill(json({ ...SAMPLE_TASK, projectId: 7 }))
+    );
+    await page.route("**/api/projects", (route) => route.fulfill(json({ projects: [
+      { id: 8, name: "Other Project", localPath: "/w/other", status: "ready" },
+      { id: 7, name: "Task Project", localPath: "/w/task", status: "ready" },
+    ] })));
+    await page.goto("/tasks/42");
+    await page.getByRole("link", { name: "Chat with the team" }).click();
+    await expect(page).toHaveURL(/\/chat\?project=7$/);
+    await expect(page.getByLabel("Project", { exact: true })).toHaveValue("/w/task");
+  });
 });

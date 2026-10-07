@@ -84,6 +84,17 @@ async def _one(db: Any, title: str) -> DevTask:
     return row
 
 
+def _approval(task_id: int) -> PendingApproval:
+    async def go(db: Any) -> PendingApproval:
+        return (
+            await db.execute(
+                select(PendingApproval).where(PendingApproval.task_id == task_id)
+            )
+        ).scalar_one()
+
+    return _q(go)
+
+
 def test_seed_creates_every_kind_of_demo_content_and_is_rerunnable(demo: Path) -> None:
     from scripts.seed_demo_data import seed
 
@@ -208,6 +219,142 @@ def test_deciding_a_demo_approval_uses_no_ai(demo: Path) -> None:
         )
     assert r.status_code == 200
     assert _task(t.title).status == "coding"
+
+
+@pytest.mark.parametrize(
+    ("title", "status", "decision", "action"),
+    [
+        ("Live chat widget for the help centre", "rejected", "rejected", "patch"),
+        ("Show delivery date on the product page", "completed", "approved", "patch"),
+        ("Live chat widget for the help centre", "rejected", "rejected", "reject"),
+        ("Show delivery date on the product page", "completed", "approved", "complete"),
+    ],
+)
+def test_task_page_decision_closes_demo_fleet_approval(
+    demo: Path, title: str, status: str, decision: str, action: str
+) -> None:
+    task = _task(title)
+    approval = _approval(task.id)
+
+    if action == "patch":
+        response = _call("PATCH", f"/api/tasks/{task.id}", {"status": status})
+    else:
+        with patch("app.api.tasks.remove_worktree") as cleanup:
+            response = _call("POST", f"/api/tasks/{task.id}/{action}", {})
+        cleanup.assert_not_called()
+
+    assert response.status_code == 200
+    assert _task(title).status == status
+    decided = _approval(task.id)
+    assert decided.status == decision
+    assert decided.decided_by == "user" and decided.decided_at is not None
+    assert (
+        _call("POST", f"/api/approvals/{approval.thread_id}/approve").status_code == 409
+    )
+    assert _task(title).status == status
+
+
+@pytest.mark.parametrize(
+    ("title", "status", "approved"),
+    [
+        ("Live chat widget for the help centre", "rejected", True),
+        ("Live chat widget for the help centre", "completed", True),
+        ("Live chat widget for the help centre", "completed", False),
+        ("Show delivery date on the product page", "completed", False),
+        ("Show delivery date on the product page", "rejected", True),
+        ("Search products by colour and size", "cancelled", True),
+    ],
+)
+def test_queued_demo_fleet_decision_cannot_overwrite_task_page_choice(
+    demo: Path, title: str, status: str, approved: bool
+) -> None:
+    from app.api.approvals import _dispatch_decision
+    from app.fleet.approval_gate import aget_pending
+
+    task = _task(title)
+    approval = _approval(task.id)
+    # Capture the record as if its dispatcher was queued before the user
+    # decided on the task page. The late callback must respect that choice.
+    queued = _run(lambda: aget_pending(approval.thread_id))
+    assert queued is not None
+    assert (
+        _call("PATCH", f"/api/tasks/{task.id}", {"status": status}).status_code == 200
+    )
+    with (
+        patch("app.api.agents.resume_planning_pipeline", new=AsyncMock()) as planning,
+        patch(
+            "app.api.agents.resume_planner_after_clarification", new=AsyncMock()
+        ) as answer,
+        patch("app.api.approvals.dispatch_git_push_decision", new=AsyncMock()) as push,
+    ):
+        _run(lambda: _dispatch_decision(queued, approved, "Shop sizes"))
+    assert _task(title).status == status
+    planning.assert_not_called()
+    answer.assert_not_called()
+    push.assert_not_called()
+
+
+def test_demo_restart_closes_question_from_the_previous_attempt(demo: Path) -> None:
+    task = _task("Search products by colour and size")
+    with patch("app.api.agents.launch_planning_pipeline", new=AsyncMock()) as planning:
+        response = _call("POST", f"/api/tasks/{task.id}/restart")
+    assert response.status_code == 200
+    assert _task(task.title).status == "planning"
+    assert _task(task.title).blocked_reason is None
+    assert _approval(task.id).status == "rejected"
+    planning.assert_not_called()
+
+
+def test_demo_push_retry_never_dispatches_a_real_git_push(demo: Path) -> None:
+    task = _task("Show delivery date on the product page")
+    with patch("app.api.approvals.dispatch_git_push_decision", new=AsyncMock()) as push:
+        response = _call("POST", f"/api/tasks/{task.id}/push")
+    assert response.status_code == 200
+    assert _task(task.title).status == "completed"
+    assert _task(task.title).pr_status == "pushed"
+    assert _approval(task.id).status == "approved"
+    push.assert_not_called()
+
+
+def test_real_task_page_decision_preserves_existing_approval_behavior(
+    demo: Path,
+) -> None:
+    from sqlalchemy import delete
+
+    created = _call(
+        "POST", "/api/tasks", {"title": "real review", "description": "d"}
+    ).json()
+    task_id = int(created["id"])
+
+    async def setup(db: Any) -> None:
+        task = await db.get(DevTask, task_id)
+        task.status = "ready_for_review"
+        db.add(
+            PendingApproval(
+                thread_id=f"real-task-{task_id}",
+                task_id=task_id,
+                agent_name="planner",
+                action="plan_review",
+                details={},
+                status="pending",
+            )
+        )
+        await db.commit()
+
+    async def cleanup(db: Any) -> None:
+        await db.execute(
+            delete(PendingApproval).where(PendingApproval.task_id == task_id)
+        )
+        await db.execute(delete(DevTask).where(DevTask.id == task_id))
+        await db.commit()
+
+    try:
+        _q(setup)
+        response = _call("PATCH", f"/api/tasks/{task_id}", {"status": "rejected"})
+        assert response.status_code == 200
+        assert _approval(task_id).status == "pending"
+    finally:
+        _q(cleanup)
 
 
 def test_approving_a_demo_suggestion_starts_no_apply_agent(demo: Path) -> None:

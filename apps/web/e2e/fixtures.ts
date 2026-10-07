@@ -29,6 +29,7 @@ export async function authenticate(
   ]);
   await context.addInitScript((r) => {
     window.localStorage.setItem("gridiron_role", r);
+    window.localStorage.setItem("mac_tour_done_v1", "1");
   }, role);
 
   // NavBar renders on every page and polls these three endpoints in the

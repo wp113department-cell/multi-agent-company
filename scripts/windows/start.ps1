@@ -88,6 +88,17 @@ if (-not (Test-Path $backendEnv)) {
     Say "backend\.env found." Green
 }
 
+# ---------------------------------------------------------------- 2a. Browser sign-in
+. (Join-Path $PSScriptRoot "settings.ps1")
+try {
+    Initialize-WebLoginSettings $backendEnv
+    Say "Browser sign-in configured (JWT enabled; existing signing key kept)." Green
+} catch {
+    Say $_.Exception.Message Red
+    Read-Host "Press Enter to close"
+    exit 1
+}
+
 # ---------------------------------------------------------------- 2b. Workspace
 # The folder on this PC where repositories are cloned. The app sees it as
 # /workspace; the folder browser starts there.

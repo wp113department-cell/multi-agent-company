@@ -308,6 +308,9 @@ async def patch_status(
         raise HTTPException(status_code=400, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    from app.services import demo
+
+    await demo.finish_decisions(db, task_id, body.status)
     return _task_to_dict(task)
 
 
@@ -827,6 +830,10 @@ async def reject_task(
     task = await transition_task(db, task_id, "rejected")
     msg = f"Task rejected. Reason: {body.reason}" if body.reason else "Task rejected"
     await append_log(db, task_id, "rejection", msg)
+    from app.services import demo
+
+    if await demo.finish_decisions(db, task_id, "rejected"):
+        return {"rejected": True, "task": _task_to_dict(task)}
 
     # Gap-closure (Audit 04 fix, ORCH-04-012): the worktree is no longer
     # needed once a task is rejected (whether the plan or an already-coded
@@ -1123,6 +1130,10 @@ async def complete_task(
         )
     task = await transition_task(db, task_id, "completed")
     await append_log(db, task_id, "completion", "Task marked completed")
+    from app.services import demo
+
+    if await demo.finish_decisions(db, task_id, "completed"):
+        return {"completed": True, "task": _task_to_dict(task)}
 
     # Gap-closure (Audit 04 fix, ORCH-04-012): worktree no longer needed
     # once a task is completed. Best-effort.
@@ -1196,6 +1207,13 @@ async def push_task(
             status_code=400,
             detail="Task has no branch to push — has coding completed yet?",
         )
+
+    from app.services import demo
+
+    if await demo.simulate(db, task_id, "push_approved"):
+        result = {"triggered": True, "taskId": task_id}
+        await store_response(db, request, "push_task", result)
+        return result
 
     _clear_stale_abort(task_id)
     await dispatch_job(

@@ -9,16 +9,19 @@ goals and epics, tasks in every stage of the lifecycle with timelines, plans,
 results and AI cost history, decisions waiting for the user (plan, question,
 risky action, send to GitHub), team-improvement suggestions and a roadmap.
 
-Everything is marked ``created_by = "demo-seed"`` (approvals and suggestions
-through their task or ``trace_id``), so it can be removed without touching
-real data, and acting on it in the UI never starts real AI work (see
-app/services/demo.py). Running it again replaces the previous demo data.
+Projects and tasks are marked ``created_by = "demo-seed"`` (approvals and
+suggestions through their task or ``trace_id``). The IDs of repos and roadmaps
+created here are recorded separately because those models have no creator
+field. Removal preserves shared rows, and acting on demo items in the UI never
+starts real AI work (see app/services/demo.py). Running it again replaces the
+previous demo data, keeping its folders and avoiding existing real folders.
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import os
 import subprocess
 import uuid
@@ -41,12 +44,15 @@ from app.db.models import (
     Repo,
     Roadmap,
     RoadmapItem,
+    SystemSetting,
     TaskLog,
 )
 from app.db.session import get_session_factory
 from app.services.demo import DEMO_CREATOR
 
 NOW = datetime.now(timezone.utc)
+DEMO_FOLDER_MARKER = ".gridiron-demo"
+DEMO_OWNERSHIP_KEY = "demo-seed-owned-data"
 
 
 def ago(**kw: float) -> datetime:
@@ -363,22 +369,89 @@ def _git(folder: Path, *args: str) -> None:
     )
 
 
-def _make_folder(base: Path, spec: dict[str, Any]) -> Path:
-    folder = base / spec["folder"]
-    folder.mkdir(parents=True, exist_ok=True)
+def _make_folder(base: Path, spec: dict[str, Any], registered_paths: set[Path]) -> Path:
+    """Only create files in a fresh folder or reuse an untouched owned folder."""
+    suffix = 0
+    while True:
+        name = spec["folder"] + (f"-demo-{suffix}" if suffix else "")
+        folder = base / name
+        marker = folder / DEMO_FOLDER_MARKER
+        if folder.resolve() not in registered_paths and not folder.is_symlink():
+            if not folder.exists():
+                folder.mkdir(parents=True, exist_ok=False)
+                break
+            if marker.is_file() and marker.read_text() == DEMO_CREATOR:
+                # Keep any edits the user made, including git history. Never
+                # add files through symlinks inside a previously used folder.
+                return folder
+        suffix += 1
     for rel, content in spec["files"].items():
         f = folder / rel
         f.parent.mkdir(parents=True, exist_ok=True)
-        if not f.exists():
-            f.write_text(content)
-    if not (folder / ".git").exists():
-        _git(folder, "init", "-q")
-        _git(folder, "add", "-A")
-        _git(folder, "commit", "-qm", "Initial project")
+        f.write_text(content)
+    marker.write_text(DEMO_CREATOR)
+    _git(folder, "init", "-q")
+    _git(folder, "add", "-A")
+    _git(folder, "commit", "-qm", "Initial project")
     return folder
 
 
+async def _owned_data(db: Any) -> dict[str, list[int]]:
+    setting = await db.get(SystemSetting, DEMO_OWNERSHIP_KEY)
+    if setting is None:
+        return {"repo_ids": [], "roadmap_ids": []}
+    try:
+        data = json.loads(setting.value)
+    except (ValueError, TypeError):
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    owned = {}
+    for key in ("repo_ids", "roadmap_ids"):
+        values = data.get(key, [])
+        owned[key] = (
+            [value for value in values if type(value) is int]
+            if isinstance(values, list)
+            else []
+        )
+    return owned
+
+
+async def _save_owned_data(db: Any, owned: dict[str, list[int]]) -> None:
+    setting = await db.get(SystemSetting, DEMO_OWNERSHIP_KEY)
+    if not any(owned.values()):
+        if setting is not None:
+            await db.delete(setting)
+    elif setting is None:
+        db.add(SystemSetting(key=DEMO_OWNERSHIP_KEY, value=json.dumps(owned)))
+    else:
+        setting.value = json.dumps(owned)
+
+
+async def _delete_unreferenced(
+    db: Any, model: Any, primary_key: Any, ids: list[Any]
+) -> list[Any]:
+    """Do not remove an owned row while any surviving row still needs it."""
+    if not ids:
+        return []
+    stmt = delete(model).where(primary_key.in_(ids))
+    target = f"{model.__tablename__}.{primary_key.key}"
+    for table in Repo.metadata.tables.values():
+        for foreign_key in table.foreign_keys:
+            if foreign_key.target_fullname == target:
+                reference = (
+                    select(1)
+                    .select_from(table)
+                    .where(foreign_key.parent == primary_key)
+                    .correlate(model.__table__)
+                    .exists()
+                )
+                stmt = stmt.where(~reference)
+    return list((await db.execute(stmt.returning(primary_key))).scalars())
+
+
 async def remove_demo(db: Any) -> int:
+    owned = await _owned_data(db)
     projects = list(
         (
             await db.execute(select(Project).where(Project.created_by == DEMO_CREATOR))
@@ -390,7 +463,7 @@ async def remove_demo(db: Any) -> int:
             select(DevTask.id).where(DevTask.created_by == DEMO_CREATOR)
         )
     ]
-    repo_ids = [p.repo_id for p in projects if p.repo_id]
+    project_ids = [p.id for p in projects]
     if task_ids:
         await db.execute(
             delete(PendingApproval).where(PendingApproval.task_id.in_(task_ids))
@@ -401,51 +474,64 @@ async def remove_demo(db: Any) -> int:
     await db.execute(
         delete(EnhancementRequest).where(EnhancementRequest.trace_id == DEMO_CREATOR)
     )
-    for p in projects:
-        await db.execute(delete(Goal).where(Goal.project_id == p.id))
-        await db.execute(delete(Epic).where(Epic.project_id == p.id))
-    if repo_ids:
-        roadmap_ids = [
-            r
-            for (r,) in await db.execute(
-                select(Roadmap.id).where(Roadmap.repo_id.in_(repo_ids))
-            )
-        ]
-        if roadmap_ids:
-            await db.execute(
-                delete(RoadmapItem).where(RoadmapItem.roadmap_id.in_(roadmap_ids))
-            )
-            await db.execute(delete(Roadmap).where(Roadmap.id.in_(roadmap_ids)))
-    for p in projects:
-        await db.delete(p)
+    # Sharing a repo with a demo project does not make a roadmap demo data.
+    # Older unmarked repos/roadmaps are deliberately retained: their ownership
+    # cannot be established safely from the project's repo_id alone.
+    if owned["roadmap_ids"]:
+        await db.execute(
+            delete(RoadmapItem).where(RoadmapItem.roadmap_id.in_(owned["roadmap_ids"]))
+        )
+        await db.execute(delete(Roadmap).where(Roadmap.id.in_(owned["roadmap_ids"])))
+        owned["roadmap_ids"] = []
+    for model, primary_key in ((Goal, Goal.goal_id), (Epic, Epic.epic_id)):
+        ids = list(
+            (
+                await db.execute(
+                    select(primary_key).where(model.project_id.in_(project_ids))
+                )
+            ).scalars()
+        )
+        await _delete_unreferenced(db, model, primary_key, ids)
+    removed_projects = await _delete_unreferenced(db, Project, Project.id, project_ids)
     await db.flush()
-    if repo_ids:
-        await db.execute(delete(Repo).where(Repo.id.in_(repo_ids)))
+    removed_repos = await _delete_unreferenced(db, Repo, Repo.id, owned["repo_ids"])
+    owned["repo_ids"] = [
+        repo_id for repo_id in owned["repo_ids"] if repo_id not in removed_repos
+    ]
+    await _save_owned_data(db, owned)
     await db.commit()
-    return len(projects)
+    return len(removed_projects)
 
 
 async def seed(workspace: Path) -> None:
     factory = get_session_factory()
     async with factory() as db:
         await remove_demo(db)
+        owned = await _owned_data(db)
+        registered_paths = {
+            Path(path).resolve()
+            for model in (Repo, Project)
+            for path in (
+                await db.execute(
+                    select(model.local_path).where(model.local_path.is_not(None))
+                )
+            ).scalars()
+        }
 
         made: list[tuple[Project, list[Goal], list[Epic]]] = []
         for i, spec in enumerate(PROJECTS):
-            folder = _make_folder(workspace, spec)
-            existing = (
-                await db.execute(select(Repo).where(Repo.local_path == str(folder)))
-            ).scalar_one_or_none()
-            repo = existing or Repo(
+            folder = _make_folder(workspace, spec, registered_paths)
+            repo = Repo(
                 github_url=None,
                 name=spec["folder"],
                 local_path=str(folder),
                 status="ready",
                 cloned_at=ago(days=14 - i),
             )
-            if existing is None:
-                db.add(repo)
-                await db.flush()
+            db.add(repo)
+            await db.flush()
+            owned["repo_ids"].append(repo.id)
+            registered_paths.add(folder.resolve())
             project = Project(
                 name=spec["name"],
                 description=spec["description"],
@@ -476,6 +562,7 @@ async def seed(workspace: Path) -> None:
                     status="open",
                     repo_id=repo.id,
                     project_id=project.id,
+                    created_by=DEMO_CREATOR,
                 )
                 for e in spec["epics"]
             ]
@@ -688,6 +775,7 @@ async def seed(workspace: Path) -> None:
         )
         db.add(roadmap)
         await db.flush()
+        owned["roadmap_ids"].append(roadmap.id)
         for k, (phase, initiative, impact, effort, status) in enumerate(ROADMAP):
             db.add(
                 RoadmapItem(
@@ -702,6 +790,7 @@ async def seed(workspace: Path) -> None:
                     status=status,
                 )
             )
+        await _save_owned_data(db, owned)
         await db.commit()
     print(
         f"Demo data loaded: {len(PROJECTS)} projects, {len(TASKS)} tasks, 4 decisions, "
@@ -724,7 +813,8 @@ def main() -> None:
             async with get_session_factory()() as db:
                 n = await remove_demo(db)
             print(
-                f"Removed {n} demo projects and everything linked to them. Folders on disk are kept."
+                f"Removed {n} demo projects and their demo data. "
+                "Shared rows and folders on disk are kept."
             )
 
         asyncio.run(rm())

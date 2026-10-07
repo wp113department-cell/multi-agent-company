@@ -212,6 +212,10 @@ export default function TaskDetailPage() {
   const isPipelineRunning = task.status === "planning" && (!pipeline || pipeline.stage === "pm");
   const isPipelineAwaitingApproval = pipeline?.stage === "awaiting_approval";
   const canRunPipeline = canRun && !isPipelineRunning && !isPipelineAwaitingApproval;
+  const actionError = startMutation.error ?? runMutation.error ?? startCodingMutation.error ??
+    runPipelineMutation.error ?? smartRunMutation.error ?? restartMutation.error ??
+    approveDiffMutation.error ?? rejectDiffMutation.error ?? approvePipelineMutation.error ??
+    rejectPipelineMutation.error ?? retryPushMutation.error;
 
   return (
     <div className="space-y-6">
@@ -253,7 +257,7 @@ export default function TaskDetailPage() {
           </span>
           {task.goalTitle && <span className="rounded-full bg-slate-50 px-2.5 py-0.5 text-slate-600 ring-1 ring-slate-200 inline-flex items-center gap-1"><Icon name="target" size={12} /> {task.goalTitle}</span>}
           {task.epicTitle && <span className="rounded-full bg-slate-50 px-2.5 py-0.5 text-slate-600 ring-1 ring-slate-200 inline-flex items-center gap-1"><Icon name="layers" size={12} /> {task.epicTitle}</span>}
-          <Link href="/chat" className="ml-auto rounded-full border border-slate-200 px-2.5 py-0.5 font-medium text-slate-600 hover:bg-orange-50">
+          <Link href={task.projectId ? `/chat?project=${task.projectId}` : "/chat"} className="ml-auto rounded-full border border-slate-200 px-2.5 py-0.5 font-medium text-slate-600 hover:bg-orange-50">
             <Icon name="message" size={12} /> Chat with the team
           </Link>
         </p>
@@ -403,9 +407,9 @@ export default function TaskDetailPage() {
           )}
         </div>
 
-        {(runMutation.isError || startCodingMutation.isError || runPipelineMutation.isError || smartRunMutation.isError || restartMutation.isError) && (
-          <p className="mt-2 text-xs text-red-600">
-            {((runMutation.error ?? startCodingMutation.error ?? runPipelineMutation.error ?? smartRunMutation.error ?? restartMutation.error) as Error).message}
+        {actionError && (
+          <p role="alert" className="mt-2 text-xs text-red-600">
+            {actionError.message}
           </p>
         )}
       </div>

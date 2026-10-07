@@ -3,12 +3,9 @@
 /**
  * Human Approval UI (Day 13).
  *
- * Generic list of every LangGraph thread currently paused at interrupt() —
- * today the only registrant is the planning pipeline's human_review_node
- * (plan_review), reached via POST /tasks/{id}/run. Approve/reject here call
- * the same resume_planning_pipeline() the existing task-detail approve
- * button already uses. Day 14's git-push approval gate will show up here too
- * once it registers into the same pending_approvals table.
+ * Pending decisions from plans, questions and protected actions. Questions
+ * send the human's answer through the same approval API that resumes the
+ * waiting agent; other actions remain yes/no decisions.
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -72,10 +69,11 @@ function readable(value: unknown): string {
   return String(value);
 }
 
-async function apiFetch<T>(path: string, method = "GET"): Promise<T> {
+async function apiFetch<T>(path: string, method = "GET", body?: { answer: string }): Promise<T> {
   const res = await fetch(path, {
     method,
     headers: { "Content-Type": "application/json", ...authHeaders() },
+    ...(body ? { body: JSON.stringify(body) } : {}),
   });
   const json = (await res.json()) as T;
   if (!res.ok) {
@@ -109,10 +107,17 @@ function ApprovalCard({
   busy,
 }: {
   approval: PendingApproval;
-  onApprove: (threadId: string) => void;
+  onApprove: (threadId: string, answer?: string) => void;
   onReject: (threadId: string) => void;
   busy: boolean;
 }) {
+  const [answer, setAnswer] = useState("");
+  const isQuestion = approval.action === "clarification";
+  const answerId = `approval-answer-${approval.id}`;
+  const options = Array.isArray(approval.details.options)
+    ? approval.details.options.filter((option) => option !== null && option !== undefined)
+    : [];
+
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-900">
       <div className="flex items-start justify-between gap-3">
@@ -147,22 +152,64 @@ function ApprovalCard({
         // only 403 (app/middleware/rbac.py's own docstring: "UI hiding
         // buttons is a courtesy only").
         isApprover() ? (
-          <div className="mt-4 flex gap-2">
-            <button
-              disabled={busy}
-              onClick={() => onApprove(approval.threadId)}
-              className="rounded-md bg-green-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
-            >
-              Approve
-            </button>
-            <button
-              disabled={busy}
-              onClick={() => onReject(approval.threadId)}
-              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-800"
-            >
-              Reject
-            </button>
-          </div>
+          <form
+            className="mt-4 space-y-3"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (busy || (isQuestion && !answer.trim())) return;
+              onApprove(approval.threadId, isQuestion ? answer.trim() : undefined);
+            }}
+          >
+            {isQuestion && (
+              <div className="space-y-2">
+                <label htmlFor={answerId} className="block text-sm font-medium text-slate-700 dark:text-slate-300">
+                  Your answer
+                </label>
+                <textarea
+                  id={answerId}
+                  value={answer}
+                  onChange={(event) => setAnswer(event.target.value)}
+                  required
+                  disabled={busy}
+                  rows={3}
+                  placeholder="Answer the team's question"
+                  className="block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
+                />
+                {options.length > 0 && (
+                  <div className="flex flex-wrap gap-2" role="group" aria-label="Suggested answers">
+                    {options.map((option, index) => (
+                      <button
+                        key={index}
+                        type="button"
+                        disabled={busy}
+                        onClick={() => setAnswer(readable(option))}
+                        className="rounded-md border border-orange-200 px-2.5 py-1.5 text-xs text-orange-800 hover:bg-orange-50 disabled:opacity-50 dark:border-orange-900 dark:text-orange-300 dark:hover:bg-orange-950"
+                      >
+                        {readable(option)}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            <div className="flex gap-2">
+              <button
+                type="submit"
+                disabled={busy || (isQuestion && !answer.trim())}
+                className="rounded-md bg-green-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
+              >
+                {isQuestion ? (busy ? "Sending…" : "Send answer") : "Approve"}
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => onReject(approval.threadId)}
+                className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-800"
+              >
+                Reject
+              </button>
+            </div>
+          </form>
         ) : (
           <p className="mt-4 text-xs text-slate-400 dark:text-slate-500">
             Approver role required to decide on this request.
@@ -222,10 +269,14 @@ export function ApprovalsPanel() {
   }, [refresh]);
 
   const decide = useCallback(
-    async (threadId: string, action: "approve" | "reject") => {
+    async (threadId: string, action: "approve" | "reject", answer?: string) => {
       setBusyThreads((prev) => new Set(prev).add(threadId));
       try {
-        await apiFetch(`/api/approvals/${threadId}/${action}`, "POST");
+        await apiFetch(
+          `/api/approvals/${encodeURIComponent(threadId)}/${action}`,
+          "POST",
+          action === "approve" && answer ? { answer } : undefined,
+        );
         await refresh();
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
@@ -253,7 +304,7 @@ export function ApprovalsPanel() {
       </div>
 
       {error && (
-        <div className="rounded-lg bg-red-50 p-4 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-400">
+        <div role="alert" className="rounded-lg bg-red-50 p-4 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-400">
           {error}
         </div>
       )}
@@ -270,7 +321,7 @@ export function ApprovalsPanel() {
             <ApprovalCard
               key={a.threadId}
               approval={a}
-              onApprove={(tid) => void decide(tid, "approve")}
+              onApprove={(tid, answer) => void decide(tid, "approve", answer)}
               onReject={(tid) => void decide(tid, "reject")}
               busy={busyThreads.has(a.threadId)}
             />
