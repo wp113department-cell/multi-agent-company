@@ -48,7 +48,7 @@ const DETAIL_LABELS: Record<string, string> = {
 };
 
 // Internal flags that mean nothing to a user.
-const HIDDEN_DETAILS = new Set(["blocking"]);
+const HIDDEN_DETAILS = new Set(["blocking", "demo"]);
 
 /** A detail value as readable text: lists and objects included. */
 function readable(value: unknown): string {
