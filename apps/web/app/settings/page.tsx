@@ -2,33 +2,12 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import {
-  deleteCustomSecret,
-  fetchAppSettings,
-  fetchCustomSecrets,
-  saveApiKey,
-  saveCustomSecret,
-  saveGithubToken,
-  type AppSettings,
-} from "../../lib/api";
+import { fetchAppSettings, saveApiKey, saveGithubToken, type AppSettings } from "../../lib/api";
 import { authHeaders } from "../../lib/auth";
 
 // ---------------------------------------------------------------------------
 // API helpers
 // ---------------------------------------------------------------------------
-
-async function saveOpenAiKey(key: string) {
-  const res = await fetch("/api/settings/openai-key", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...authHeaders() },
-    body: JSON.stringify({ api_key: key }),
-  });
-  if (!res.ok) {
-    const b = await res.json().catch(() => ({})) as { detail?: string };
-    throw new Error(b.detail ?? "Save failed");
-  }
-  return res.json();
-}
 
 async function verifyKey(provider: "anthropic" | "openai", key: string): Promise<{ ok: boolean; error?: string }> {
   const res = await fetch("/api/settings/verify-key", {
@@ -211,126 +190,6 @@ function ApiKeyCard({
 }
 
 // ---------------------------------------------------------------------------
-// Custom secrets (Day 17 — Credential Vault). Arbitrary named secrets
-// injected into the coding agents' bash tool env — never database/deploy
-// credentials (see docs/DAY17_PLAN.md). List + add form + delete, adapted
-// from open-hands's secrets-settings screen to this project's simpler
-// backend (create/list/delete only — no description field, no editing an
-// existing secret's value, matching what POST/GET/DELETE
-// /api/settings/custom-secrets actually supports).
-// ---------------------------------------------------------------------------
-
-function CustomSecretsSection() {
-  const queryClient = useQueryClient();
-  const [name, setName] = useState("");
-  const [value, setValue] = useState("");
-  const [formError, setFormError] = useState("");
-
-  const { data: names, isLoading } = useQuery({
-    queryKey: ["custom-secrets"],
-    queryFn: fetchCustomSecrets,
-  });
-
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["custom-secrets"] });
-
-  const createMutation = useMutation({
-    mutationFn: () => saveCustomSecret(name.trim(), value.trim()),
-    onSuccess: () => {
-      setName("");
-      setValue("");
-      setFormError("");
-      invalidate();
-    },
-    onError: (e) => setFormError(e instanceof Error ? e.message : "Save failed"),
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: (secretName: string) => deleteCustomSecret(secretName),
-    onSuccess: invalidate,
-  });
-
-  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    if (!name.trim() || !value.trim()) return;
-    createMutation.mutate();
-  }
-
-  return (
-    <section className="rounded-xl border border-slate-200 bg-white p-6 dark:border-slate-700 dark:bg-slate-900 space-y-4">
-      <div>
-        <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200">Custom Secrets</h2>
-        <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-          Named secrets (e.g. a third-party API key) injected into the coding agents&apos; shell
-          environment. Never database credentials or deploy secrets — those are never handed to
-          agents.
-        </p>
-      </div>
-
-      {isLoading ? (
-        <p className="text-sm text-slate-400">Loading…</p>
-      ) : names && names.length > 0 ? (
-        <ul className="divide-y divide-slate-100 rounded-lg border border-slate-100 dark:divide-slate-800 dark:border-slate-800">
-          {names.map((secretName) => (
-            <li
-              key={secretName}
-              className="flex items-center justify-between gap-3 px-4 py-2.5"
-            >
-              <span className="font-mono text-sm text-slate-700 dark:text-slate-300">{secretName}</span>
-              <button
-                onClick={() => deleteMutation.mutate(secretName)}
-                disabled={deleteMutation.isPending}
-                className="text-xs font-medium text-red-500 hover:text-red-700 disabled:opacity-50 dark:text-red-400"
-              >
-                Remove
-              </button>
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p className="rounded-lg bg-slate-50 px-4 py-3 text-sm text-slate-500 dark:bg-slate-800 dark:text-slate-400">
-          No custom secrets set.
-        </p>
-      )}
-
-      <form onSubmit={handleSubmit} className="space-y-2 border-t border-slate-100 pt-4 dark:border-slate-800">
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value.toUpperCase())}
-            placeholder="NPM_TOKEN"
-            className="w-1/3 rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
-          />
-          <input
-            type="password"
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            placeholder="Secret value"
-            className="flex-1 rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
-          />
-          <button
-            type="submit"
-            disabled={!name.trim() || !value.trim() || createMutation.isPending}
-            className="shrink-0 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
-          >
-            {createMutation.isPending ? "Adding…" : "Add"}
-          </button>
-        </div>
-        <p className="text-xs text-slate-400">
-          Name must be a valid env var identifier (letters, digits, underscore).
-        </p>
-        {formError && (
-          <div className="flex items-start gap-2 text-sm text-red-600 dark:text-red-400">
-            <span>✗</span>
-            <span>{formError}</span>
-          </div>
-        )}
-      </form>
-    </section>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Main settings page
 // ---------------------------------------------------------------------------
 
@@ -347,22 +206,17 @@ export default function SettingsPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["app-settings"] }),
   });
 
-  const saveOpenAiMutation = useMutation({
-    mutationFn: (key: string) => saveOpenAiKey(key),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["app-settings"] }),
-  });
-
   const saveGithubMutation = useMutation({
     mutationFn: (token: string) => saveGithubToken(token),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["app-settings"] }),
   });
 
   return (
-    <div className="mx-auto max-w-lg space-y-8">
+    <div className="mx-auto max-w-xl space-y-6">
       <div>
-        <h1 className="text-xl font-semibold text-slate-900 dark:text-slate-100">Settings</h1>
+        <h1 className="text-2xl font-extrabold tracking-tight text-slate-900 dark:text-white">Settings</h1>
         <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-          Runtime configuration — changes take effect immediately.
+          Add your Anthropic API key so the AI team can work. Changes take effect immediately.
         </p>
       </div>
 
@@ -373,7 +227,7 @@ export default function SettingsPage() {
           <ApiKeyCard
             provider="anthropic"
             label="Anthropic API Key"
-            hint="Powers all 68 fleet agents. Stored in your local database — never leaves your machine."
+            hint="Powers the whole AI team. Verify checks it with Anthropic, then Save stores it in your local database. It never leaves your machine except to talk to Anthropic."
             placeholder="sk-ant-..."
             isSet={settings?.anthropicKeySet ?? false}
             masked={settings?.anthropicKeyMasked ?? ""}
@@ -381,58 +235,29 @@ export default function SettingsPage() {
             isSaving={saveAnthropicMutation.isPending}
           />
 
-          <ApiKeyCard
-            provider="openai"
-            label="OpenAI API Key"
-            hint="Required for GPT-based tools and embeddings used by some agents. Stored locally."
-            placeholder="sk-..."
-            isSet={settings?.openaiKeySet ?? false}
-            masked={settings?.openaiKeyMasked ?? ""}
-            onSave={(key) => saveOpenAiMutation.mutateAsync(key)}
-            isSaving={saveOpenAiMutation.isPending}
-          />
-
-          <ApiKeyCard
-            provider="github"
-            label="GitHub Token"
-            hint="Personal access token used to create pull requests once agents finish a task. Stored locally."
-            placeholder="ghp_..."
-            isSet={settings?.githubTokenSet ?? false}
-            masked={settings?.githubTokenMasked ?? ""}
-            onSave={(key) => saveGithubMutation.mutateAsync(key).then(() => {})}
-            isSaving={saveGithubMutation.isPending}
-          />
-
-          <CustomSecretsSection />
-
-          {/* Model config (read-only) */}
-          {settings && (
-            <section className="rounded-xl border border-slate-200 bg-white p-6 dark:border-slate-700 dark:bg-slate-900">
-              <h2 className="mb-1 text-sm font-semibold text-slate-800 dark:text-slate-200">
-                Model Configuration
-              </h2>
-              <p className="mb-4 text-xs text-slate-500 dark:text-slate-400">
-                Change via env vars in your{" "}
-                <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">.env</code> file.
-              </p>
-              <dl className="space-y-2 text-sm">
-                <div className="flex justify-between">
-                  <dt className="text-slate-500 dark:text-slate-400">Backend</dt>
-                  <dd className="font-medium text-slate-800 dark:text-slate-200">
-                    {settings.usingGroq ? "Groq" : "Anthropic"}
-                  </dd>
-                </div>
-                <div className="flex justify-between">
-                  <dt className="text-slate-500 dark:text-slate-400">Planner model</dt>
-                  <dd className="font-mono text-xs text-slate-700 dark:text-slate-300">{settings.modelPlanner}</dd>
-                </div>
-                <div className="flex justify-between">
-                  <dt className="text-slate-500 dark:text-slate-400">Coder model</dt>
-                  <dd className="font-mono text-xs text-slate-700 dark:text-slate-300">{settings.modelCoder}</dd>
-                </div>
-              </dl>
-            </section>
-          )}
+          <details className="group rounded-xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
+            <summary className="flex cursor-pointer items-center justify-between px-6 py-4 text-sm font-semibold text-slate-800 dark:text-slate-200">
+              <span>
+                GitHub access{" "}
+                <span className="font-normal text-slate-500">
+                  · only for private or new GitHub projects{settings?.githubTokenSet ? " · saved" : ""}
+                </span>
+              </span>
+              <span className="text-slate-400 transition group-open:rotate-180">▾</span>
+            </summary>
+            <div className="border-t border-slate-100 p-4 dark:border-slate-800">
+              <ApiKeyCard
+                provider="github"
+                label="GitHub Token"
+                hint="Lets the team read private repositories, create new ones and send finished work to GitHub. Never shown again after saving."
+                placeholder="ghp_..."
+                isSet={settings?.githubTokenSet ?? false}
+                masked={settings?.githubTokenMasked ?? ""}
+                onSave={(key) => saveGithubMutation.mutateAsync(key).then(() => {})}
+                isSaving={saveGithubMutation.isPending}
+              />
+            </div>
+          </details>
         </>
       )}
     </div>
