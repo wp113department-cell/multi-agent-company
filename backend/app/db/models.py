@@ -755,6 +755,51 @@ class Project(Base):
     repo: Mapped["Repo | None"] = relationship("Repo", foreign_keys=[repo_id])
 
 
+class CustomAgent(Base):
+    """An agent a user created on the Agents page (migration 065). Runs on
+    demand with read-only tools; never part of automatic dispatch."""
+
+    __tablename__ = "custom_agents"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(100), unique=True)
+    purpose: Mapped[str] = mapped_column(Text)
+    tools: Mapped[Any] = mapped_column(JSONB, default=list)
+    capabilities: Mapped[Any] = mapped_column(ARRAY(Text), default=list)
+    created_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class CustomAgentRun(Base):
+    """One on-demand run of a CustomAgent against a project (migration 065)."""
+
+    __tablename__ = "custom_agent_runs"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    agent_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("custom_agents.id", ondelete="CASCADE")
+    )
+    project_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("projects.id", ondelete="SET NULL"), nullable=True
+    )
+    request: Mapped[str] = mapped_column(Text)
+    # running | completed | blocked | failed
+    status: Mapped[str] = mapped_column(String(20), default="running")
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    result: Mapped[Any] = mapped_column(JSONB, nullable=True)
+    tokens_in: Mapped[int] = mapped_column(Integer, default=0)
+    tokens_out: Mapped[int] = mapped_column(Integer, default=0)
+    created_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
 class Repo(Base):
     """GitHub repos that have been cloned for agents to work on."""
 

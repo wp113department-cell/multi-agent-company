@@ -966,3 +966,96 @@ export function setCurrentProjectId(id: number | null): void {
     // private mode: the choice simply isn't remembered
   }
 }
+
+// ---------------------------------------------------------------------------
+// Team (Agents page): built-in catalog and user-created agents
+// ---------------------------------------------------------------------------
+
+export interface CatalogAgent {
+  name: string;
+  displayName: string;
+  purpose: string;
+  tools: string[];
+  capabilities: string[];
+  available: boolean;
+  state: string;
+  risk: string;
+}
+
+export interface CatalogCategory {
+  name: string;
+  description: string;
+  count: number;
+  agents: CatalogAgent[];
+}
+
+export interface CustomAgentRecord {
+  id: number;
+  name: string;
+  purpose: string;
+  tools: string[];
+  capabilities: string[];
+  createdBy: string | null;
+  createdAt: string | null;
+}
+
+export interface CustomAgentRunRecord {
+  id: number;
+  agentId: number;
+  projectId: number | null;
+  request: string;
+  status: "running" | "completed" | "blocked" | "failed";
+  summary: string | null;
+  tokensIn: number;
+  tokensOut: number;
+  createdAt: string | null;
+  finishedAt: string | null;
+}
+
+export async function fetchTeamCatalog(): Promise<{ total: number; categories: CatalogCategory[] }> {
+  const res = await apiFetch("/api/team/agents", { cache: "no-store" });
+  return handleResponse(res);
+}
+
+export async function fetchCustomAgentTools(): Promise<{ name: string; description: string }[]> {
+  const res = await apiFetch("/api/team/tools", { cache: "no-store" });
+  return (await handleResponse<{ tools: { name: string; description: string }[] }>(res)).tools;
+}
+
+export async function listCustomAgents(): Promise<CustomAgentRecord[]> {
+  const res = await apiFetch("/api/team/custom-agents", { cache: "no-store" });
+  return (await handleResponse<{ agents: CustomAgentRecord[] }>(res)).agents;
+}
+
+export async function createCustomAgent(input: {
+  name: string;
+  purpose: string;
+  tools: string[];
+  capabilities: string[];
+}): Promise<CustomAgentRecord> {
+  const res = await apiFetch("/api/team/custom-agents", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  return handleResponse(res);
+}
+
+export async function deleteCustomAgent(id: number): Promise<void> {
+  const res = await apiFetch(`/api/team/custom-agents/${id}`, { method: "DELETE" });
+  await handleResponse(res);
+}
+
+export async function runCustomAgent(id: number, projectId: number, request: string): Promise<CustomAgentRunRecord> {
+  const res = await apiFetch(`/api/team/custom-agents/${id}/runs`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ project_id: projectId, request }),
+  });
+  return handleResponse(res);
+}
+
+export async function listCustomAgentRuns(id: number): Promise<CustomAgentRunRecord[]> {
+  const res = await apiFetch(`/api/team/custom-agents/${id}/runs`, { cache: "no-store" });
+  return (await handleResponse<{ runs: CustomAgentRunRecord[] }>(res)).runs;
+}
