@@ -10,6 +10,7 @@ POST   /api/projects                     — create from one of 4 setups
 GET    /api/projects/{id}                — detail: goals, epics, task history
 PATCH  /api/projects/{id}                — rename / describe
 POST   /api/projects/{id}/open           — mark opened, make its folder active
+DELETE /api/projects/{id}                — remove from the app (files untouched)
 POST   /api/projects/{id}/goals          — add a goal label (no AI run)
 POST   /api/projects/{id}/epics          — add an epic label (no AI run)
 
@@ -610,3 +611,24 @@ async def add_epic(
     db.add(epic)
     await db.commit()
     return {"id": epic.epic_id, "title": epic.title, "status": epic.status}
+
+
+@router.delete("/{project_id}")
+async def delete_project(
+    project_id: int,
+    db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_approver),
+) -> dict[str, Any]:
+    """Remove a project from the app.
+
+    Never touches files: the folder on this computer and the GitHub
+    repository stay exactly as they are. Its tasks, goals and epics are kept
+    (their project link is cleared by the foreign key's ON DELETE SET NULL),
+    so past work stays visible and nothing in the task history is lost. The
+    repository record is kept too, since those tasks still point at it."""
+    p = await db.get(Project, project_id)
+    if p is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    await db.delete(p)
+    await db.commit()
+    return {"deleted": True, "id": project_id}

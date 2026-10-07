@@ -15,6 +15,7 @@ import { useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   createProject,
+  deleteProject,
   getProject,
   listProjects,
   openProject,
@@ -200,9 +201,26 @@ function TextField({
   );
 }
 
-function NewProjectWizard({ onClose, onCreated }: { onClose: () => void; onCreated: (p: Project) => void }) {
+function NewProjectWizard({
+  onClose,
+  onCreated,
+  onGoToTasks,
+}: {
+  onClose: () => void;
+  onCreated: (p: Project) => void;
+  onGoToTasks: (p: Project) => void;
+}) {
   useEscapeKey(onClose);
   const [setup, setSetup] = useState<ProjectSetup | null>(null);
+  const [created, setCreated] = useState<Project | null>(null);
+  // a GitHub copy downloads in the background: follow it until it is ready
+  const { data: live } = useQuery({
+    queryKey: ["project", created?.id],
+    queryFn: () => getProject(created!.id),
+    enabled: created != null && created.status === "cloning",
+    refetchInterval: (q) => ((q.state.data as Project | undefined)?.status === "cloning" ? 2500 : false),
+  });
+  const result: Project | null = created ? { ...created, ...(live ?? {}) } : null;
   const [ws, setWs] = useState<WorkspaceRoot | null>(null);
   const [name, setName] = useState("");
   const [path, setPath] = useState("");
@@ -268,6 +286,7 @@ function NewProjectWizard({ onClose, onCreated }: { onClose: () => void; onCreat
     setBusy(true);
     try {
       const p = await createProject(input);
+      setCreated(p);
       onCreated(p);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not create the project");
@@ -289,10 +308,10 @@ function NewProjectWizard({ onClose, onCreated }: { onClose: () => void; onCreat
         <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4 dark:border-slate-800">
           <div>
             <h2 id="new-project-title" className="text-lg font-bold text-slate-900 dark:text-white">
-              {chosen ? chosen.title : "Start a new project"}
+              {created ? "Project created" : chosen ? chosen.title : "Start a new project"}
             </h2>
             <p className="text-sm text-slate-500 dark:text-slate-400">
-              {chosen ? chosen.text : "Where is your project? Pick the option that fits."}
+              {created ? "What would you like to do next?" : chosen ? chosen.text : "Where is your project? Pick the option that fits."}
             </p>
           </div>
           <button onClick={onClose} aria-label="Close" className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800">
@@ -300,7 +319,52 @@ function NewProjectWizard({ onClose, onCreated }: { onClose: () => void; onCreat
           </button>
         </div>
 
-        {!setup ? (
+        {result ? (
+          <div className="space-y-5 p-6 text-center sm:p-8">
+            <span
+              className={`mx-auto flex h-14 w-14 items-center justify-center rounded-2xl ${
+                result.status === "error" ? "bg-red-100 text-red-600" : "bg-green-100 text-green-600"
+              }`}
+            >
+              <Icon name={result.status === "error" ? "x-circle" : result.status === "cloning" ? "arrow-down" : "check-circle"} size={28} />
+            </span>
+            <div>
+              <p className="text-xl font-bold text-slate-900 dark:text-white">
+                {result.status === "cloning"
+                  ? `Downloading “${result.name}”…`
+                  : result.status === "error"
+                    ? `“${result.name}” could not be downloaded`
+                    : `“${result.name}” is ready`}
+              </p>
+              <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
+                {result.status === "cloning"
+                  ? "We are getting a copy from GitHub. This usually takes a few seconds; you can wait here or come back from Start."
+                  : result.status === "error"
+                    ? result.error ?? "Check the link and your GitHub token, then try again."
+                    : "Next, describe the first piece of work in Tasks and the AI team takes it from there."}
+              </p>
+            </div>
+            <div className="flex flex-col-reverse justify-center gap-2 sm:flex-row">
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-lg border border-slate-200 px-5 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+              >
+                Back to projects
+              </button>
+              <button
+                type="button"
+                disabled={result.status !== "ready"}
+                onClick={() => onGoToTasks(result)}
+                className="rounded-lg bg-orange-600 px-6 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
+              >
+                <span className="inline-flex items-center gap-2">
+                  Go to Tasks <Icon name="arrow-right" size={15} />
+                </span>
+              </button>
+            </div>
+          </div>
+        ) : !setup ? (
           <div className="grid gap-3 p-6 sm:grid-cols-2">
             {SETUPS.map((s) => (
               <button
@@ -583,6 +647,36 @@ export default function StartPage() {
   const [historyFor, setHistoryFor] = useState<number | null>(null);
   const [opening, setOpening] = useState<number | null>(null);
   const [tools, setTools] = useState<Project | null>(null);
+  const [managing, setManaging] = useState(false);
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  function toggle(id: number) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  async function deleteSelected() {
+    setDeleting(true);
+    setError("");
+    try {
+      for (const id of selected) await deleteProject(id);
+      setSelected(new Set());
+      setManaging(false);
+      setConfirmDelete(false);
+      await qc.invalidateQueries({ queryKey: ["projects"] });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not delete");
+      setConfirmDelete(false);
+    } finally {
+      setDeleting(false);
+    }
+  }
   const [error, setError] = useState("");
 
   const { data: projects = [], isLoading } = useQuery({
@@ -663,6 +757,52 @@ export default function StartPage() {
 
       {tab === "projects" ? (
         <section aria-label="Your projects">
+          {sorted.length > 0 && (
+            <div className="mb-3 flex flex-wrap items-center justify-end gap-2">
+              {managing ? (
+                <>
+                  <span className="mr-auto text-sm text-slate-600 dark:text-slate-300">
+                    {selected.size === 0 ? "Select the projects to delete." : `${selected.size} selected`}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setSelected(selected.size === sorted.length ? new Set() : new Set(sorted.map((p) => p.id)))
+                    }
+                    className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200"
+                  >
+                    {selected.size === sorted.length ? "Clear selection" : "Select all"}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={selected.size === 0}
+                    onClick={() => setConfirmDelete(true)}
+                    className="rounded-lg bg-red-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-40"
+                  >
+                    Delete selected{selected.size ? ` (${selected.size})` : ""}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setManaging(false);
+                      setSelected(new Set());
+                    }}
+                    className="rounded-lg px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+                  >
+                    Done
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setManaging(true)}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:border-orange-200 hover:bg-orange-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+                >
+                  <Icon name="settings" size={14} /> Manage
+                </button>
+              )}
+            </div>
+          )}
           {isLoading && <p className="text-sm text-slate-500">Loading projects…</p>}
           {!isLoading && sorted.length === 0 && (
             <div className="rounded-2xl border border-dashed border-orange-200 p-10 text-center">
@@ -677,10 +817,27 @@ export default function StartPage() {
               return (
                 <article
                   key={p.id}
-                  className="flex flex-col rounded-2xl border border-slate-200 bg-white p-5 shadow-soft transition hover:border-orange-200 hover:shadow-glow dark:border-slate-700 dark:bg-slate-900"
+                  className={`flex flex-col rounded-2xl border bg-white p-5 shadow-soft transition dark:bg-slate-900 ${
+                    managing ? "" : "hover:shadow-glow"
+                  } ${
+                    managing && selected.has(p.id)
+                      ? "border-red-400 ring-2 ring-red-200"
+                      : "border-slate-200 hover:border-orange-200 dark:border-slate-700"
+                  }`}
                 >
                   <div className="flex items-start justify-between gap-2">
-                    <h2 className="text-base font-bold text-slate-900 dark:text-white">{p.name}</h2>
+                    <div className="flex min-w-0 items-center gap-2.5">
+                      {managing && (
+                        <input
+                          type="checkbox"
+                          aria-label={`Select ${p.name}`}
+                          checked={selected.has(p.id)}
+                          onChange={() => toggle(p.id)}
+                          className="h-5 w-5 shrink-0 cursor-pointer accent-red-600"
+                        />
+                      )}
+                      <h2 className="truncate text-base font-bold text-slate-900 dark:text-white">{p.name}</h2>
+                    </div>
                     {p.status === "cloning" && (
                       <span className="shrink-0 rounded-full bg-orange-100 px-2 py-0.5 text-xs font-medium text-orange-700">
                         Downloading…
@@ -702,6 +859,7 @@ export default function StartPage() {
                   {p.lastOpenedAt && (
                     <p className="mt-0.5 text-xs text-slate-400">Opened {relTime(p.lastOpenedAt)}</p>
                   )}
+                  {!managing && (
                   <div className="mt-4 flex gap-2 pt-1">
                     <button
                       type="button"
@@ -732,6 +890,7 @@ export default function StartPage() {
                       History
                     </button>
                   </div>
+                  )}
                 </article>
               );
             })}
@@ -743,6 +902,52 @@ export default function StartPage() {
         </section>
       )}
 
+      {confirmDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm">
+          <div
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="del-title"
+            className="w-full max-w-md rounded-2xl border border-red-100 bg-white p-6 shadow-2xl dark:border-slate-700 dark:bg-slate-900"
+          >
+            <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-red-100 text-red-600">
+              <Icon name="alert" size={22} />
+            </span>
+            <h2 id="del-title" className="mt-3 text-lg font-bold text-slate-900 dark:text-white">
+              Delete {selected.size} project{selected.size === 1 ? "" : "s"}?
+            </h2>
+            <ul className="mt-2 list-inside list-disc text-sm text-slate-600 dark:text-slate-400">
+              {sorted
+                .filter((p) => selected.has(p.id))
+                .map((p) => (
+                  <li key={p.id}>{p.name}</li>
+                ))}
+            </ul>
+            <p className="mt-3 rounded-lg bg-slate-50 p-3 text-sm text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+              This only removes them from the app. Your files on this computer and on GitHub are not touched,
+              and their past tasks stay in the task history.
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmDelete(false)}
+                className="rounded-lg px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={() => void deleteSelected()}
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                {deleting ? "Deleting…" : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {tools && tools.localPath && (
         <ProjectTools name={tools.name} path={tools.localPath} onClose={() => setTools(null)} />
       )}
@@ -751,10 +956,12 @@ export default function StartPage() {
         <NewProjectWizard
           onClose={() => setWizard(false)}
           onCreated={(p) => {
-            setWizard(false);
             void qc.invalidateQueries({ queryKey: ["projects"] });
             setCurrentProjectId(p.id);
-            if (p.status === "ready") router.push(`/tasks?project=${p.id}`);
+          }}
+          onGoToTasks={(p) => {
+            setWizard(false);
+            void continueWith(p);
           }}
         />
       )}

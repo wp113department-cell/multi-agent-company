@@ -404,3 +404,30 @@ def test_a_location_that_cannot_be_written_gets_a_clear_message(
     finally:
         locked.chmod(0o700)
     assert r.status_code == 400 and "Could not create the folder" in r.text
+
+
+def test_deleting_a_project_keeps_its_files_and_task_history(
+    workspace: Path, _cleanup: Any
+) -> None:
+    p = _create(_cleanup, name="Gone", setup="local_new", parent_path=str(workspace))
+    t = _call(
+        "POST",
+        "/api/tasks",
+        {"title": "keep me", "description": "d", "project_id": p["id"]},
+    ).json()
+    r = _call("DELETE", f"/api/projects/{p['id']}")
+    assert r.status_code == 200
+    assert _call("GET", f"/api/projects/{p['id']}").status_code == 404
+    # the folder and its git history are untouched
+    assert (workspace / "gone" / "README.md").exists()
+    assert _git_files(workspace / "gone") == ["README.md"]
+    # the task still exists, just no longer linked to a project
+    task = _call("GET", f"/api/tasks/{t['id']}").json()
+    assert task["title"] == "keep me" and task["projectId"] is None
+    assert _call("DELETE", f"/api/projects/{p['id']}").status_code == 404
+
+    async def rm(db: Any) -> None:
+        await db.execute(delete(DevTask).where(DevTask.id == t["id"]))
+        await db.commit()
+
+    _db(rm)

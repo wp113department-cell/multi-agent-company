@@ -1059,3 +1059,8 @@ export async function listCustomAgentRuns(id: number): Promise<CustomAgentRunRec
   const res = await apiFetch(`/api/team/custom-agents/${id}/runs`, { cache: "no-store" });
   return (await handleResponse<{ runs: CustomAgentRunRecord[] }>(res)).runs;
 }
+
+export async function deleteProject(id: number): Promise<void> {
+  const res = await apiFetch(`/api/projects/${id}`, { method: "DELETE" });
+  await handleResponse(res);
+}
