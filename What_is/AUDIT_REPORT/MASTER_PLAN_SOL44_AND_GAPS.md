@@ -314,3 +314,66 @@ The wiring is covered by tests with the LLM stubbed.
 Also from today:
 - Codex commit `f6b76c2b` was reviewed and is fine (sign-in setup on first run, answer box for questions, demo-safe reject/complete/push).
 - Fixed: reloading the demo data after adding real work to a demo project created a duplicate project with the same name.
+
+## New owner items (2026-10-08): project workflows (W) and chat panel (C)
+
+Added after the client demo. Checked against the code on 2026-10-08; nothing implemented yet.
+
+### What exists today for the 4 project types
+
+| Type | Setup today | Works | Missing |
+|---|---|---|---|
+| 1. Existing folder on this computer | `local_existing`: folder must be in the workspace; starts git tracking (first commit of existing files, `.env` excluded) | Tasks run in their own worktree on branch `agent/task-N`; terminal opens in the folder | W1, W2, W3, W4 |
+| 2. New folder on this computer | `local_new`: creates the folder, README, first commit | Same as type 1 | W2, W3, W5 |
+| 3. Existing GitHub repo | `github_existing`: clones (shallow by default; private repos with a token kept in the vault) | Approve → pushes `agent/task-N` and opens a PR | W3, W6, W7, W8 |
+| 4. New GitHub repo | `github_new`: creates the repo on GitHub (`auto_init`) and clones it | Same as type 3 | W3, W5, W8 |
+
+### W items (production behaviour for all 4 types)
+
+- **W1 — Understand an existing project first.** When an existing folder or repo is opened the first time, run a read-only "understand the project" step and store the result for the planner. The onboarding agent (`app/agents/onboarding_agent.py`) and the repo scanner already exist but aren't wired to project creation. The result is: stack, how to run and test it, structure, and known problems found.
+- **W2 — Local delivery ("Apply to my folder").** Today, approving the final step on a project with no GitHub link sets `pr_status="failed"` (`app/api/approvals.py`, `dispatch_git_push_decision`). The work stays on `agent/task-N` and never reaches the user's folder. Build:
+  - an approved merge of `agent/task-N` into the folder's current branch;
+  - a check for uncommitted user changes, which refuses and explains;
+  - conflict detection with a clear message;
+  - task page wording "Apply to my folder" instead of "Push to GitHub" for local projects;
+  - an optional "Connect to GitHub" later, which turns the project into type 3.
+- **W3 — Code and tests actually run** for every type in the Docker/Windows version. This is the "After the client demo: first item" Docker sandbox fix; W1, W2 and W5 depend on it.
+- **W4 — Uncommitted user edits.** Worktrees start from the last commit, so agents don't see edits the user hasn't committed. Warn before a task starts, and offer "Save my current changes first", which makes a commit on the user's say-so.
+- **W5 — Build a new project from zero.** A pipeline for an empty folder or repo:
+  - plan the stack and structure;
+  - scaffold;
+  - implement;
+  - add tests and a run command;
+  - human approval at the plan and at delivery.
+
+  This needs a Max-mode end-to-end check.
+- **W6 — Choose the target branch.** PRs always target `main` (`app/tools/git_push_tool.py`, `base_branch="main"`), so repos whose default branch is `master` or anything else fail. Use the repo's default branch, and let the user pick an "approved branch" per project.
+- **W7 — Start from the latest code.** Fetch and update from GitHub before a task starts, so work doesn't begin from a stale clone. Also handle a full clone when an agent needs history.
+- **W8 — Live checks not yet done** (need a GitHub token): private clone, create a new repo, push plus PR, and a PR to a non-`main` default branch. Do them once, with a throwaway repo.
+
+Each W item: tests that fail on the old code, impact check (Start page, Tasks, task page, Fleet & Approvals, tour, Windows launcher), full local CI, then push.
+
+### C items: chat panel
+
+Today the chat has:
+- live streaming of answers (SSE, reattach after a refresh);
+- one conversation at a time per session;
+- history readable per session.
+
+It has no file or image upload, no list of past chats, no memory carried between chats, and no menu entry (it opens only from a task page link). The UI is basic.
+
+- **C1 — Attachments.** Upload files and images (PDF, images, text and code) in a chat. Reuse the existing task attachment limits and PDF extraction; images go to the model as vision input.
+- **C2 — Chat history.** A list of past chats per project (new `GET /api/chat/sessions`), with reopen, rename and delete.
+- **C3 — Memory.** Per-project memory that later chats can use (decisions and facts the user confirms), scoped to the project and the user. Batch 6 memory-scope rules apply.
+- **C4 — UI.** A full-width layout with the chat list on the left. Messages render Markdown and code blocks with a copy button, show tool steps as collapsible cards, and show a stop button and a typing state. Add a Chat entry to the menu. The new arcade/pixel style applies.
+- **C5 — Real-time working view.** Show which file or tool the chat agent is using as it happens, with the existing approval prompt for risky steps.
+
+### Next week's order (owner sets the start day)
+
+1. The Docker sandbox fix ("After the client demo: first item"), which is also **W3**.
+2. **W2**, **W6**, **W1**, **W4** (local folders become fully usable; GitHub targets the right branch).
+3. **W5**, **W7**, **W8** (new projects from zero; live GitHub checks with a throwaway repo).
+4. **C1–C5** (chat).
+5. "Tomorrow morning" Step 0, then the 58 items (Batch 1 rest → Batches 2–15).
+
+Every item gets a full local CI before each push. Close heavy apps first, because Docker Desktop was OOM-killed on 2026-10-07.
