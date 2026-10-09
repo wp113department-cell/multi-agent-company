@@ -98,7 +98,11 @@ class JsonLogFormatter(logging.Formatter):
         }
         if record.exc_info:
             payload["exc_info"] = self.formatException(record.exc_info)
-        return json.dumps(payload, default=str)
+        # Sol A13/G10: logs leave the platform too (log shipping, support
+        # bundles) — never with a secret in them
+        from app.observability.redaction import redact
+
+        return json.dumps(redact(payload), default=str)
 
 
 def configure_structured_logging(level: str) -> None:

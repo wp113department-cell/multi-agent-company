@@ -21,6 +21,9 @@ async def _post_alert(payload: dict[str, object], log_ctx: str) -> None:
     send_agent_alert don't duplicate the httpx/error-handling boilerplate.
     Never raises — failures are only logged."""
     settings = get_settings()
+    from app.observability.redaction import redact
+
+    payload = redact(payload)  # Sol A13/G10: alerts carry no secrets
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.post(settings.alert_webhook_url, json=payload)

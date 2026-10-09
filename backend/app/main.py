@@ -57,6 +57,11 @@ def _init_sentry(settings: "Settings") -> None:  # type: ignore[name-defined]  #
         from sentry_sdk.integrations.fastapi import FastApiIntegration
         from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
 
+        from app.observability.redaction import (
+            sentry_before_breadcrumb,
+            sentry_before_send,
+        )
+
         sentry_sdk.init(
             dsn=settings.sentry_dsn,
             environment=settings.sentry_environment,
@@ -74,7 +79,10 @@ def _init_sentry(settings: "Settings") -> None:  # type: ignore[name-defined]  #
                 AsyncioIntegration(),
             ],
             # Never send secrets to Sentry
-            before_send=lambda event, hint: event,
+            # Sol A13 (2026-10-09): this used to return every event unchanged
+            before_send=sentry_before_send,
+            before_breadcrumb=sentry_before_breadcrumb,
+            send_default_pii=False,
         )
         logger.info("Sentry initialised (environment=%s)", settings.sentry_environment)
     except ImportError:

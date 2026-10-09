@@ -1,9 +1,36 @@
 # Build context for backend/Dockerfile (context: ./backend).
 # Secrets never enter an image (Sol A05): docker-compose passes them at runtime.
 .env
+**/.env
 .env.*
+**/.env.*
 !.env.example
+!**/.env.example
 secrets/
+**/secrets/
+# private keys and certificates (Sol A05, 2026-10-09)
+*.pem
+**/*.pem
+*.key
+**/*.key
+*.p12
+**/*.p12
+*.pfx
+**/*.pfx
+id_rsa*
+**/id_rsa*
+id_ed25519*
+**/id_ed25519*
+id_ecdsa*
+**/id_ecdsa*
+*.keystore
+**/*.keystore
+.npmrc
+**/.npmrc
+.pypirc
+**/.pypirc
+.netrc
+**/.netrc
 .venv/
 venv/
 __pycache__/

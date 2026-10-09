@@ -551,3 +551,15 @@ Every item gets a full local CI before each push. Close heavy apps first, becaus
     - Memory curation rejects matching text, and LessonStore refuses it.
     - `record_learning` is not even advertised to the coder (the loop refuses it); for the agents that have it, the poisoned finding is rejected before any insert.
   - Tests: 9 in `tests/test_g2_prompt_injection.py`. The 3 memory-poisoning tests fail on the old code; the 6 guard tests pass on both, showing the existing guards held. 602 memory/lesson/injection tests pass.
+- **2026-10-09: Batch 5, A05 image secrets + A13/G10 telemetry redaction. DONE. Batch 5 complete.**
+  - **A05:** proven with a real `docker build`. Fake secret files were planted in a copy of each build context, copied into a scratch image with the real ignore rules, and the exported filesystem was searched by file name and content.
+    - **Found and fixed:** `backend/.dockerignore` matched only top-level files, so `app/.env`, `deep/nested/.env.staging` and `certs/tls.key` went into the backend, runner and sandbox images.
+    - Every secret pattern now also matches at any depth (`**/`).
+    - Both contexts now exclude keys, certificates and credential files: `*.pem`, `*.key`, `*.p12`, `*.pfx`, `id_rsa*`, `id_ed25519*`, `*.keystore`, `.npmrc`, `.pypirc`, `.netrc`.
+    - `.env.example` and source files still ship.
+  - **A13/G10:** a single redaction layer, `app/observability/redaction.py`, applied to Sentry (`before_send` used to return events unchanged; it now also has `before_breadcrumb` and `send_default_pii=False`), the JSON log formatter and alert webhooks. It removes:
+    - the platform's own secret values (settings and secret-looking environment variables, including the passwords inside database/redis URLs);
+    - well-known token shapes;
+    - fields named like password, token, secret, cookie or authorization (header lists included).
+  - **Proof:** a real Sentry client with a capturing transport (canaries in the exception message, a frame variable, a breadcrumb and a cookie header), the JSON log formatter (message and traceback) and a real alert webhook on a local server. The alert fires and carries no canary.
+  - Tests: 4 in `tests/test_a13_g10_telemetry_redaction.py` (Sentry, logs and alerts fail on the old wiring) and 2 in `tests/test_a05_image_secrets.py` (the backend context failed before the fix).

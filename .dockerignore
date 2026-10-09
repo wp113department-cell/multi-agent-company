@@ -4,6 +4,18 @@
 **/.env.*
 !**/.env.example
 **/secrets/
+# private keys and certificates (Sol A05, 2026-10-09)
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+**/id_rsa*
+**/id_ed25519*
+**/id_ecdsa*
+**/*.keystore
+**/.npmrc
+**/.pypirc
+**/.netrc
 # Large or irrelevant to the web build
 **/node_modules
 **/.next
