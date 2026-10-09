@@ -469,3 +469,10 @@ Every item gets a full local CI before each push. Close heavy apps first, becaus
     - Images (png/jpeg/gif/webp, ≤5 MB) go to the model as images. PDFs (≤20 MB) are turned into text. Text/code files (≤300 KB) are inlined. Binary files are refused.
     - Stored history keeps "[an image was attached]" instead of the picture data.
   - Tests: 6 new (C2) and 11 new (C1), all failing on the old code. The 2,857 chat-related and 210 chat-file existing tests pass (the only failures were environmental: `python` missing from PATH, and a Docker timing test that passes on rerun).
+- **2026-10-09: C3 project memory + C5 live activity line. DONE (visual check pending).**
+  - **C3:** the chat already learned from every turn (repo-scoped memory, found by similarity, invisible). Now there are **project notes** the user can see and edit: short facts and decisions written in the chat sidebar ("Project memory").
+    - Every chat in the project gets all of them with every message, as `## Project notes (always follow them)`.
+    - Up to 30 notes of 500 characters each, stored per project and removed with the project.
+    - API: `GET/POST /api/projects/{id}/notes`, `DELETE /api/projects/{id}/notes/{note}`.
+  - **C5:** while the AI works, a live line above the chat input says what it is doing in plain words, e.g. "Reading app/page.tsx…", "Running: npm run build…", "Running tests…", "Waiting for your approval", "Writing the answer…". It is built from the same stream as the tool cards (`lib/chatActivity.ts`).
+  - Tests: 5 new for C3 (4 fail on the old code; the deletion test passes trivially there) and 4 new vitest tests for C5.

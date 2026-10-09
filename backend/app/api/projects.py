@@ -690,6 +690,59 @@ async def _run_ai_overview(project_id: int, folder: str) -> None:
         await db.commit()
 
 
+# ---------------------------------------------------------------------------
+# C3 (2026-10-09): project notes — memory the user can see and edit
+# ---------------------------------------------------------------------------
+
+
+class NoteRequest(BaseModel):
+    text: str = Field(..., min_length=1, max_length=2000)
+
+
+@router.get("/{project_id}/notes")
+async def list_project_notes(
+    project_id: int,
+    db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
+) -> dict[str, Any]:
+    from app.services.project_notes import get_notes
+
+    if await db.get(Project, project_id) is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return {"notes": await get_notes(db, project_id)}
+
+
+@router.post("/{project_id}/notes", status_code=201)
+async def add_project_note(
+    project_id: int,
+    body: NoteRequest,
+    db: AsyncSession = Depends(get_db),
+    actor: str = Depends(require_approver),
+) -> dict[str, Any]:
+    from app.services.project_notes import add_note
+
+    if await db.get(Project, project_id) is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    try:
+        return {"notes": await add_note(db, project_id, body.text, actor)}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+
+
+@router.delete("/{project_id}/notes/{note_id}")
+async def delete_project_note(
+    project_id: int,
+    note_id: str,
+    db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_approver),
+) -> dict[str, Any]:
+    from app.services.project_notes import delete_note
+
+    if await db.get(Project, project_id) is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return {"notes": await delete_note(db, project_id, note_id)}
+
+
 @router.post("/{project_id}/open")
 async def open_project(
     project_id: int,
@@ -783,9 +836,11 @@ async def delete_project(
 
     from app.db.models import SystemSetting
 
+    from app.services.project_notes import notes_key
+
     await db.execute(
         sql_delete(SystemSetting).where(
-            SystemSetting.key == _ai_overview_key(project_id)
+            SystemSetting.key.in_([_ai_overview_key(project_id), notes_key(project_id)])
         )
     )
     await db.commit()

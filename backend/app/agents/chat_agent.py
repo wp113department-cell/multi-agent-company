@@ -1244,6 +1244,34 @@ class ChatAgent:
             logger.debug("ChatAgent memory read skipped (non-fatal)", exc_info=True)
             return ""
 
+    async def _project_notes_context(self) -> str:
+        """C3: the project's notes (what the user asked the team to
+        remember), given in full with every message. Non-fatal."""
+        try:
+            from sqlalchemy.ext.asyncio import async_sessionmaker
+
+            from app.db.session import new_isolated_async_engine
+            from app.services.project_notes import (
+                format_notes,
+                get_notes,
+                project_id_for_chat,
+            )
+
+            engine = new_isolated_async_engine()
+            try:
+                async with async_sessionmaker(engine, expire_on_commit=False)() as db:
+                    project_id = await project_id_for_chat(
+                        db, self.session.session_id, self.session.repo_path
+                    )
+                    if project_id is None:
+                        return ""
+                    return format_notes(await get_notes(db, project_id))
+            finally:
+                await engine.dispose()
+        except Exception:
+            logger.debug("project notes skipped (non-fatal)", exc_info=True)
+            return ""
+
     async def _memory_write_outcome(
         self, description: str, summary: str, error: str | None
     ) -> None:
@@ -4942,6 +4970,9 @@ class ChatAgent:
         else:
             self.session.history.append({"role": "user", "content": user_message})
         memory_block = await self._memory_read_context(user_message)
+        notes_block = await self._project_notes_context()
+        if notes_block:
+            memory_block = f"{notes_block}\n\n{memory_block}".strip()
         system_prompt = (
             (f"{self._system}\n\n{memory_block}" if memory_block else self._system)
             + frustration_directive

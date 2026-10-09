@@ -823,6 +823,39 @@ export async function createChatSession(
   return handleResponse(res);
 }
 
+/** C3: a note the user asked the team to remember for a project. */
+export interface ProjectNote {
+  id: string;
+  text: string;
+  createdBy: string | null;
+  createdAt: string;
+}
+
+export async function listProjectNotes(projectId: number): Promise<ProjectNote[]> {
+  const data = await handleResponse<{ notes: ProjectNote[] }>(
+    await apiFetch(`/api/projects/${projectId}/notes`),
+  );
+  return data.notes;
+}
+
+export async function addProjectNote(projectId: number, text: string): Promise<ProjectNote[]> {
+  const data = await handleResponse<{ notes: ProjectNote[] }>(
+    await apiFetch(`/api/projects/${projectId}/notes`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    }),
+  );
+  return data.notes;
+}
+
+export async function deleteProjectNote(projectId: number, noteId: string): Promise<ProjectNote[]> {
+  const data = await handleResponse<{ notes: ProjectNote[] }>(
+    await apiFetch(`/api/projects/${projectId}/notes/${noteId}`, { method: "DELETE" }),
+  );
+  return data.notes;
+}
+
 /** C2: a past chat in the list. */
 export interface ChatSummary {
   id: string;

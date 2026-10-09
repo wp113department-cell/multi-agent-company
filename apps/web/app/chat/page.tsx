@@ -17,6 +17,8 @@ import type { ChatSummary, Project } from "@/lib/api";
 import { authHeaders } from "@/lib/auth";
 import { TerminalTabs } from "@/components/TerminalTabs";
 import { Icon } from "../../components/Icon";
+import { activityFor } from "../../lib/chatActivity";
+import { ProjectMemory } from "../../components/ProjectMemory";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -264,6 +266,8 @@ export default function ChatPage() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
+  // C5: what the agent is doing right now (the live status line)
+  const [activity, setActivity] = useState<string | null>(null);
   // C1: files attached to the next message
   const [attachments, setAttachments] = useState<File[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -480,6 +484,7 @@ export default function ChatPage() {
 
   // ---- Shared SSE event handling (initial fetch-stream + reconnect EventSource) ----
   const handleSseEvent = useCallback((event: SseEvent) => {
+    setActivity((current) => activityFor(event, current));
     if (event.type === "text_delta") {
       assistantContentRef.current += event.text;
       const id = assistantMsgIdRef.current;
@@ -650,6 +655,7 @@ export default function ChatPage() {
     setAttachments([]);
     setError(null);
     setStreaming(true);
+    setActivity("Thinking…");
     reachedTerminalRef.current = false;
 
     // Add user message immediately
@@ -845,6 +851,7 @@ export default function ChatPage() {
             </li>
           ))}
         </ul>
+        {selectedProject && <ProjectMemory projectId={selectedProject.id} />}
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
@@ -1067,6 +1074,16 @@ export default function ChatPage() {
 
           {/* Input area */}
           <div className="border-t border-slate-200 p-3 dark:border-slate-700">
+            {streaming && activity && (
+              <p
+                role="status"
+                aria-live="polite"
+                className="mb-2 flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400"
+              >
+                <span className="h-2 w-2 animate-pulse rounded-full bg-orange-500" />
+                {activity}
+              </p>
+            )}
             {attachments.length > 0 && (
               <ul className="mb-2 flex flex-wrap gap-2" aria-label="Attached files">
                 {attachments.map((f, i) => (
