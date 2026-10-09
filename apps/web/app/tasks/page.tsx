@@ -18,8 +18,10 @@ import {
   setCurrentProjectId,
   startTask,
   type DevTask,
+  type StartTaskResult,
 } from "../../lib/api";
 import { Icon } from "../../components/Icon";
+import { UnsavedChangesDialog } from "../../components/UnsavedChangesDialog";
 
 // The statuses a user sees, in lifecycle order, with plain words.
 const STATUSES: { id: string; label: string; cls: string; hint: string }[] = [
@@ -46,9 +48,13 @@ function StatusChip({ status }: { status: string }) {
 
 function TaskAction({ task }: { task: DevTask }) {
   const qc = useQueryClient();
+  const [unsaved, setUnsaved] = useState<StartTaskResult | null>(null);
   const start = useMutation({
-    mutationFn: () => startTask(task.id),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ["tasks"] }),
+    mutationFn: (choice?: "save" | "ignore") => startTask(task.id, choice),
+    onSuccess: (r) => {
+      setUnsaved(r.triggered ? null : r.unsavedChanges?.length ? r : null);
+      void qc.invalidateQueries({ queryKey: ["tasks"] });
+    },
   });
   const base = "inline-flex items-center justify-center whitespace-nowrap rounded-lg px-3.5 py-1.5 text-sm font-semibold";
 
@@ -59,7 +65,7 @@ function TaskAction({ task }: { task: DevTask }) {
           type="button"
           onClick={(e) => {
             e.preventDefault();
-            start.mutate();
+            start.mutate(undefined);
           }}
           disabled={start.isPending}
           className={`${base} bg-orange-600 text-white disabled:opacity-50`}
@@ -70,6 +76,16 @@ function TaskAction({ task }: { task: DevTask }) {
           <span className="max-w-[14rem] text-right text-xs text-red-600">
             {start.error instanceof Error ? start.error.message : "Could not start"}
           </span>
+        )}
+        {unsaved && (
+          <UnsavedChangesDialog
+            files={unsaved.unsavedChanges ?? []}
+            count={unsaved.unsavedCount ?? 0}
+            busy={start.isPending}
+            onSave={() => start.mutate("save")}
+            onIgnore={() => start.mutate("ignore")}
+            onCancel={() => setUnsaved(null)}
+          />
         )}
       </div>
     );

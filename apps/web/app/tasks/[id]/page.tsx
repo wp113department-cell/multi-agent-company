@@ -7,7 +7,9 @@ import { DiffViewer } from "../../../components/DiffViewer";
 import { PipelineView, type SubtaskEdit } from "../../../components/PipelineView";
 import { StatusBadge } from "../../../components/StatusBadge";
 import { useState } from "react";
+import { UnsavedChangesDialog } from "../../../components/UnsavedChangesDialog";
 import {
+  type StartTaskResult,
   approvePipeline,
   fetchArtifacts,
   fetchPipelineState,
@@ -136,9 +138,13 @@ export default function TaskDetailPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["task", params.id] }),
   });
 
+  const [unsaved, setUnsaved] = useState<StartTaskResult | null>(null);
   const startMutation = useMutation({
-    mutationFn: () => startTask(params.id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["task", params.id] }),
+    mutationFn: (choice?: "save" | "ignore") => startTask(params.id, choice),
+    onSuccess: (r) => {
+      setUnsaved(r.triggered ? null : r.unsavedChanges?.length ? r : null);
+      return qc.invalidateQueries({ queryKey: ["task", params.id] });
+    },
   });
 
   const smartRunMutation = useMutation({
@@ -291,13 +297,23 @@ export default function TaskDetailPage() {
         <div className="flex flex-wrap gap-2">
           {canRunPipeline && (
             <button
-              onClick={() => startMutation.mutate()}
+              onClick={() => startMutation.mutate(undefined)}
               disabled={startMutation.isPending}
               title={task.executionMode === "max" ? "Runs the full team pipeline" : "Uses the fewest agents (Economy)"}
               className="rounded-lg bg-orange-600 px-5 py-2 text-sm font-semibold text-white disabled:opacity-50"
             >
               <span className="inline-flex items-center gap-1.5">{!startMutation.isPending && <Icon name="play" size={13} />}{startMutation.isPending ? "Starting…" : `Start (${task.executionMode === "max" ? "Max" : "Economy"})`}</span>
             </button>
+          )}
+          {unsaved && (
+            <UnsavedChangesDialog
+              files={unsaved.unsavedChanges ?? []}
+              count={unsaved.unsavedCount ?? 0}
+              busy={startMutation.isPending}
+              onSave={() => startMutation.mutate("save")}
+              onIgnore={() => startMutation.mutate("ignore")}
+              onCancel={() => setUnsaved(null)}
+            />
           )}
 
           {canRunPipeline && (

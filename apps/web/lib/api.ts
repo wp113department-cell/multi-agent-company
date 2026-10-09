@@ -173,11 +173,23 @@ export async function createTask(input: {
 
 /** Start a task the way its own execution mode says (Economy: the smart
  * router picks the fewest agents; Max: the full pipeline). */
-export async function startTask(taskId: number | string): Promise<{ triggered: boolean; mode: string }> {
+export interface StartTaskResult {
+  triggered: boolean;
+  mode?: string;
+  /** W4: the project folder has edits not saved in git (the task would not
+   * see them); nothing started. Call again with `unsaved`. */
+  unsavedChanges?: string[];
+  unsavedCount?: number;
+}
+
+export async function startTask(
+  taskId: number | string,
+  unsaved?: "save" | "ignore",
+): Promise<StartTaskResult> {
   const res = await apiFetch(`/api/tasks/${taskId}/run`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({}),
+    body: JSON.stringify(unsaved ? { unsaved } : {}),
   });
   return handleResponse(res);
 }

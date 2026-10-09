@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 from typing import TYPE_CHECKING, Any, Literal
 from fastapi import (
     APIRouter,
@@ -124,6 +125,11 @@ class RunRequest(BaseModel):
     mode: str | None = (
         None  # "auto" | "full" | "simple" — overrides PIPELINE_MODE for this request
     )
+    # W4: what to do with the user's uncommitted edits in the project folder
+    # (the task works from the last commit and would not see them): "save"
+    # commits them first, "ignore" starts anyway. Unset + edits present =
+    # nothing starts; the response lists them so the user can choose.
+    unsaved: Literal["save", "ignore"] | None = None
 
 
 class RepeatTaskRequest(BaseModel):
@@ -470,8 +476,30 @@ async def run_task(
     # Resolve which repo path agents should use for this task
     repo_path = resolve_task_repo_path(task)
 
+    # W4: a project's folder may hold edits the user hasn't committed; the
+    # task's worktree starts from the last commit and wouldn't see them.
+    saved_note: str | None = None
+    if getattr(task, "project_id", None) and repo_path and os.path.isdir(repo_path):
+        from app.tools.git_local_apply import save_changes, unsaved_changes
+
+        if body.unsaved is None:
+            files = await unsaved_changes(repo_path)
+            if files:
+                return {
+                    "triggered": False,
+                    "unsavedChanges": files[:20],
+                    "unsavedCount": len(files),
+                }
+        elif body.unsaved == "save":
+            saved = await save_changes(repo_path, task_id)
+            if not saved.applied:
+                raise HTTPException(status_code=400, detail=saved.message)
+            saved_note = saved.message
+
     await transition_task(db, task_id, "planning")
     await append_log(db, task_id, "pipeline", "Planning triggered")
+    if saved_note:
+        await append_log(db, task_id, "pipeline", saved_note)
 
     settings = get_settings()
     # UI redesign: Max always runs the full pipeline (its quality cost profile

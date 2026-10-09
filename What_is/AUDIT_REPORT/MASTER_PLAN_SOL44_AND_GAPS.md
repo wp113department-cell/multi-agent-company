@@ -418,3 +418,13 @@ Every item gets a full local CI before each push. Close heavy apps first, becaus
   - UI: Start → project → Tools → Branches has "Send finished work to" (GitHub projects only). The Project API returns `targetBranch`.
   - Local folders keep merging into the branch the folder is on (W2), so the user's checkout never changes under them.
   - Tests: 10 new in `tests/test_w6_target_branch.py`. The 3 wiring tests fail on the old code. The 236 existing project, push and migration tests pass. The existing dispatch tests also caught a crash on a missing folder, which is now fixed.
+- **2026-10-09: W4 "unsaved edits". DONE.**
+  - A task works from the folder's last commit, so edits the user hadn't committed were silently invisible to the agents.
+  - `POST /api/tasks/{id}/run` for a project task now checks first. When edited or new (non-ignored) files are found, nothing starts, and the reply lists them (`triggered:false, unsavedChanges, unsavedCount`).
+  - A dialog offers three choices:
+    - **Save them and start:** a commit "Save my changes before task #N", which never includes `.env`, `.env.*`, `*.pem` or `*.key`;
+    - **Start without them**;
+    - **Cancel**.
+  - Both Start buttons (the Tasks list and the task page) use it.
+  - Tasks without a project behave exactly as before.
+  - Tests: 8 new in `tests/test_w4_unsaved_changes.py` (the job launcher is replaced, so no AI runs). The 2 key tests fail on the old code. The 353 existing tests that start tasks pass.

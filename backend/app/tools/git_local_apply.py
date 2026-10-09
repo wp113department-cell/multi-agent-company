@@ -111,3 +111,48 @@ async def apply_task_branch(task_id: int, folder: str, title: str) -> ApplyResul
         )
     _, head = await _git(folder, "rev-parse", "HEAD")
     return ApplyResult(True, f"Applied to your folder (branch {current}).", head)
+
+
+# -- W4: the user's unsaved edits (2026-10-09) --------------------------------
+# A task works in its own worktree, which starts from the folder's last
+# commit: edits the user has not committed are invisible to the agents. Before
+# a task starts, the user is told and can save them first.
+
+# never committed by "save my changes": secrets stay out of git
+_SECRET_EXCLUDES = [
+    ":(exclude,glob)**/.env",
+    ":(exclude,glob)**/.env.*",
+    ":(exclude,glob)**/*.pem",
+    ":(exclude,glob)**/*.key",
+]
+
+
+async def unsaved_changes(folder: str) -> list[str]:
+    """Files changed or added in the folder but not committed (ignored files
+    excluded). Empty when the folder isn't a git repository."""
+    rc, tracked = await _git(folder, "diff", "--name-only", "HEAD")
+    if rc != 0:
+        return []
+    _, untracked = await _git(folder, "ls-files", "--others", "--exclude-standard")
+    names = [n for n in (tracked + "\n" + untracked).splitlines() if n.strip()]
+    return list(dict.fromkeys(names))
+
+
+async def save_changes(folder: str, task_id: int) -> ApplyResult:
+    """Commit the user's unsaved edits (never .env/keys) so the task sees
+    them. Only on the user's explicit request."""
+    rc, out = await _git(folder, "add", "-A", "--", ".", *_SECRET_EXCLUDES)
+    if rc != 0:
+        return ApplyResult(False, f"Could not save your changes: {out[:300]}")
+    rc, staged = await _git(folder, "diff", "--cached", "--name-only")
+    if rc == 0 and not staged:
+        return ApplyResult(True, "Nothing to save.")
+    rc, out = await _git(
+        folder, "commit", "-m", f"Save my changes before task #{task_id}"
+    )
+    if rc != 0:
+        return ApplyResult(False, f"Could not save your changes: {out[:300]}")
+    _, head = await _git(folder, "rev-parse", "HEAD")
+    return ApplyResult(
+        True, "Your changes were saved in git before the task started.", head
+    )
