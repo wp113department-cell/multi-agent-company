@@ -48,6 +48,56 @@ def thinking_param_for(model: str, budget_tokens: int) -> dict[str, Any]:
     return {"type": "adaptive"}
 
 
+# Sol A27 (2026-10-09) — the agent loop sent max_tokens=8096 to every model.
+# Published output ceilings per Claude family, most specific first; the
+# non-streaming agent loop is further bounded by the SDK, which refuses a
+# non-streaming request whose max_tokens implies >10 minutes (above ~21,333)
+# and caps Opus 4 / 4.1 at 8,192 without streaming. Non-Claude IDs (Groq,
+# Gemini — mapped by their adapters) return None: no known ceiling here.
+_MODEL_OUTPUT_CAPS: tuple[tuple[re.Pattern[str], int], ...] = (
+    (re.compile(r"^claude-3-(?:haiku|opus|sonnet)"), 4_096),
+    (re.compile(r"^claude-3-5-"), 8_192),
+    (re.compile(r"^claude-opus-4(?:-0|-1)?(?:-\d{8})?$"), 8_192),
+    (
+        re.compile(
+            r"^claude-(?:3-7-sonnet|sonnet-4|sonnet-4-0|sonnet-4-5|haiku-4-5|opus-4-5)"
+            r"(?:-\d{8}|-latest)?$"
+        ),
+        64_000,
+    ),
+    (re.compile(r"^claude-"), 128_000),  # 4.6 and newer
+)
+_NONSTREAMING_MAX_TOKENS = 21_333
+
+
+def output_cap_for(model: str) -> int | None:
+    """The most max_tokens a non-streaming request to `model` may ask for."""
+    for pattern, cap in _MODEL_OUTPUT_CAPS:
+        if pattern.match(model or ""):
+            return min(cap, _NONSTREAMING_MAX_TOKENS)
+    return None
+
+
+def agent_output_tokens(
+    model: str, desired: int, thinking: dict[str, Any] | None = None
+) -> tuple[int, dict[str, Any] | None]:
+    """max_tokens for one agent call, and the thinking parameter adjusted to fit.
+
+    A fixed thinking budget must stay below max_tokens and still leave room
+    for the answer, so max_tokens grows to budget + 4,096 when needed; both
+    are then held under the model's real ceiling.
+    """
+    budget = (thinking or {}).get("budget_tokens")
+    max_tokens = max(desired, budget + 4_096) if budget else desired
+    cap = output_cap_for(model)
+    if cap is not None:
+        max_tokens = min(max_tokens, cap)
+    if budget and budget >= max_tokens:
+        budget = max(1_024, max_tokens - 4_096)
+        thinking = {**(thinking or {}), "budget_tokens": budget}
+    return max_tokens, thinking
+
+
 @dataclass(frozen=True)
 class RouteConfig:
     agent_name: str

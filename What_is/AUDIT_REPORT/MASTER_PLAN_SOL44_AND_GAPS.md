@@ -175,10 +175,10 @@ Each batch groups items that touch the same code, so nothing is fixed twice.
 | 6 | A07 | Resource ownership | P0 | ⬜ | |
 | 6 | A14 | Privacy export/delete | P1 | ⬜ | |
 | 6 | A08 | Lesson/memory scope per project | P1 | ⬜ | |
-| 7 | A15 | /run-sync arguments | P1 | ⬜ | |
-| 7 | A16 | Tuple results (research/DevOps) | P1 | ⬜ | |
+| 7 | A15 | /run-sync arguments | P1 | ✅ | 35470c25 |
+| 7 | A16 | Tuple results (research/DevOps) | P1 | ✅ | 35470c25 |
 | 7 | A22 | Authoritative tool registry | P1 | ⬜ | |
-| 7 | A27 | Real output caps | P2 | ⬜ | |
+| 7 | A27 | Real output caps | P2 | ✅ | |
 | 7 | A28 | Enforced timeouts, real probing | P2 | ⬜ | |
 | 7 | G9 | Model/provider layer and pricing | P2 | ⬜ | |
 | 8 | A19 | Stable plan step IDs | P1 | ⬜ | |
@@ -606,3 +606,9 @@ Every item gets a full local CI before each push. Close heavy apps first, becaus
   - **A16:** research and DevOps return `(report, error, tokens_in, tokens_out)` tuples, while everything after a run reads `.summary/.status/.findings`, so a successful run crashed on completion.
     - `_normalize_agent_result` turns any runner's return value into an `AgentResult` on both paths: research becomes recommended approach + findings/risks, DevOps becomes summary + checks, and an error with no report becomes blocked.
   - Tests: 66 in `tests/test_a15_a16_agent_entry_points.py`. The research run-sync and tuple tests fail on the old code. 912 specialized-agent tests pass; one audit hash-chain concurrency test flaked once under CI load and passes 3/3 on rerun.
+- **2026-10-09: Batch 7, A27 real output caps. DONE.**
+  - The agent loop sent `max_tokens=8096` to every model. That is more than Claude 3 Haiku allows (4,096 → a 400 on every call), and it ignored the thinking budget, which must stay below `max_tokens`.
+  - `model_router.output_cap_for(model)` holds the published ceiling per Claude family, bounded by the SDK's non-streaming limit (21,333; 8,192 for Opus 4/4.1). Groq/Gemini IDs have no ceiling here.
+  - `agent_output_tokens()` takes the new `AGENT_MAX_OUTPUT_TOKENS` setting (default 8,192, documented in `.env.example`), grows it to budget + 4,096 when a fixed thinking budget needs room, clamps to the ceiling, and lowers the budget if the ceiling is tight.
+  - Deliberately not switched to the router's per-tier numbers (Haiku 1,024), which would truncate code written by Haiku agents. Day-to-day behaviour is unchanged apart from 8096 → 8192.
+  - Tests: 11 in `tests/test_a27_output_caps.py` (3 fail on the old code). `test_phase54_thinking_budget` was updated to the new rule. 100 agent-loop, Groq, cost-mode and breaker tests pass.

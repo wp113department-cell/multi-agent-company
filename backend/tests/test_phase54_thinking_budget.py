@@ -136,10 +136,12 @@ def test_all_real_opus_tier_agents_get_thinking_enabled() -> None:
 
 def test_budget_tokens_stays_below_max_tokens_api_constraint() -> None:
     """The Anthropic SDK's own contract: budget_tokens must be < max_tokens.
-    This call site hardcodes max_tokens=8096 — confirm the real configured
-    thinking_budget_opus never violates that, since a config change here
-    could otherwise silently break every opus-tier agent's real API calls."""
-    assert 1024 <= get_settings().thinking_budget_opus < 8096
+    UPDATED (Sol A27): max_tokens is no longer a fixed 8096 — it comes from
+    agent_output_tokens(), which keeps any fixed budget below it (proven in
+    tests/test_a27_output_caps.py). The default budget still fits the default
+    max_tokens without adjustment."""
+    s = get_settings()
+    assert 1024 <= s.thinking_budget_opus < s.agent_max_output_tokens
 
 
 def test_opus_agent_capped_to_haiku_sends_no_thinking() -> None:

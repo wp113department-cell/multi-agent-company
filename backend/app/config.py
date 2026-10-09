@@ -1113,6 +1113,12 @@ class Settings(BaseSettings):
     max_tokens_opus: int = Field(
         default=8192, description="Max tokens for Opus-tier agents."
     )
+    agent_max_output_tokens: int = Field(
+        default=8192,
+        ge=1024,
+        le=21333,
+        description="max_tokens for each agent-loop model call, held under the model's real output ceiling (app/fleet/model_router.output_cap_for). The loop does not stream, so the SDK refuses values above 21,333.",
+    )
     thinking_budget_opus: int = Field(
         default=2048,
         description="Extended thinking budget for Opus-tier agents (tokens).",

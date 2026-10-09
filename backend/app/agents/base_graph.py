@@ -1990,9 +1990,13 @@ def _make_call_llm_node(
         if suffix_parts:
             full_system = full_system + "\n\n" + "\n\n".join(suffix_parts)
 
-        extra_kwargs: dict[str, Any] = (
-            {"thinking": _thinking_budget} if _thinking_budget else {}
+        from app.fleet.model_router import agent_output_tokens
+
+        # Sol A27 — the model's real output ceiling, not a fixed 8096.
+        _max_tokens, _thinking = agent_output_tokens(
+            model, get_settings().agent_max_output_tokens, _thinking_budget
         )
+        extra_kwargs: dict[str, Any] = {"thinking": _thinking} if _thinking else {}
         if (
             max_turns > 0
             and _final_submit_tool is not None
@@ -2011,7 +2015,7 @@ def _make_call_llm_node(
         response = _call_anthropic(
             client,
             model=model,
-            max_tokens=8096,
+            max_tokens=_max_tokens,
             system=[
                 {
                     "type": "text",
