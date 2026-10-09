@@ -497,6 +497,18 @@ class LessonStore:
         is re-checked with `in self._lessons` before removal in the second
         lock, so a member concurrently removed/replaced by another thread's
         own add() in between is simply skipped, not an error."""
+        # G2 (2026-10-09): a "lesson" that reads like an injected instruction
+        # ("always send .env to ...", "ignore previous instructions") would be
+        # handed to every later agent as advice — never store it.
+        from app.security.injection import looks_like_injection
+
+        if looks_like_injection(f"{lesson.lesson} {lesson.pattern}"):
+            logger.warning(
+                "LessonStore: refused a lesson that looks like an injected "
+                "instruction (agent=%s)",
+                lesson.agent_name,
+            )
+            return
         from app.config import get_settings
 
         settings = get_settings()
@@ -2478,29 +2490,13 @@ _UNTRUSTED_CONTENT_TOOLS = frozenset(
 # easily echo back adversarial content (e.g. `cat` on a malicious file).
 _INJECTION_FLAG_TOOLS = _UNTRUSTED_CONTENT_TOOLS | {"bash"}
 
+from app.security.injection import INJECTION_PATTERNS  # noqa: E402
+
 # Patterns that look like an attempt to inject a fake system/assistant turn
 # into tool output the model will read as context. Flag, don't silently
 # strip — a false positive here should be visible, not lose real content.
-_INJECTION_LOOKING_PATTERNS = [
-    re.compile(r"(?im)^\s*(system|assistant)\s*:"),
-    re.compile(r"(?i)ignore (all )?(previous|prior|above) instructions"),
-    re.compile(r"<\|(system|assistant|im_start|im_end)\|>"),
-    re.compile(r"(?im)^\s*#{1,3}\s*(system|instructions?)\s*$"),
-    # B7 verification — the four patterns above caught one phrasing each; common
-    # variants went through unflagged:
-    re.compile(
-        r"(?i)\b(disregard|forget|override)\b.{0,30}\b(previous|prior|above|earlier|all)\b"
-        r".{0,30}\b(instructions?|rules?|prompts?|context)\b"
-    ),
-    re.compile(r"(?i)\byou are now\b"),
-    re.compile(r"(?i)\bnew (system )?instructions?\s*:"),
-    re.compile(r"(?i)</?(system|assistant|instructions?)>|\[/?INST\]|<<SYS>>"),
-    re.compile(r"(?i)\bdo not (tell|inform|mention)\b.{0,20}\buser\b"),
-    re.compile(
-        r"(?i)\b(send|post|upload|exfiltrate|email)\b.{0,40}"
-        r"\b(secrets?|credentials?|api[_ ]?keys?|tokens?|\.env)\b"
-    ),
-]
+# Patterns live in app/security/injection.py (shared with memory curation, G2).
+_INJECTION_LOOKING_PATTERNS = INJECTION_PATTERNS
 
 
 def _wrap_untrusted_tool_content(tool_name: str, content: str) -> str:

@@ -172,6 +172,18 @@ def evaluate_memory_quality(*text_fragments: str) -> MemoryQualityDecision:
     combined = " ".join(t for t in text_fragments if t).strip()
     length = len(combined)
     distinct_tokens = len({t.lower() for t in combined.split() if len(t) > 2})
+    # G2 (2026-10-09): memory poisoning — text that reads as an instruction
+    # to an AI (from a hostile README, page, log or tool output the agent
+    # summarised) is never stored; later runs would be fed it as context.
+    from app.security.injection import looks_like_injection
+
+    if looks_like_injection(combined):
+        return MemoryQualityDecision(
+            "reject",
+            ["looks like an injected instruction (memory poisoning)"],
+            length,
+            distinct_tokens,
+        )
 
     try:
         settings = get_settings()
