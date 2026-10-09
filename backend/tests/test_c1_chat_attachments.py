@@ -24,7 +24,9 @@ PNG = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"0" * 64).decode()
 
 
 def _att(name: str, media: str, raw: bytes) -> ChatAttachment:
-    return ChatAttachment(name=name, media_type=media, data=base64.b64encode(raw).decode())
+    return ChatAttachment(
+        name=name, media_type=media, data=base64.b64encode(raw).decode()
+    )
 
 
 def test_an_image_becomes_a_picture_for_the_model() -> None:
@@ -33,12 +35,17 @@ def test_an_image_becomes_a_picture_for_the_model() -> None:
     )
     assert text == ""
     assert images == [
-        {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": PNG}}
+        {
+            "type": "image",
+            "source": {"type": "base64", "media_type": "image/png", "data": PNG},
+        }
     ]
 
 
 def test_a_code_file_becomes_text_in_the_message() -> None:
-    text, images = _prepare_attachments([_att("app.py", "text/x-python", b"print('hi')\n")])
+    text, images = _prepare_attachments(
+        [_att("app.py", "text/x-python", b"print('hi')\n")]
+    )
     assert images == []
     assert "--- Attached file: app.py ---" in text and "print('hi')" in text
 
@@ -51,10 +58,19 @@ def test_an_unreadable_pdf_is_reported_not_crashed() -> None:
 @pytest.mark.parametrize(
     ("att", "why"),
     [
-        (ChatAttachment(name="x.png", media_type="image/png", data="%%%"), "could not be read"),
-        (_att("big.png", "image/png", b"0" * (5 * 1024 * 1024 + 1)), "larger than 5 MB"),
+        (
+            ChatAttachment(name="x.png", media_type="image/png", data="%%%"),
+            "could not be read",
+        ),
+        (
+            _att("big.png", "image/png", b"0" * (5 * 1024 * 1024 + 1)),
+            "larger than 5 MB",
+        ),
         (_att("big.log", "text/plain", b"a" * (300 * 1024 + 1)), "larger than 300 KB"),
-        (_att("tool.exe", "application/octet-stream", b"MZ\x00\x00"), "not a text file"),
+        (
+            _att("tool.exe", "application/octet-stream", b"MZ\x00\x00"),
+            "not a text file",
+        ),
     ],
 )
 def test_limits_are_enforced(att: ChatAttachment, why: str) -> None:
@@ -66,7 +82,10 @@ def test_limits_are_enforced(att: ChatAttachment, why: str) -> None:
 def test_stored_history_keeps_a_note_not_the_picture() -> None:
     content = [
         {"type": "text", "text": "what is wrong here?"},
-        {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": PNG}},
+        {
+            "type": "image",
+            "source": {"type": "base64", "media_type": "image/png", "data": PNG},
+        },
     ]
     stored = _without_image_data(content)
     assert stored[1] == {"type": "text", "text": "[an image was attached]"}
@@ -107,9 +126,9 @@ def test_sending_with_attachments_reaches_the_agent(
 
     monkeypatch.setattr(chat_agent, "get_or_create_chat_agent", fake_get)
     with TestClient(app) as client:
-        sid = client.post("/api/chat/sessions", json={"repo_path": str(tmp_path)}).json()[
-            "session_id"
-        ]
+        sid = client.post(
+            "/api/chat/sessions", json={"repo_path": str(tmp_path)}
+        ).json()["session_id"]
         try:
             with client.stream(
                 "POST",
@@ -140,11 +159,13 @@ def test_sending_with_attachments_reaches_the_agent(
 
 def test_an_empty_message_without_files_is_refused(tmp_path: Any) -> None:
     with TestClient(app) as client:
-        sid = client.post("/api/chat/sessions", json={"repo_path": str(tmp_path)}).json()[
-            "session_id"
-        ]
+        sid = client.post(
+            "/api/chat/sessions", json={"repo_path": str(tmp_path)}
+        ).json()["session_id"]
         try:
-            r = client.post(f"/api/chat/sessions/{sid}/messages", json={"message": "  "})
+            r = client.post(
+                f"/api/chat/sessions/{sid}/messages", json={"message": "  "}
+            )
             assert r.status_code == 400
         finally:
             client.delete(f"/api/chat/history/{sid}")
@@ -164,7 +185,14 @@ def test_the_stored_message_has_no_picture_data(tmp_path: Any) -> None:
             "role": "user",
             "content": [
                 {"type": "text", "text": "look"},
-                {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": PNG}},
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/png",
+                        "data": PNG,
+                    },
+                },
             ],
         }
     ]

@@ -45,7 +45,9 @@ def chats(tmp_path: Any):  # type: ignore[no-untyped-def]
         from app.db.models import ChatSessionRecord
 
         for sid in created:
-            await s.execute(delete(ChatSessionRecord).where(ChatSessionRecord.id == sid))
+            await s.execute(
+                delete(ChatSessionRecord).where(ChatSessionRecord.id == sid)
+            )
             await s.execute(
                 text("DELETE FROM chat_messages WHERE session_id = :s"), {"s": sid}
             )
@@ -102,10 +104,16 @@ def test_rename_and_delete(chats) -> None:  # type: ignore[no-untyped-def]
         sid = _new_chat(client, created, path)
         r = client.patch(f"/api/chat/sessions/{sid}", json={"title": "Release notes"})
         assert r.status_code == 200 and r.json()["title"] == "Release notes"
-        assert client.patch(f"/api/chat/sessions/{sid}", json={"title": " "}).status_code == 400
+        assert (
+            client.patch(f"/api/chat/sessions/{sid}", json={"title": " "}).status_code
+            == 400
+        )
         assert client.delete(f"/api/chat/history/{sid}").status_code == 200
         assert all(c["id"] != sid for c in _listed(client))
-        assert client.patch(f"/api/chat/sessions/{sid}", json={"title": "x"}).status_code == 404
+        assert (
+            client.patch(f"/api/chat/sessions/{sid}", json={"title": "x"}).status_code
+            == 404
+        )
 
 
 def test_closing_a_chat_keeps_it_in_the_list(chats) -> None:  # type: ignore[no-untyped-def]
@@ -138,7 +146,11 @@ def test_another_users_chat_is_not_listed_or_editable(chats) -> None:  # type: i
     created, path = chats
 
     async def other(s):  # type: ignore[no-untyped-def]
-        s.add(ChatSessionRecord(id="c2-other-user", repo_path=path, created_by="someone-else"))
+        s.add(
+            ChatSessionRecord(
+                id="c2-other-user", repo_path=path, created_by="someone-else"
+            )
+        )
         await s.commit()
 
     _db(other)

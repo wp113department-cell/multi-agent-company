@@ -54,7 +54,9 @@ def project(tmp_path: Path):  # type: ignore[no-untyped-def]
 def test_notes_can_be_added_listed_and_forgotten(project) -> None:  # type: ignore[no-untyped-def]
     pid, _ = project
     with TestClient(app) as client:
-        r = client.post(f"/api/projects/{pid}/notes", json={"text": "  We use   pnpm  "})
+        r = client.post(
+            f"/api/projects/{pid}/notes", json={"text": "  We use   pnpm  "}
+        )
         assert r.status_code == 201
         note = r.json()["notes"][0]
         assert note["text"] == "We use pnpm"
@@ -66,7 +68,10 @@ def test_notes_can_be_added_listed_and_forgotten(project) -> None:  # type: igno
 def test_limits(project) -> None:  # type: ignore[no-untyped-def]
     pid, _ = project
     with TestClient(app) as client:
-        assert client.post(f"/api/projects/{pid}/notes", json={"text": ""}).status_code == 422
+        assert (
+            client.post(f"/api/projects/{pid}/notes", json={"text": ""}).status_code
+            == 422
+        )
         for i in range(30):
             client.post(f"/api/projects/{pid}/notes", json={"text": f"note {i}"})
         r = client.post(f"/api/projects/{pid}/notes", json={"text": "one too many"})
@@ -80,7 +85,9 @@ def test_every_chat_in_the_project_gets_the_notes(project) -> None:  # type: ign
 
     pid, folder = project
     with TestClient(app) as client:
-        client.post(f"/api/projects/{pid}/notes", json={"text": "Never touch payments/"})
+        client.post(
+            f"/api/projects/{pid}/notes", json={"text": "Never touch payments/"}
+        )
         client.post(f"/api/projects/{pid}/notes", json={"text": "We use pnpm"})
     session = create_session(repo_path=folder)
     try:
