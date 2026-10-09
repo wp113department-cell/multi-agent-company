@@ -94,6 +94,9 @@ class CreateProjectRequest(BaseModel):
 class UpdateProjectRequest(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=200)
     description: str | None = None
+    # W6: branch approved work goes to; "" or null = automatic (the
+    # repository's default branch)
+    target_branch: str | None = Field(None, max_length=200)
 
 
 class LabelRequest(BaseModel):
@@ -116,6 +119,7 @@ def _project_dict(
         "setup": p.source,
         "localPath": p.local_path,
         "githubUrl": p.github_url,
+        "targetBranch": p.target_branch,
         "visibility": p.visibility,
         "repoId": p.repo_id,
         # cloning | ready | error (from the repository), "ready" for a
@@ -536,6 +540,17 @@ async def update_project(
         p.name = body.name.strip()
     if body.description is not None:
         p.description = body.description
+    if "target_branch" in body.model_fields_set:
+        from app.tools.git_push_tool import valid_branch_name
+
+        target = (body.target_branch or "").strip()
+        if target and not valid_branch_name(target):
+            raise HTTPException(
+                status_code=400,
+                detail="That is not a valid branch name (letters, numbers, "
+                "'.', '_', '-' and '/').",
+            )
+        p.target_branch = target or None
     await db.commit()
     await db.refresh(p)
     repo = await db.get(Repo, p.repo_id) if p.repo_id else None

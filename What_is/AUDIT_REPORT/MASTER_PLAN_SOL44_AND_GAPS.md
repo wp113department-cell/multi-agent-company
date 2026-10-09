@@ -407,3 +407,14 @@ Every item gets a full local CI before each push. Close heavy apps first, becaus
   - On success: `pr_status="applied"`, the task is completed and the worktree removed. On refusal: `failed`, with the reason in the task log, and "Try again" works once it's fixed.
   - The task page shows "Delivery to your folder" with plain-word statuses. `/api/tasks/{id}/pr` returns `delivery: github|folder`.
   - Tests: 10 new in `tests/test_w2_apply_to_my_folder.py` (real git repos). The 3 wiring tests fail on the old code. The existing push, launch-manager, demo and audit04 tests still pass (76 in total).
+- **2026-10-09: W6 "deliver to the right branch". DONE.**
+  - A pull request no longer always targets `main`. The target is chosen in this order:
+    1. the project's own choice (new nullable `projects.target_branch`, migration 066, additive and reversible);
+    2. the repository's default branch recorded by the clone (`origin/HEAD`, e.g. `master` or `develop`);
+    3. an existing `origin/main` or `origin/master`;
+    4. `main` as the last resort.
+  - Branch names are validated (`PATCH /api/projects/{id}` returns 400 on a bad one, and `""` clears the choice).
+  - Detection never breaks delivery: a missing folder falls back to `main`, and the push reports the real problem.
+  - UI: Start → project → Tools → Branches has "Send finished work to" (GitHub projects only). The Project API returns `targetBranch`.
+  - Local folders keep merging into the branch the folder is on (W2), so the user's checkout never changes under them.
+  - Tests: 10 new in `tests/test_w6_target_branch.py`. The 3 wiring tests fail on the old code. The 236 existing project, push and migration tests pass. The existing dispatch tests also caught a crash on a missing folder, which is now fixed.

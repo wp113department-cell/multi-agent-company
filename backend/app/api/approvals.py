@@ -233,7 +233,16 @@ async def dispatch_git_push_decision(task_id: int, approved: bool) -> None:
 
         token = (await get_setting(db, "github_token")) or get_settings().github_token
 
-        from app.tools.git_push_tool import push_and_create_pr
+        from app.tools.git_push_tool import push_and_create_pr, resolve_target_branch
+
+        # W6: the project's chosen branch, else the repository's default
+        project_target = None
+        if getattr(task, "project_id", None):
+            from app.db.models import Project
+
+            project = await db.get(Project, task.project_id)
+            project_target = project.target_branch if project else None
+        base_branch = await resolve_target_branch(project_target, task.repo.local_path)
 
         result = await push_and_create_pr(
             task_id=task_id,
@@ -242,6 +251,7 @@ async def dispatch_git_push_decision(task_id: int, approved: bool) -> None:
             repo_path=task.repo.local_path,
             github_url=task.repo.github_url,
             token=token,
+            base_branch=base_branch,
         )
         await update_task_pr(
             db, task_id, result.pr_url, "pushed" if result.pushed else "failed"

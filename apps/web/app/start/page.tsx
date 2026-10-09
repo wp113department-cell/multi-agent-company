@@ -949,7 +949,15 @@ export default function StartPage() {
       )}
 
       {tools && tools.localPath && (
-        <ProjectTools name={tools.name} path={tools.localPath} onClose={() => setTools(null)} />
+        <ProjectTools
+          name={tools.name}
+          path={tools.localPath}
+          projectId={tools.id}
+          githubUrl={tools.githubUrl}
+          targetBranch={tools.targetBranch ?? null}
+          onSaved={() => void qc.invalidateQueries({ queryKey: ["projects"] })}
+          onClose={() => setTools(null)}
+        />
       )}
 
       {wizard && (

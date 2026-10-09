@@ -7,6 +7,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
+import { updateProject } from "../lib/api";
 import { authHeaders } from "../lib/auth";
 import { useEscapeKey } from "./FolderPicker";
 import { Icon } from "./Icon";
@@ -39,10 +40,18 @@ async function git<T>(path: string, op: string, method = "GET", body?: unknown):
 export function ProjectTools({
   name,
   path,
+  projectId,
+  githubUrl = null,
+  targetBranch = null,
+  onSaved,
   onClose,
 }: {
   name: string;
   path: string;
+  projectId?: number;
+  githubUrl?: string | null;
+  targetBranch?: string | null;
+  onSaved?: () => void;
   onClose: () => void;
 }) {
   useEscapeKey(onClose);
@@ -55,6 +64,7 @@ export function ProjectTools({
   const [branches, setBranches] = useState<string[]>([]);
   const [newBranch, setNewBranch] = useState("");
   const [commitMsg, setCommitMsg] = useState("");
+  const [deliverTo, setDeliverTo] = useState(targetBranch ?? "");
 
   const run = useCallback(async (fn: () => Promise<void>, success?: string) => {
     setBusy(true);
@@ -241,6 +251,44 @@ export function ProjectTools({
                 </button>
               </div>
               <p className="text-xs text-slate-500">Click a branch to switch to it.</p>
+              {githubUrl && projectId !== undefined && (
+                <div className="mt-4 space-y-2 border-t border-slate-100 pt-4 dark:border-slate-800">
+                  <p className="text-sm font-medium text-slate-700 dark:text-slate-200">
+                    Send finished work to
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    Approved work opens a pull request into this branch on GitHub.
+                  </p>
+                  <div className="flex gap-2">
+                    <select
+                      aria-label="Branch that receives finished work"
+                      value={deliverTo}
+                      onChange={(e) => setDeliverTo(e.target.value)}
+                      className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
+                    >
+                      <option value="">Automatic (the repository&apos;s default branch)</option>
+                      {[...new Set([...(deliverTo ? [deliverTo] : []), ...branches])].map((b) => (
+                        <option key={b} value={b}>
+                          {b}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      disabled={busy || deliverTo === (targetBranch ?? "")}
+                      onClick={() =>
+                        void run(async () => {
+                          await updateProject(projectId, { targetBranch: deliverTo });
+                          onSaved?.();
+                        }, deliverTo ? `Finished work will go to ${deliverTo}.` : "Finished work will go to the default branch.")
+                      }
+                      className="rounded-lg bg-orange-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                    >
+                      Save
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

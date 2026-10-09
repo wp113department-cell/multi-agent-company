@@ -737,6 +737,9 @@ class Project(Base):
     )
     github_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     visibility: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    # W6: branch approved work is delivered to (a pull request's base);
+    # NULL = the repository's own default branch
+    target_branch: Mapped[str | None] = mapped_column(String(200), nullable=True)
     # local_existing | local_new | github_existing | github_new | imported
     source: Mapped[str] = mapped_column(
         String(30), default="imported", server_default="imported"

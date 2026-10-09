@@ -848,6 +848,9 @@ export interface Project {
   setup: ProjectSetup | "imported";
   localPath: string | null;
   githubUrl: string | null;
+  /** W6: branch approved work is delivered to; null = the repository's
+   * default branch. */
+  targetBranch?: string | null;
   visibility: "public" | "private" | null;
   repoId: number | null;
   status: "cloning" | "ready" | "error" | "none";
@@ -903,6 +906,24 @@ export async function listProjects(): Promise<Project[]> {
 export async function getProject(id: number): Promise<ProjectDetail> {
   const res = await apiFetch(`/api/projects/${id}`, { cache: "no-store" });
   return handleResponse<ProjectDetail>(res);
+}
+
+/** Change a project's name, description or delivery branch (W6: "" =
+ * automatic, the repository's default branch). */
+export async function updateProject(
+  projectId: number,
+  input: { name?: string; description?: string | null; targetBranch?: string },
+): Promise<Project> {
+  const body: Record<string, unknown> = {};
+  if (input.name !== undefined) body.name = input.name;
+  if (input.description !== undefined) body.description = input.description;
+  if (input.targetBranch !== undefined) body.target_branch = input.targetBranch;
+  const res = await apiFetch(`/api/projects/${projectId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return handleResponse<Project>(res);
 }
 
 export async function createProject(input: CreateProjectInput): Promise<Project> {

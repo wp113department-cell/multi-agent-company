@@ -191,6 +191,52 @@ async def create_github_pr(
     }
 
 
+_BRANCH_RE = re.compile(
+    r"^(?!-)(?!/)(?!.*\.\.)(?!.*//)(?!.*@\{)[A-Za-z0-9._/-]{1,200}(?<!/)(?<!\.)(?<!\.lock)$"
+)
+
+
+def valid_branch_name(name: str) -> bool:
+    """A name git accepts for a branch (the subset that needs no quoting)."""
+    return bool(_BRANCH_RE.match(name))
+
+
+async def resolve_target_branch(project_target: str | None, repo_path: str) -> str:
+    """W6 (2026-10-09): the branch a pull request is opened against.
+
+    The project's own choice when set; otherwise the repository's default
+    branch as the clone recorded it (refs/remotes/origin/HEAD, e.g.
+    `master`); otherwise whichever of main/master exists on the remote;
+    `main` only as the last resort (before W6 it was always `main`, so
+    `master` repositories failed at the last step)."""
+    from app.services.git_service import run_git_process
+
+    if project_target and valid_branch_name(project_target):
+        return project_target
+
+    async def git(*args: str) -> tuple[int, str]:
+        # never fails the delivery: a missing folder or git error just means
+        # "unknown", and the push itself reports the real problem
+        try:
+            rc, out, _err, _t = await run_git_process(
+                ["git", "-C", repo_path, *args], None, None, 30
+            )
+        except OSError:
+            return 1, ""
+        return rc, out.decode(errors="replace").strip()
+
+    rc, head = await git("symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+    if rc == 0 and head.startswith("origin/") and len(head) > len("origin/"):
+        return head[len("origin/") :]
+    for name in ("main", "master"):
+        rc, _ = await git(
+            "rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{name}"
+        )
+        if rc == 0:
+            return name
+    return "main"
+
+
 async def push_and_create_pr(
     task_id: int,
     task_title: str,
