@@ -101,7 +101,9 @@ async def login(
         raise HTTPException(status_code=401, detail="Invalid username or password")
 
     role = user.role
-    token = create_access_token({"sub": body.username, "role": role})
+    token = create_access_token(
+        {"sub": body.username, "role": role, "tv": int(user.token_version or 0)}
+    )
     response.set_cookie(
         key="gridiron_token",
         value=token,
@@ -132,6 +134,7 @@ async def me(current_user: CurrentUser = Depends(get_current_user)) -> MeRespons
 async def refresh_token(
     response: Response,
     current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ) -> LoginResponse:
     """Renew the caller's session: issues a fresh JWT (full expiry window) for
     an already-valid, unexpired session and resets the httponly cookie.
@@ -148,8 +151,13 @@ async def refresh_token(
         )
 
     settings = get_settings()
+    user = await get_user(db, current_user.username)
     token = create_access_token(
-        {"sub": current_user.username, "role": current_user.role}
+        {
+            "sub": current_user.username,
+            "role": current_user.role,
+            "tv": int(user.token_version or 0) if user is not None else 0,
+        }
     )
     response.set_cookie(
         key="gridiron_token",
@@ -203,7 +211,7 @@ async def setup_first_user(
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
-async def logout() -> Response:
+async def logout(request: Request, db: AsyncSession = Depends(get_db)) -> Response:
     """Clear the browser session cookie without exposing it to JavaScript.
 
     Production audit 12: this used to return FastAPI's injected `response`
@@ -211,6 +219,13 @@ async def logout() -> Response:
     status_code=None — returning it made uvicorn fail to send it, so every
     real logout was a 500 and the httpOnly cookie was never cleared.
     """
+    # Sol A12: signing out ends every session of this account (all its
+    # tokens), not just this browser's cookie — a copied token stops working
+    username = _session_username(request)
+    if username:
+        from app.db.repository import bump_token_version
+
+        await bump_token_version(db, username)
     response = Response(status_code=status.HTTP_204_NO_CONTENT)
     response.delete_cookie(key="gridiron_token", path="/")
     return response
@@ -246,6 +261,7 @@ def _session_username(request: Request) -> str | None:
 async def change_password(
     body: ChangePasswordRequest,
     request: Request,
+    response: Response,
     current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, str]:
@@ -287,4 +303,19 @@ async def change_password(
     from app.middleware.password_change import forget
 
     forget(username)  # the API unlocks immediately, not after the cache TTL
+    # Sol A12: every token issued before this change stops working (a copied
+    # or stolen token is useless now); this browser gets a fresh one
+    from app.db.repository import bump_token_version
+
+    version = await bump_token_version(db, username)
+    settings = get_settings()
+    response.set_cookie(
+        key="gridiron_token",
+        value=create_access_token({"sub": username, "role": user.role, "tv": version}),
+        max_age=settings.jwt_access_token_expire_minutes * 60,
+        httponly=True,
+        secure=settings.deployment_env in ("staging", "production"),
+        samesite="lax",
+        path="/",
+    )
     return {"status": "changed", "username": username}

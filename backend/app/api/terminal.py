@@ -85,7 +85,9 @@ async def _authenticate_as_approver(
             payload = decode_access_token(token)
             role = str(payload.get("role", "viewer"))
             username = str(payload.get("sub", "unknown"))
-            live_role = await current_role(username, role, db)
+            live_role = await current_role(
+                username, role, db, token_version=payload.get("tv")
+            )
             if live_role is None or live_role not in ("approver", "admin"):
                 return None
             return username

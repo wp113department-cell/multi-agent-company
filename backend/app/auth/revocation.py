@@ -17,7 +17,7 @@ import time
 from app.config import get_settings
 
 _TTL_SECONDS = 15.0
-_cache: dict[str, tuple[float, str | None]] = {}
+_cache: dict[str, tuple[float, tuple[str, int] | None]] = {}
 
 
 def invalidate(username: str | None = None) -> None:
@@ -30,25 +30,40 @@ def invalidate(username: str | None = None) -> None:
 
 
 async def current_role(
-    username: str, claimed_role: str, db: object | None = None
+    username: str,
+    claimed_role: str,
+    db: object | None = None,
+    token_version: int | None = None,
 ) -> str | None:
-    """The role this account holds right now, or None if the account no longer exists."""
+    """The role this account holds right now, or None if the account no
+    longer exists — or (Sol A12) if `token_version` (the token's "tv"; a
+    token without one counts as 0) differs from the account's: the user has
+    signed out or changed the password since that token was issued."""
     if not get_settings().jwt_revalidate_against_db:
         return claimed_role
     now = time.monotonic()
     hit = _cache.get(username)
-    if hit is not None and hit[0] > now:
-        return hit[1]
+    if hit is None or hit[0] <= now:
+        from app.db.repository import get_user
 
-    from app.db.repository import get_user
+        if db is not None:
+            user = await get_user(db, username)  # type: ignore[arg-type]
+        else:
+            from app.db.session import get_session_factory
 
-    if db is not None:
-        user = await get_user(db, username)  # type: ignore[arg-type]
-    else:
-        from app.db.session import get_session_factory
-
-        async with get_session_factory()() as session:
-            user = await get_user(session, username)
-    role = str(user.role) if user is not None else None
-    _cache[username] = (now + _TTL_SECONDS, role)
+            async with get_session_factory()() as session:
+                user = await get_user(session, username)
+        account = (
+            (str(user.role), int(getattr(user, "token_version", 0) or 0))
+            if user is not None
+            else None
+        )
+        hit = (now + _TTL_SECONDS, account)
+        _cache[username] = hit
+    account = hit[1]
+    if account is None:
+        return None
+    role, version = account
+    if int(token_version or 0) != version:
+        return None
     return role

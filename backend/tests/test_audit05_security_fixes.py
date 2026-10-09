@@ -559,6 +559,7 @@ class TestChangePasswordEndpoint:
                             current_password="whatever", new_password="short"
                         ),
                         request=MagicMock(),  # unused: a JWT user is passed
+                        response=MagicMock(),  # Sol A12: carries the new cookie
                         current_user=user,
                         db=db,
                     )

@@ -563,3 +563,11 @@ Every item gets a full local CI before each push. Close heavy apps first, becaus
     - fields named like password, token, secret, cookie or authorization (header lists included).
   - **Proof:** a real Sentry client with a capturing transport (canaries in the exception message, a frame variable, a breadcrumb and a cookie header), the JSON log formatter (message and traceback) and a real alert webhook on a local server. The alert fires and carries no canary.
   - Tests: 4 in `tests/test_a13_g10_telemetry_redaction.py` (Sentry, logs and alerts fail on the old wiring) and 2 in `tests/test_a05_image_secrets.py` (the backend context failed before the fix).
+- **2026-10-09: Batch 6, A12 "old tokens stop working". DONE.**
+  - `users.token_version` (migration 068, additive) is carried in every token as `tv` (sign-in and refresh).
+  - The live account check (`revocation.current_role`, used by the RBAC middleware, `get_current_user` and the terminal websocket) refuses a token whose version differs. Message: "Your sign-in has ended (signed out, password changed or account removed) — please sign in again".
+  - Changing the password raises the version and gives this browser a fresh token. Signing out raises it too, so it ends every session of the account.
+  - Tokens issued before the upgrade count as version 0, so nobody is signed out by the upgrade.
+  - A refresh with an old token is refused.
+  - Tests: 4 in `tests/test_a12_token_revocation.py` (3 fail on the old code). One direct call in `test_audit05_security_fixes.py` now passes the response object. 357 auth tests pass.
+  - Not done (noted): shorter access-token lifetimes with refresh rotation. Token versions already make revocation immediate.

@@ -88,11 +88,13 @@ async def require_approver(
                 username = str(payload.get("sub", "unknown"))
                 from app.auth.revocation import current_role
 
-                live_role = await current_role(username, role, db)
+                live_role = await current_role(
+                    username, role, db, token_version=payload.get("tv")
+                )
                 if live_role is None:
                     raise HTTPException(
                         status_code=status.HTTP_401_UNAUTHORIZED,
-                        detail="This account no longer exists",
+                        detail="Your sign-in has ended (signed out, password changed or account removed) — please sign in again",
                     )
                 role = live_role
                 if role not in ("approver", "admin"):
@@ -220,12 +222,17 @@ async def require_authenticated(
                 from app.auth.revocation import current_role
 
                 if (
-                    await current_role(username, str(payload.get("role", "viewer")), db)
+                    await current_role(
+                        username,
+                        str(payload.get("role", "viewer")),
+                        db,
+                        token_version=payload.get("tv"),
+                    )
                     is None
                 ):
                     raise HTTPException(
                         status_code=status.HTTP_401_UNAUTHORIZED,
-                        detail="This account no longer exists",
+                        detail="Your sign-in has ended (signed out, password changed or account removed) — please sign in again",
                     )
                 return username
             except HTTPException:

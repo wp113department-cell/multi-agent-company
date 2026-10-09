@@ -65,11 +65,14 @@ async def get_current_user(request: Request) -> CurrentUser:
 
                 username = str(payload.get("sub", "unknown"))
                 live_role = await current_role(
-                    username, str(payload.get("role", "viewer"))
+                    username,
+                    str(payload.get("role", "viewer")),
+                    token_version=payload.get("tv"),
                 )
                 if live_role is None:
                     raise HTTPException(
-                        status_code=401, detail="This account no longer exists"
+                        status_code=401,
+                        detail="Your sign-in has ended (signed out, password changed or account removed) — please sign in again",
                     )
                 return CurrentUser(username=username, role=live_role)
             except JWTError:

@@ -1275,6 +1275,20 @@ async def update_pipeline_state(
 # credential_vault.py's custom secrets).
 
 
+async def bump_token_version(db: AsyncSession, username: str) -> int:
+    """Sol A12: invalidate every sign-in token issued to `username` so far;
+    returns the new version (0 when the user does not exist)."""
+    user = await db.get(User, username)
+    if user is None:
+        return 0
+    user.token_version = int(user.token_version or 0) + 1
+    await db.commit()
+    from app.auth.revocation import invalidate
+
+    invalidate(username)
+    return int(user.token_version)
+
+
 async def get_setting(db: AsyncSession, key: str) -> str | None:
     from app.security.credential_vault import decrypt_value
 
