@@ -111,3 +111,13 @@ real, end-to-end-verified fix (actual browser navigation, actual
 screenshots, actual SSRF blocking). One real, lower-priority finding
 (`browser_screenshot`'s path boundary) explicitly deferred with
 reasoning, not silently dropped.
+
+## Update 2026-10-09 (Sol A10): screenshot path boundary — fixed
+
+The deferred finding above is closed. `browser_screenshot` now always
+writes inside the browser session's own folder
+(`<tmp>/gridiron-screenshots/<session>/`). The caller may only choose a
+plain file name ending in `.png`/`.jpg`. Absolute paths, folders,
+`..` and symbolic links (folder or file) are refused before the browser
+is touched (`browser_driver.screenshot_path`; tests in
+`tests/test_a10_screenshot_paths.py`).

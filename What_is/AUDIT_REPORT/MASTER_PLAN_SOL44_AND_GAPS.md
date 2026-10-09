@@ -528,3 +528,7 @@ Every item gets a full local CI before each push. Close heavy apps first, becaus
   - The chat page no longer offers "Or a folder path (advanced)"; chats start from a project.
   - Ownership of projects between users is left to A07 (Batch 6).
   - Tests: 9 new in `tests/test_a03_chat_folder_authorization.py`, 8 failing on the old code. The C1/C2 chat tests now register their temporary folder as a project, as real use does. 139 chat/auth tests pass.
+- **2026-10-09: Batch 2, A10 "screenshot destination". DONE. Batch 2 complete (A04, A03, A10).**
+  - `browser_screenshot` wrote wherever the model's `path` said: Playwright `page.screenshot(path=...)`, so any file the backend can write. It was logged as "deliberately deferred" in the tool docs.
+  - Screenshots now always land in `<tmp>/gridiron-screenshots/<session>/` (`browser_driver.screenshot_path`). Only a plain `.png`/`.jpg` file name may be chosen. Absolute paths, folders, `..`, odd session IDs and symlinked folders or files are refused before the browser is touched. The tool description and docs were updated.
+  - Tests: 16 new in `tests/test_a10_screenshot_paths.py` (the file fails to import on the old code). The existing browser tests pass.

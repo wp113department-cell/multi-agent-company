@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import ipaddress
 import os
+import re
 import socket
 import tempfile
 import uuid
@@ -129,14 +130,43 @@ def _do_navigate(url: str, session_id: str) -> dict[str, str]:
     return {"title": page.title(), "url": page.url}
 
 
-def _do_screenshot(path: str | None, session_id: str) -> str:
-    page = _get_page(session_id)
-    if path is None:
-        path = os.path.join(
-            tempfile.gettempdir(), f"screenshot_{uuid.uuid4().hex[:8]}.png"
+_SHOT_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}\.(png|jpe?g)$", re.I)
+
+
+def screenshot_path(name: str | None, session_id: str) -> str:
+    """Sol A10 (2026-10-09): where a screenshot is written. Always inside
+    this browser session's own folder; the caller may only choose a plain
+    file name (.png/.jpg). It used to accept any path on the server, so a
+    model could overwrite any file the backend can write. Raises ValueError
+    for anything else, before the browser is touched."""
+    safe_session = re.sub(r"[^A-Za-z0-9_-]", "_", session_id)[:64] or "default"
+    base = os.path.join(tempfile.gettempdir(), "gridiron-screenshots")
+    folder = os.path.join(base, safe_session)
+    for d in (base, folder):
+        if os.path.islink(d):
+            raise ValueError("the screenshot folder may not be a symbolic link")
+        os.makedirs(d, mode=0o700, exist_ok=True)
+    if name is None or not str(name).strip():
+        name = f"screenshot_{uuid.uuid4().hex[:8]}.png"
+    name = str(name).strip()
+    if not _SHOT_NAME.match(name) or ".." in name:
+        raise ValueError(
+            "a screenshot name must be a plain file name ending in .png or .jpg "
+            "(no folders); it is saved in the session's screenshot folder"
         )
-    page.screenshot(path=path)
-    return path
+    target = os.path.join(folder, name)
+    if os.path.islink(target):
+        raise ValueError("refusing to write through a symbolic link")
+    if os.path.dirname(os.path.realpath(target)) != os.path.realpath(folder):
+        raise ValueError("the screenshot would leave the session's folder")
+    return target
+
+
+def _do_screenshot(path: str | None, session_id: str) -> str:
+    target = screenshot_path(path, session_id)
+    page = _get_page(session_id)
+    page.screenshot(path=target)
+    return target
 
 
 def _do_read_dom(selector: str | None, session_id: str) -> str:

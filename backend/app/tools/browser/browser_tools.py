@@ -106,13 +106,13 @@ BROWSER_NAVIGATE_TOOL: dict[str, Any] = {
 
 BROWSER_SCREENSHOT_TOOL: dict[str, Any] = {
     "name": "browser_screenshot",
-    "description": "Take a screenshot of the current page. Saves to /tmp and returns the file path.",
+    "description": "Take a screenshot of the current page. Saved in this browser session's own screenshot folder; returns the file path.",
     "input_schema": {
         "type": "object",
         "properties": {
             "path": {
                 "type": "string",
-                "description": "Optional output path. Auto-generated if omitted.",
+                "description": "Optional plain file name ending in .png or .jpg (no folders). Auto-generated if omitted.",
             }
         },
         "required": [],
