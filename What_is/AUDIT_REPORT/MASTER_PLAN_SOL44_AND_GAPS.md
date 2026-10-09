@@ -576,3 +576,16 @@ Every item gets a full local CI before each push. Close heavy apps first, becaus
   - Chat messages, stream, confirm, stop, history and close now check the chat's owner (`_check_chat_owner`). Another user gets 404, so the chat's existence isn't revealed. List, rename and delete were already owner-scoped (C2). Chats from before C2 have no recorded owner and stay shared.
   - Tests: `tests/test_a07_two_user_access.py`, a two-user matrix over real sign-ins. User B, an approver, gets 404 on all 8 chat operations on A's chat and doesn't see it listed. A keeps access, and B still sees the shared project. On the old code B read A's history (200).
   - Per-customer tenancy (tenants/memberships) is out of scope for a single-team install and is noted for a hosted multi-customer version.
+- **2026-10-09: Batch 6, A14 privacy export/erasure tell the truth. DONE.**
+  - The export returned only identity, role and audit rows.
+  - It now covers the full inventory, each list with `total` and paging (`?offset=&limit=`, up to 5000):
+    - the person's own chats with all their messages;
+    - `teamWork`: tasks, epics (created or cost-approved), projects, custom agents and their runs, approval and improvement decisions, prompt approvals;
+    - project notes;
+    - the audit trail (capped at 2000, stated).
+  - Erasure used to remove only the login and role. It now:
+    - deletes the person's chats and messages (personal content);
+    - replaces their name with `erased-user` on shared team work, including notes (the team's record stays);
+    - keeps the append-only audit log (legal-obligation basis, stated in the response).
+  - The response lists `removed`, `pseudonymized` (with counts) and `retained`.
+  - Tests: 2 in `tests/test_a14_privacy_inventory.py`, failing on the old code. 112 existing privacy-related tests pass.

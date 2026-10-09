@@ -15,6 +15,14 @@ data model, not a placeholder:
   - Attributable activity: audit_log rows where this identity is either the
     acting agent_name or the human recorded as approved_by (AuditLog.
     by_actor_async, app/fleet/audit_log.py).
+  - Sol A14 (2026-10-09) — the full inventory, exported with totals and
+    paging (?offset=&limit=): the person's own chats with their messages
+    (personal content: DELETED on erasure), and the shared team records that
+    name them — tasks, epics (created/cost-approved), projects, custom
+    agents and their runs, approval and improvement decisions, prompt
+    approvals, project notes (team work: KEPT on erasure, with the name
+    replaced by "erased-user"). Before this the export returned only the
+    identity and audit rows while tasks/epics kept the name forever.
 
 Erasure (DELETE /api/privacy/user/{username}) removes identity data (login
 becomes impossible, role assignment removed) but deliberately does NOT
@@ -58,7 +66,81 @@ def _serialize_audit_entry(entry: AuditEntry) -> dict[str, Any]:
     return entry.to_dict()
 
 
-async def _export_for_username(username: str, db: AsyncSession) -> dict[str, Any]:
+# Sol A14 (2026-10-09): everything that records a person, and what erasure
+# does with it. "personal" is the person's own content (deleted on
+# erasure); "team" is shared team work that stays, with the name replaced.
+ERASED = "erased-user"
+_TEAM_ATTRIBUTION = [
+    ("dev_tasks", "created_by", "tasks"),
+    ("epics", "created_by", "epics"),
+    ("epics", "cost_approved_by", "epicCostApprovals"),
+    ("projects", "created_by", "projects"),
+    ("custom_agents", "created_by", "customAgents"),
+    ("custom_agent_runs", "created_by", "customAgentRuns"),
+    ("pending_approvals", "decided_by", "approvalDecisions"),
+    ("enhancement_requests", "decided_by", "improvementDecisions"),
+    ("prompt_versions", "approved_by", "promptApprovals"),
+]
+
+
+def _plain(value: Any) -> Any:
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    if isinstance(value, (bytes, bytearray)):
+        return f"<{len(value)} bytes>"
+    return value
+
+
+async def _rows(
+    db: AsyncSession, table: str, column: str, username: str, offset: int, limit: int
+) -> dict[str, Any]:
+    from sqlalchemy import text
+
+    total = int(
+        (
+            await db.execute(
+                text(f"SELECT count(*) FROM {table} WHERE {column} = :u"),  # noqa: S608
+                {"u": username},
+            )
+        ).scalar_one()
+    )
+    result = await db.execute(
+        text(
+            f"SELECT * FROM {table} WHERE {column} = :u "  # noqa: S608
+            "ORDER BY 1 OFFSET :o LIMIT :l"
+        ),
+        {"u": username, "o": offset, "l": limit},
+    )
+    items = [{k: _plain(v) for k, v in row._mapping.items()} for row in result]
+    return {"total": total, "offset": offset, "items": items}
+
+
+async def _project_notes_by(db: AsyncSession, username: str) -> list[dict[str, Any]]:
+    import json
+
+    from app.db.models import SystemSetting
+    from app.db.repository import get_setting
+
+    keys = (
+        await db.execute(
+            select(SystemSetting.key).where(SystemSetting.key.like("project-notes:%"))
+        )
+    ).scalars()
+    out: list[dict[str, Any]] = []
+    for key in list(keys):
+        try:
+            notes = json.loads(await get_setting(db, key) or "[]")
+        except ValueError:
+            continue
+        for note in notes:
+            if note.get("createdBy") == username:
+                out.append({"project": key.split(":", 1)[1], **note})
+    return out
+
+
+async def _export_for_username(
+    username: str, db: AsyncSession, offset: int = 0, limit: int = 500
+) -> dict[str, Any]:
     user = await get_user(db, username)
     identity: dict[str, Any] | None = None
     if user is not None:
@@ -85,23 +167,53 @@ async def _export_for_username(username: str, db: AsyncSession) -> dict[str, Any
 
     audit_entries = await get_audit_log().by_actor_async(username, limit=2000)
 
+    chats = await _rows(db, "chat_sessions", "created_by", username, offset, limit)
+    for chat in chats["items"]:
+        from sqlalchemy import text
+
+        msgs = await db.execute(
+            text(
+                "SELECT role, content, created_at FROM chat_messages "
+                "WHERE session_id = :s ORDER BY created_at"
+            ),
+            {"s": chat["id"]},
+        )
+        chat["messages"] = [{k: _plain(v) for k, v in m._mapping.items()} for m in msgs]
+    team_work = {
+        label: await _rows(db, table, column, username, offset, limit)
+        for table, column, label in _TEAM_ATTRIBUTION
+    }
+
     return {
         "username": username,
         "identity": identity,
         "userRole": user_role,
+        "chats": chats,
+        "teamWork": team_work,
+        "projectNotes": await _project_notes_by(db, username),
+        "paging": {
+            "offset": offset,
+            "limit": limit,
+            "howTo": "every list has a 'total'; ask again with ?offset= to page "
+            "through lists longer than the limit",
+        },
         "attributableAuditEntries": [_serialize_audit_entry(e) for e in audit_entries],
         "notes": (
             "identity/userRole are null if no matching record exists. "
             "attributableAuditEntries includes every audit_log row where "
             "this username is either the acting agent or the human who "
-            "made an approval decision; password hashes are never included "
-            "in this export."
+            "made an approval decision (capped at 2000, newest first); "
+            "chats are this person's own conversations with their messages; "
+            "teamWork lists shared team records that name this person; "
+            "password hashes are never included in this export."
         ),
     }
 
 
 @router.get("/export/me")
 async def export_my_data(
+    offset: int = 0,
+    limit: int = 500,
     current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
@@ -114,19 +226,57 @@ async def export_my_data(
             "(the anonymous/legacy-header default does not count as a resolvable "
             "identity).",
         )
-    return await _export_for_username(current_user.username, db)
+    return await _export_for_username(
+        current_user.username, db, max(0, offset), max(1, min(limit, 5000))
+    )
 
 
 @router.get("/export/{username}")
 async def export_user_data(
     username: str,
+    offset: int = 0,
+    limit: int = 500,
     _admin: str = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Admin-initiated GDPR/CCPA data-access request on behalf of another
     user (e.g. responding to a data subject access request submitted
     outside this system)."""
-    return await _export_for_username(username, db)
+    return await _export_for_username(
+        username, db, max(0, offset), max(1, min(limit, 5000))
+    )
+
+
+async def _pseudonymize_notes(db: AsyncSession, username: str) -> int:
+    import json
+
+    from app.db.models import SystemSetting
+    from app.db.repository import get_setting, set_setting
+
+    keys = list(
+        (
+            await db.execute(
+                select(SystemSetting.key).where(
+                    SystemSetting.key.like("project-notes:%")
+                )
+            )
+        ).scalars()
+    )
+    changed = 0
+    for key in keys:
+        try:
+            notes = json.loads(await get_setting(db, key) or "[]")
+        except ValueError:
+            continue
+        hit = False
+        for note in notes:
+            if note.get("createdBy") == username:
+                note["createdBy"] = ERASED
+                changed += 1
+                hit = True
+        if hit:
+            await set_setting(db, key, json.dumps(notes))
+    return changed
 
 
 @router.delete("/user/{username}")
@@ -166,6 +316,32 @@ async def delete_user_data(
     )
     role_removed = bool(getattr(role_delete_result, "rowcount", 0))
 
+    # Sol A14: the person's own chats go; shared team work stays with the
+    # name replaced (it is the team's record, not personal content)
+    from sqlalchemy import text
+
+    chat_ids = [
+        str(r[0])
+        for r in await db.execute(
+            text("SELECT id FROM chat_sessions WHERE created_by = :u"), {"u": username}
+        )
+    ]
+    for sid in chat_ids:
+        await db.execute(
+            text("DELETE FROM chat_messages WHERE session_id = :s"), {"s": sid}
+        )
+    await db.execute(
+        text("DELETE FROM chat_sessions WHERE created_by = :u"), {"u": username}
+    )
+    pseudonymized: dict[str, int] = {}
+    for table, column, label in _TEAM_ATTRIBUTION:
+        result = await db.execute(
+            text(f"UPDATE {table} SET {column} = :e WHERE {column} = :u"),  # noqa: S608
+            {"e": ERASED, "u": username},
+        )
+        pseudonymized[label] = int(getattr(result, "rowcount", 0) or 0)
+    pseudonymized["projectNotes"] = await _pseudonymize_notes(db, username)
+
     await db.commit()
 
     if not identity_removed and not role_removed:
@@ -200,6 +376,13 @@ async def delete_user_data(
         "removed": {
             "authCredentials": identity_removed,
             "userRole": role_removed,
+            "chats": len(chat_ids),
+        },
+        "pseudonymized": {
+            "replacedWith": ERASED,
+            "counts": pseudonymized,
+            "reason": "shared team work stays for the team; the person's "
+            "name on it is replaced",
         },
         "retained": {
             "auditLogEntries": audit_count > 0,
