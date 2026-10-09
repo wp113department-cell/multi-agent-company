@@ -1696,18 +1696,22 @@ def _make_memory_hook_node(
                 summary = f"## Repo context\nRelevant files: {', '.join(ctx.relevant_files[:8])}"
                 if ctx.related_symbols:
                     summary += f"\nKey symbols: {', '.join(ctx.related_symbols[:6])}"
-                # W1: the free project overview (stack, run/test commands)
-                try:
-                    from app.repo_tools.project_scan import overview_text
-
-                    overview = overview_text(repo_path)
-                    if overview:
-                        summary += "\n\n" + overview
-                except Exception as exc:
-                    logger.debug("project overview skipped: %s", exc)
                 updates["repo_context"] = summary
             except Exception as exc:
                 logger.debug("memory_hook repo context skipped: %s", exc)
+            # W1/W5: the free project overview (stack, run/test commands, or
+            # "new project: build it from zero"); independent of the index,
+            # which can fail on an almost empty folder
+            try:
+                from app.repo_tools.project_scan import overview_text
+
+                overview = overview_text(repo_path)
+                if overview:
+                    updates["repo_context"] = (
+                        updates.get("repo_context", "") + "\n\n" + overview
+                    ).strip()
+            except Exception as exc:
+                logger.debug("project overview skipped: %s", exc)
 
         return updates
 

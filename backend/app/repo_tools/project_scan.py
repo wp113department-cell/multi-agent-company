@@ -156,6 +156,22 @@ def _other(root: Path, frameworks: list[str], run: list[str], test: list[str]) -
         frameworks.append("Docker")
 
 
+_STARTER = re.compile(
+    r"^(readme(\.\w+)?|license(\.\w+)?|licence(\.\w+)?|\.gitignore|\.gitattributes)$",
+    re.I,
+)
+
+
+def _starter_only(root: Path) -> bool:
+    """W5: nothing but the starter files a new project is created with (the
+    README a new folder gets, GitHub's auto README/LICENSE/.gitignore)."""
+    try:
+        entries = [p for p in root.iterdir() if p.name not in _SKIP_DIRS]
+    except OSError:
+        return False
+    return all(p.is_file() and _STARTER.match(p.name) for p in entries)
+
+
 def scan_project(folder: str) -> dict[str, Any]:
     """The free overview of the project in `folder` (cached for 5 minutes)."""
     now = time.monotonic()
@@ -190,8 +206,11 @@ def scan_project(folder: str) -> dict[str, Any]:
                 title = line.strip().strip("#").strip()[:120]
                 break
     warnings: list[str] = []
+    is_new = files == 0 or _starter_only(root)
     if files == 0:
         warnings.append("The folder is empty: this is a new project.")
+    elif is_new:
+        warnings.append("Only starter files (README/licence): this is a new project.")
     else:
         if readme is None:
             warnings.append("No README: there is no description of the project.")
@@ -214,6 +233,7 @@ def scan_project(folder: str) -> dict[str, Any]:
         "fileCount": min(files, _MAX_FILES),
         "sizeBytes": size,
         "hasTests": has_tests or bool(test),
+        "isNewProject": is_new,
         "warnings": warnings,
     }
     _CACHE[folder] = (now, overview)
@@ -223,8 +243,18 @@ def scan_project(folder: str) -> dict[str, Any]:
 def overview_text(folder: str) -> str:
     """A few lines for an agent's context; "" when nothing useful."""
     o = scan_project(folder)
-    if not o.get("ok") or not o.get("fileCount"):
+    if not o.get("ok"):
         return ""
+    if o.get("isNewProject"):
+        # W5: tell every agent plainly that it builds from zero
+        return (
+            "## Project overview (free scan)\n"
+            "This is a NEW project: nothing is built yet"
+            + (f' (only {", ".join(o["topLevel"])})' if o.get("topLevel") else "")
+            + ". Plan the structure and technology for the request, create the "
+            "project files, implement it, add tests and a command to run them, "
+            "and describe in the README how to run the project."
+        )
     lines = ["## Project overview (free scan)"]
     if o["languages"]:
         lines.append("Languages: " + ", ".join(o["languages"]))

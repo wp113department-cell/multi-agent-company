@@ -79,7 +79,8 @@ def test_an_empty_folder_is_a_new_project(tmp_path: Path) -> None:
     o = scan_project(str(root))
     assert o["fileCount"] == 0
     assert o["warnings"] == ["The folder is empty: this is a new project."]
-    assert overview_text(str(root)) == ""
+    # W5: agents are told to build it from zero
+    assert "This is a NEW project" in overview_text(str(root))
 
 
 def test_a_missing_folder_is_reported_not_raised(tmp_path: Path) -> None:

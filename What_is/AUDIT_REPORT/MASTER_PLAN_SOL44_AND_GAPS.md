@@ -446,3 +446,9 @@ Every item gets a full local CI before each push. Close heavy apps first, becaus
   - Each outcome is written to the task log. It never blocks the task, and hooks never run.
   - Tests: 7 new in `tests/test_w7_latest_code.py` (a local bare repo stands in for GitHub). The start-wiring test fails on the old code. The 370 existing task-start tests pass.
 - **2026-10-09: GitHub CI green** for `f9b9f2e5` (sandbox, W2, W6, W4, Next.js 15.5.27).
+- **2026-10-09: W5 "build a new project from zero". DONE.**
+  - Both new-project setups make a first commit (a README, or GitHub's `auto_init` files). So the old blank-repo bootstrap, which only runs on 0-commit repos and writes and commits straight into the folder without approval, never ran for them, and nothing told the team the project was new.
+  - The free scan now recognises a starter-only project (`isNewProject`: only README/LICENSE/.gitignore, or empty). Every agent's context says: "This is a NEW project: plan the structure and technology, create the project files, implement, add tests and a run command, document how to run it."
+  - The work goes through the normal pipeline: plan approval, its own worktree, tests in the sandbox, delivery approval (apply to folder or PR).
+  - The overview injection no longer depends on the file indexer, which can fail on an almost-empty folder.
+  - Tests: 5 new in `tests/test_w5_new_project.py`, all failing on the old code. One W1 expectation was updated on purpose (an empty folder now gets the "new project" guidance). The bootstrap, memory-hook and W1 tests pass (70).
