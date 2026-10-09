@@ -50,7 +50,18 @@ async def _code_sandbox_available() -> bool:
     settings = get_settings()
     if not settings.bash_sandbox_enabled:
         return True  # code runs unsandboxed (operator opt-out): it does run
-    return await asyncio.to_thread(_docker_available)
+    if not await asyncio.to_thread(_docker_available):
+        return False
+    # in the Docker version the task folders must also be shareable with the
+    # sandbox containers (app/policy/docker_host.py)
+    from app.policy.docker_host import SharedFolderError, engine_path
+
+    try:
+        for folder in (settings.worktrees_dir, settings.allowed_workspace_parent):
+            await asyncio.to_thread(engine_path, folder)
+    except SharedFolderError:
+        return False
+    return True
 
 
 @router.get("")

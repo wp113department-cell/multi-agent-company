@@ -3443,6 +3443,13 @@ class ChatAgent:
 
         if tool_name == "docker_restart":
             drst_name = str(inp["container"])
+            from app.policy.docker_host import platform_container_reason
+
+            drst_platform = await asyncio.to_thread(
+                platform_container_reason, drst_name
+            )
+            if drst_platform:
+                return f"[POLICY DENIED] {drst_platform}"
             drst_cmd = build_docker_restart_command(drst_name)
             # Restarting a container interrupts whatever it serves (the DB, the
             # queue, the app itself) — it ran with no prompt (and, in a probe,

@@ -189,6 +189,12 @@ def run_sandboxed(
     for key, value in (env or {}).items():
         env_flags.extend(["-e", f"{key}={value}"])
 
+    from app.policy.docker_host import SharedFolderError, mount_args
+
+    try:
+        workspace_mount = mount_args(cwd, "/workspace", "ro" if read_only else "rw")
+    except SharedFolderError as exc:
+        raise SandboxUnavailableError(str(exc)) from None
     docker_cmd = [
         "docker",
         "run",
@@ -205,8 +211,7 @@ def run_sandboxed(
         "--user",
         f"{os.getuid()}:{os.getgid()}",
         *env_flags,
-        "-v",
-        f"{cwd}:/workspace:{'ro' if read_only else 'rw'}",
+        *workspace_mount,
         "-w",
         "/workspace",
         resolved_image,

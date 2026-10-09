@@ -3377,6 +3377,11 @@ def make_docker_agent_handlers(repo_path: str) -> dict[str, Any]:
 
     def dk_docker_restart(inp: dict[str, Any]) -> str:
         dr_container = str(inp["container"])
+        from app.policy.docker_host import platform_container_reason
+
+        dr_platform = platform_container_reason(dr_container)
+        if dr_platform:
+            return f"[POLICY DENIED] {dr_platform}"
         r = subprocess.run(
             ["docker", "restart", dr_container],
             capture_output=True,
@@ -6254,6 +6259,11 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
 
     def docker_restart_h(inp: dict[str, Any]) -> str:
         drst_name = str(inp["container"])
+        from app.policy.docker_host import platform_container_reason
+
+        drst_platform = platform_container_reason(drst_name)
+        if drst_platform:
+            return f"[POLICY DENIED] {drst_platform}"
         try:
             r = subprocess.run(
                 ["docker", "restart", drst_name],

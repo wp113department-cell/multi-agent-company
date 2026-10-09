@@ -190,6 +190,13 @@ def _run_in_job_container(
         for key, value in env.items():
             if "\n" not in value:
                 env_file.write(f"{key}={value}\n")
+    from app.policy.docker_host import SharedFolderError, mount_args
+
+    try:
+        workdir_mount = mount_args(cwd, cwd, "rw")
+    except SharedFolderError as exc:
+        os.unlink(env_file.name)
+        return _done(126, "", f"[SANDBOX UNAVAILABLE] {exc}")
     masks: list[str] = []
     for hidden in (".venv",):
         if os.path.exists(os.path.join(cwd, hidden)):
@@ -218,8 +225,7 @@ def _run_in_job_container(
         f"{os.getuid()}:{os.getgid()}" if hasattr(os, "getuid") else "1000:1000",
         "--env-file",
         env_file.name,
-        "-v",
-        f"{cwd}:{cwd}:rw",
+        *workdir_mount,
         *masks,
         "-w",
         cwd,

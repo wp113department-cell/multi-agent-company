@@ -11,6 +11,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 RUN useradd --create-home --uid 10001 appuser
+# Docker CLI only (no engine): in the Docker version the backend starts the
+# code sandboxes on the computer's own Docker engine through the mounted
+# socket (docker-compose.yml). Without a reachable engine every sandbox
+# reports "unavailable" and never falls back to running code here.
+COPY --from=docker:27-cli /usr/local/bin/docker /usr/local/bin/docker
+# Task worktrees live on a named volume (docker-compose.yml) so sandbox
+# containers can mount them; an empty volume takes this folder's owner.
+RUN mkdir -p /tmp/gridiron-worktrees && chown appuser:appuser /tmp/gridiron-worktrees
 
 # Repositories live on a folder mounted from the user's computer
 # (/workspace); its files are owned by a different uid than appuser, which

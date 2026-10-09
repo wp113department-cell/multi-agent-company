@@ -52,25 +52,32 @@ services:
       db:
         condition: service_healthy
 
-  # NOTE — bash_sandbox_enabled (Settings, default True) routes the 3 fully-
-  # generic bash tools through app.policy.sandbox.run_sandboxed(), which
-  # requires a `docker` CLI + a reachable Docker daemon *inside this
-  # container*. Neither is provided here (backend/Dockerfile has no docker
-  # client, and this service has no docker.sock mount), so those tools will
-  # raise SandboxUnavailableError rather than silently running unsandboxed —
-  # that's the intended fail-closed behavior, not a bug. Two real ways to
-  # give the backend container working sandboxed execution:
-  #   1. Docker-outside-of-Docker: install the `docker` CLI in
-  #      backend/Dockerfile and mount `/var/run/docker.sock:/var/run/docker.sock`
-  #      here. Tradeoff: docker.sock access is equivalent to root on the host
-  #      — only do this if the host running `docker compose` is itself
-  #      disposable/sandboxed infrastructure, not a shared production host.
-  #   2. Point sandboxed execution at a remote/isolated Docker host (DOCKER_HOST)
-  #      dedicated to this purpose, so a compromised backend container never
-  #      has a path to the host it's running on.
-  # Until one of those is wired up, either accept that sandboxed bash tools
-  # are unavailable, or set BASH_SANDBOX_ENABLED=false as an explicit,
-  # operator-acknowledged opt-out (see Settings.bash_sandbox_enabled).
+  # Code sandbox (2026-10-09): the backend runs code, tests, the bash tools
+  # and the terminal ONLY inside throwaway sandbox containers, which it
+  # starts on this computer's own Docker engine through the mounted Docker
+  # socket below (Docker CLI in backend/Dockerfile). The sandboxes get no
+  # network, no secrets and only the one folder they work on; the backend
+  # translates its folder paths to the engine's paths
+  # (app/policy/docker_host.py). Agents may not exec into or restart the
+  # platform's own containers.
+  # Tradeoff: access to the Docker socket is equivalent to admin rights on
+  # this computer, so this file is for a single-user desktop install.
+  # docker-compose.prod.yml does NOT mount the socket. To run without it,
+  # remove the socket line; sandboxed tools then report "unavailable" and
+  # never fall back to running code inside the backend.
+  # DOCKER_SOCKET_GID: group that owns the socket (0 on Docker Desktop for
+  # Windows/macOS/Linux; on a plain Linux engine: `stat -c %g
+  # /var/run/docker.sock`).
+  # Builds the code-sandbox image (gridiron-bash-toolchain) on this computer's
+  # engine, then exits; the backend waits for it. Rebuilds are cached.
+  sandbox-image:
+    build:
+      context: ./backend
+      dockerfile: docker/bash-sandbox/Dockerfile
+    image: gridiron-bash-toolchain:latest
+    command: ["true"]
+    restart: "no"
+
   backend:
     build:
       context: ./backend
@@ -108,9 +115,15 @@ services:
       ALLOWED_WORKSPACE_PARENT: /workspace
       REPOS_DIR: /workspace/repos
       WORKSPACE_HOST_LABEL: ${WORKSPACE_HOST_LABEL:-./workspace}
+    group_add:
+      - "${DOCKER_SOCKET_GID:-0}"
     volumes:
       - ${WORKSPACE_DIR:-./workspace}:/workspace
+      - worktrees:/tmp/gridiron-worktrees
+      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
+      sandbox-image:
+        condition: service_completed_successfully
       db:
         condition: service_healthy
       migrate:
@@ -197,3 +210,4 @@ services:
 
 volumes:
   pgdata:
+  worktrees:

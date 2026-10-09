@@ -165,6 +165,7 @@ def _build_sandboxed_argv(command: str, cwd: str, container_name: str) -> list[s
     posture — still only `cwd` and nothing else of the host is exposed.
     """
     from app.config import get_settings
+    from app.policy.docker_host import mount_args
 
     settings = get_settings()
     return [
@@ -183,8 +184,7 @@ def _build_sandboxed_argv(command: str, cwd: str, container_name: str) -> list[s
         "/tmp:size=100m,mode=1777",
         "--user",
         f"{os.getuid()}:{os.getgid()}",
-        "-v",
-        f"{cwd}:{cwd}:rw",
+        *mount_args(cwd, cwd, "rw"),
         "-w",
         cwd,
         settings.bash_sandbox_image,
@@ -273,7 +273,12 @@ def spawn(
         import uuid
 
         container_name = f"gridiron-bg-{uuid.uuid4().hex[:12]}"
-        docker_argv = _build_sandboxed_argv(real_command, cwd, container_name)
+        from app.policy.docker_host import SharedFolderError
+
+        try:
+            docker_argv = _build_sandboxed_argv(real_command, cwd, container_name)
+        except SharedFolderError as exc:
+            return f"[SANDBOX UNAVAILABLE] {exc}"
         run_command = shlex.join(docker_argv)
     else:
         run_command = real_command

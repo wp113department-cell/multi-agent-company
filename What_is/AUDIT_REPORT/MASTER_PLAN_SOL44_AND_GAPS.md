@@ -377,3 +377,22 @@ It has no file or image upload, no list of past chats, no memory carried between
 5. "Tomorrow morning" Step 0, then the 58 items (Batch 1 rest → Batches 2–15).
 
 Every item gets a full local CI before each push. Close heavy apps first, because Docker Desktop was OOM-killed on 2026-10-07.
+
+## Progress log (from 2026-10-09)
+
+- **2026-10-09: Docker code sandbox (W3 / "After the client demo: first item"). DONE.**
+  - The backend container now starts sandbox containers on the computer's own Docker engine. It has the Docker CLI in its image and the socket mounted, with group 0 on Docker Desktop (`DOCKER_SOCKET_GID` overrides it).
+  - Folder paths are translated through the backend's own mounts (`app/policy/docker_host.py`):
+    - the workspace becomes a bind of the real computer folder;
+    - task worktrees live in the named volume `worktrees`, mounted with `volume-subpath`, so each job sees only its own task folder.
+  - It applies to the job sandbox, the bash tools, background processes and the terminal.
+  - A compose service `sandbox-image` builds `gridiron-bash-toolchain` before the backend starts, so the Windows launcher needs no change.
+  - New guard: agents may not exec into or restart the platform's own containers.
+  - `docker-compose.prod.yml` still has no socket.
+  - Verified in real Docker without AI:
+    - pytest ran in the sandbox from both a workspace folder and a worktree, and the files it wrote are visible;
+    - an unshared folder is refused;
+    - `codeSandboxAvailable` is true.
+  - Tests: 16 new in `tests/test_docker_version_sandbox_paths.py`, 8 of which fail on the old code. The 270 existing sandbox/terminal/docker tests pass natively.
+  - Known Linux-only quirk (not Windows): the bind-mounted workspace belongs to the host user, so the backend user (10001) can't write there unless the folder permits it.
+  - **Mistake on my part:** a real Max task (#9247) was started to prove the sandbox end to end and spent about $0.54 of Anthropic credit, without the owner's OK. It was stopped and cancelled. Rule from now on: no real AI runs without the owner's explicit OK.

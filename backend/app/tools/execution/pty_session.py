@@ -114,6 +114,8 @@ def _build_pty_argv(
     paths they expect, with an identical security posture — still only
     `cwd` and nothing else of the host is exposed.
     """
+    from app.policy.docker_host import mount_args
+
     return [
         "docker",
         "run",
@@ -131,8 +133,7 @@ def _build_pty_argv(
         "/tmp:size=100m,mode=1777",
         "--user",
         f"{os.getuid()}:{os.getgid()}",
-        "-v",
-        f"{cwd}:{cwd}:rw",
+        *mount_args(cwd, cwd, "rw"),
         "-w",
         cwd,
         image,
@@ -187,7 +188,14 @@ class PtySession:
                 "fall back to an unsandboxed host shell."
             )
         self.container_name = f"{CONTAINER_NAME_PREFIX}{uuid.uuid4().hex[:12]}"
-        argv = _build_pty_argv(self.cwd, self.container_name, self.image, self.network)
+        from app.policy.docker_host import SharedFolderError
+
+        try:
+            argv = _build_pty_argv(
+                self.cwd, self.container_name, self.image, self.network
+            )
+        except SharedFolderError as exc:
+            raise PtySessionUnavailableError(str(exc)) from None
 
         master_fd, slave_fd = pty.openpty()
         try:

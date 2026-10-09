@@ -623,6 +623,11 @@ def _docker_container_risk_reason(container: str) -> str | None:
     """
     import json as _json
 
+    from app.policy.docker_host import platform_container_reason
+
+    platform = platform_container_reason(container)
+    if platform:
+        return platform
     try:
         r = subprocess.run(
             ["docker", "inspect", container],
