@@ -479,4 +479,5 @@ Every item gets a full local CI before each push. Close heavy apps first, becaus
 - **2026-10-09: Step 0 leftovers (from 2026-10-06).**
   - Done: tests for the fast clone and folder browser (`tests/test_step0_clone_and_folder_browser.py`, 5 tests): shallow by default, full history on request, falls back to a full clone without shallow support, a non-empty folder gets `<folder>/<repo>`, and `GET /api/console/workspace/root`. `test_b7_auth_and_agent_authorization.py` and the repo-clone tests pass (196).
   - Done: the Docker check of the workspace mount, during today's sandbox work (real container: a folder in the workspace and a worktree, files visible both ways).
-  - Open: asking the owner how the Windows laptop run went (launcher, clone speed, folder browser).
+  - Done: the owner reports the Windows laptop run worked (launcher, cloning, folder browser).
+- **W8 (live GitHub checks) postponed by the owner (2026-10-09):** to run once a GitHub token is saved in Settings.
