@@ -532,3 +532,14 @@ Every item gets a full local CI before each push. Close heavy apps first, becaus
   - `browser_screenshot` wrote wherever the model's `path` said: Playwright `page.screenshot(path=...)`, so any file the backend can write. It was logged as "deliberately deferred" in the tool docs.
   - Screenshots now always land in `<tmp>/gridiron-screenshots/<session>/` (`browser_driver.screenshot_path`). Only a plain `.png`/`.jpg` file name may be chosen. Absolute paths, folders, `..`, odd session IDs and symlinked folders or files are refused before the browser is touched. The tool description and docs were updated.
   - Tests: 16 new in `tests/test_a10_screenshot_paths.py` (the file fails to import on the old code). The existing browser tests pass.
+- **2026-10-09: Batch 3, A06 browser network policy + A09 pinned fetches. DONE. Batch 3 complete.**
+  - **A09:** one check for every outbound fetch, `tool_security.resolve_checked`. It resolves IPv4+IPv6 once, refuses if any address is private, loopback, link-local/metadata, multicast, reserved, unspecified or CGNAT (judging ::ffff: and NAT64 by the embedded IPv4), and fails closed when DNS fails.
+    - urllib fetches use pinned connections that resolve, check and connect in one step (TLS still verifies the real hostname/SNI), with no environment proxies.
+    - curl fetches use `--resolve host:port:checked-ip --noproxy *`.
+    - Redirects are re-checked as before.
+  - **A06:** the browser used only a first-URL check (IPv4 only, DNS failure allowed).
+    - Now every page has a request-wide guard: each request (navigation, redirect, image, iframe, script fetch, form, click) is checked and then made by our own pinned connection (`pinned_request`, which never follows redirects) and handed to the browser with `route.fulfill`. The browser never resolves a name itself.
+    - WebSockets are checked before connecting.
+    - `ALLOW_INTERNAL_BROWSER_URLS=1` remains the explicit opt-out.
+  - **Proof:** an isolated fixture network. A "public" 127.0.0.1 server, an "internal" 127.0.0.2 server with a secret and a hit counter, and a controlled resolver (a rebinding name alternating public/internal, a dual-stack name with fd00::1, an unresolvable name). The internal server got 0 hits from the urllib, curl and pinned fetches and from the real Chromium (redirect, image, iframe, script fetch, click, rebinding, unresolvable).
+  - Tests: 22 in `tests/test_a06_a09_network_guard.py` (on the old code the shared helpers don't exist). The 643 existing SSRF/fetch/browser tests pass.

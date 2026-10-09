@@ -18,15 +18,16 @@ Fixes vs. previous version:
 
 from __future__ import annotations
 
-import ipaddress
+import logging
 import os
 import re
-import socket
 import tempfile
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 from urllib.parse import urlparse
+
+logger = logging.getLogger(__name__)
 
 _executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="playwright-driver")
 
@@ -46,29 +47,71 @@ def _allow_internal_urls() -> bool:
 
 
 def _check_url_safety(url: str) -> str | None:
-    """Return error string if URL should be blocked, else None."""
+    """Return error string if URL should be blocked, else None.
+
+    Sol A06 (2026-10-09): the same check as every server-side fetch
+    (app.agents.tool_security): IPv4 AND IPv6, every resolved address, and
+    an unresolvable host is blocked (it used to be allowed)."""
     if _allow_internal_urls():
         return None
-    parsed = urlparse(url)
-    if parsed.scheme not in ("http", "https"):
-        return f"Refusing to navigate to non-http(s) scheme: {parsed.scheme!r}"
-    host = parsed.hostname
-    if not host:
-        return "Could not parse hostname from URL"
+    from app.agents.tool_security import _ssrf_denial_reason
+
+    reason = _ssrf_denial_reason(url)
+    return f"Refusing to open {url!r}: {reason}" if reason else None
+
+
+def _guard_page(page: Any) -> None:
+    """Sol A06: every request the page makes — navigation, redirect, script,
+    image, iframe, form post, click — is checked, and allowed requests are
+    made over our own pinned connection (resolved, checked and connected in
+    one step) and handed back to the browser. The browser never resolves a
+    name itself, which closes DNS rebinding; redirects come back to the
+    browser as 3xx and are checked again as the next request. WebSockets are
+    checked before they connect. ALLOW_INTERNAL_BROWSER_URLS=1 turns the
+    guard off (explicit operator opt-out)."""
+    if _allow_internal_urls():
+        return
+    page.route(re.compile(r".*"), _route_request)
+    page.route_web_socket(re.compile(r".*"), _route_web_socket)
+
+
+def _route_request(route: Any) -> None:
+    from app.agents.tool_security import pinned_request
+
+    req = route.request
+    url = str(req.url)
+    scheme = urlparse(url).scheme
+    if scheme in ("data", "blob", "about"):
+        route.continue_()
+        return
     try:
-        resolved = socket.gethostbyname(host)
-        ip = ipaddress.ip_address(resolved)
-    except (socket.gaierror, ValueError):
-        return None
-    if (
-        ip.is_private
-        or ip.is_loopback
-        or ip.is_link_local
-        or ip.is_reserved
-        or ip.is_multicast
-    ):
-        return f"Refusing to navigate to internal/private address: {host} -> {ip}"
-    return None
+        status, headers, body = pinned_request(
+            str(req.method),
+            url,
+            headers=dict(req.all_headers()),
+            body=req.post_data_buffer,
+        )
+    except PermissionError as exc:
+        logger.warning("browser request blocked: %s (%s)", url, exc)
+        route.abort("blockedbyclient")
+        return
+    except Exception as exc:
+        logger.info("browser request failed: %s (%s)", url, exc)
+        route.abort("failed")
+        return
+    merged: dict[str, str] = {}
+    for key, value in headers:
+        k = key.lower()
+        merged[k] = f"{merged[k]}\n{value}" if k in merged else value
+    route.fulfill(status=status, headers=merged, body=body)
+
+
+def _route_web_socket(ws: Any) -> None:
+    if _check_url_safety(str(ws.url).replace("ws", "http", 1)):
+        logger.warning("browser websocket blocked: %s", ws.url)
+        ws.close()
+        return
+    ws.connect_to_server()
 
 
 def _ensure_browser() -> Any:
@@ -103,6 +146,7 @@ def _get_page(session_id: str) -> Any:
             pass
         _pages.pop(oldest_id, None)
     page = browser.new_page()
+    _guard_page(page)
     _pages[session_id] = page
     return page
 

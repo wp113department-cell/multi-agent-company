@@ -42,9 +42,11 @@ legitimate redirect to a real external site (`httpbin.org` →
 
 from __future__ import annotations
 
+import http.client
 import ipaddress
 import os
 import re
+import socket
 import subprocess
 import tempfile
 import urllib.error
@@ -65,20 +67,71 @@ def _is_dangerous_command(command: str) -> bool:
 _NAT64_WELL_KNOWN = ipaddress.ip_network("64:ff9b::/96")
 
 
-def _ssrf_denial_reason(url: str) -> str | None:
-    """SSRF guard for every agent-controlled outbound-fetch tool (audit_v1.md
-    4.5/4.8, finding "fetch_url ... is SSRF-capable with no allowlist").
+def blocked_address(raw_addr: str) -> bool:
+    """True for an address an agent-driven request must never reach:
+    private, loopback, link-local (incl. cloud metadata), multicast,
+    reserved, unspecified — judged on the embedded IPv4 for ::ffff:a.b.c.d
+    and the NAT64 prefix (2026-09-30: on a NAT64 network every public site
+    resolves into 64:ff9b::/96). Unparseable means blocked."""
+    try:
+        ip: Any = ipaddress.ip_address(raw_addr.split("%", 1)[0])
+    except ValueError:
+        return True
+    if isinstance(ip, ipaddress.IPv6Address):
+        if ip.ipv4_mapped is not None:
+            ip = ip.ipv4_mapped
+        elif ip in _NAT64_WELL_KNOWN:
+            ip = ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF)
+    return bool(
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_multicast
+        or ip.is_reserved
+        or ip.is_unspecified
+        or ip in _CGNAT
+    )
 
-    Rejects non-http(s) schemes and resolves the hostname, denying if ANY
-    resolved address falls in a private/loopback/link-local/reserved range
-    (RFC1918, 127.0.0.0/8, 169.254.0.0/16 incl. the 169.254.169.254 cloud
-    metadata endpoint, ::1, fc00::/7, etc.) — checking the resolved IP, not
-    just the hostname string, so a DNS-rebinding or bare-IP URL is caught
-    the same way a friendly hostname would be. Returns a denial reason, or
-    None if the URL is safe to fetch.
-    """
-    import ipaddress
+
+_CGNAT = ipaddress.ip_network("100.64.0.0/10")
+
+
+def resolve_checked(
+    hostname: str, port: int | None = None
+) -> tuple[str | None, str | None]:
+    """Resolve `hostname` ONCE (IPv4 and IPv6) and check every address.
+
+    Returns (address to connect to, None) — or (None, reason) when the name
+    does not resolve (fail closed) or ANY address is blocked. Sol A09
+    (2026-10-09): callers must connect to the returned address itself
+    (pinned), never resolve the name again — a second lookup is exactly the
+    DNS-rebinding window (safe answer for the check, internal for the
+    connect)."""
     import socket
+
+    try:
+        infos = socket.getaddrinfo(hostname, port, type=socket.SOCK_STREAM)
+    except Exception as e:
+        return None, f"Could not resolve host {hostname!r}: {e}"
+    if not infos:
+        return None, f"Could not resolve host {hostname!r}"
+    for info in infos:
+        raw_addr = str(info[4][0])
+        if blocked_address(raw_addr):
+            return None, (
+                f"URL host {hostname!r} resolves to {raw_addr!r}, which is a "
+                "private/loopback/link-local/reserved address — refusing to "
+                "fetch (SSRF protection)"
+            )
+    return str(infos[0][4][0]), None
+
+
+def _ssrf_denial_reason(url: str) -> str | None:
+    """SSRF guard for every agent-controlled outbound-fetch tool: only
+    http(s), and the host must resolve with no blocked address (see
+    resolve_checked). Returns a denial reason, or None if the URL is safe
+    to fetch. Connections must then be pinned (resolve_checked's address,
+    or the pinned opener/curl below)."""
     from urllib.parse import urlparse
 
     try:
@@ -92,45 +145,106 @@ def _ssrf_denial_reason(url: str) -> str | None:
     hostname = parsed.hostname
     if not hostname:
         return f"URL has no hostname: {url!r}"
+    return resolve_checked(hostname, parsed.port)[1]
 
+
+class _PinnedHTTPConnection(http.client.HTTPConnection):
+    """Sol A09: connects to the address resolve_checked approved, so the
+    name is never looked up a second time."""
+
+    def connect(self) -> None:
+        ip, reason = resolve_checked(self.host, self.port)
+        if reason or ip is None:
+            raise OSError(f"Blocked: {reason}")
+        self.sock = socket.create_connection(
+            (ip, self.port), self.timeout, getattr(self, "source_address", None)
+        )
+
+
+class _PinnedHTTPSConnection(http.client.HTTPSConnection):
+    """Same for HTTPS; TLS still verifies the certificate against the real
+    hostname (server_hostname = SNI and certificate name)."""
+
+    def connect(self) -> None:
+        ip, reason = resolve_checked(self.host, self.port)
+        if reason or ip is None:
+            raise OSError(f"Blocked: {reason}")
+        import ssl
+
+        sock = socket.create_connection(
+            (ip, self.port), self.timeout, getattr(self, "source_address", None)
+        )
+        context = getattr(self, "_context", None) or ssl.create_default_context()
+        self.sock = context.wrap_socket(sock, server_hostname=self.host)
+
+
+_HOP_BY_HOP = {
+    "connection",
+    "keep-alive",
+    "proxy-connection",
+    "transfer-encoding",
+    "upgrade",
+    "te",
+    "trailer",
+    "content-length",
+    "host",
+}
+
+
+def pinned_request(
+    method: str,
+    url: str,
+    headers: dict[str, str] | None = None,
+    body: bytes | None = None,
+    timeout: float = 30,
+    max_bytes: int = 25 * 1024 * 1024,
+) -> tuple[int, list[tuple[str, str]], bytes]:
+    """One HTTP(S) request over a pinned connection (Sol A06/A09): the
+    address is resolved, checked and connected to in one step, and
+    redirects are NOT followed — the caller sees the 3xx and checks the next
+    URL like any other. Raises PermissionError for a blocked URL."""
+    from urllib.parse import urlsplit
+
+    parts = urlsplit(url)
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        raise PermissionError(f"URL scheme {parts.scheme!r} is not allowed")
+    _ip, reason = resolve_checked(parts.hostname, parts.port)
+    if reason:
+        raise PermissionError(reason)
+    conn_cls = (
+        _PinnedHTTPSConnection if parts.scheme == "https" else _PinnedHTTPConnection
+    )
+    conn = conn_cls(parts.hostname, parts.port, timeout=timeout)
+    path = (parts.path or "/") + (f"?{parts.query}" if parts.query else "")
+    send = {
+        k: v
+        for k, v in (headers or {}).items()
+        if k.lower() not in _HOP_BY_HOP and k.lower() != "accept-encoding"
+    }
     try:
-        addr_infos = socket.getaddrinfo(hostname, None)
-    except Exception as e:
-        return f"Could not resolve host {hostname!r}: {e}"
+        conn.request(method, path, body=body, headers=send)
+        resp = conn.getresponse()
+        data = resp.read(max_bytes + 1)
+        if len(data) > max_bytes:
+            raise PermissionError("response larger than the allowed size")
+        out_headers = [
+            (k, v)
+            for k, v in resp.getheaders()
+            if k.lower() not in _HOP_BY_HOP and k.lower() != "content-encoding"
+        ]
+        return resp.status, out_headers, data
+    finally:
+        conn.close()
 
-    if not addr_infos:
-        return f"Could not resolve host {hostname!r}"
 
-    for info in addr_infos:
-        raw_addr = info[4][0]
-        try:
-            ip = ipaddress.ip_address(raw_addr)
-        except ValueError:
-            return f"Host {hostname!r} resolved to an unparseable address {raw_addr!r}"
-        # 2026-09-30: on a NAT64 network (IPv6-only hosts, some ISPs/clouds)
-        # every public IPv4 site resolves to 64:ff9b::/96 + the IPv4 address,
-        # which ipaddress classes as reserved — so ALL external fetches were
-        # refused. Judge the embedded IPv4 instead: 64:ff9b::a9fe:a9fe is
-        # still 169.254.169.254 and is still denied. Same for ::ffff:a.b.c.d.
-        if isinstance(ip, ipaddress.IPv6Address):
-            if ip.ipv4_mapped is not None:
-                ip = ip.ipv4_mapped
-            elif ip in _NAT64_WELL_KNOWN:
-                ip = ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF)
-        if (
-            ip.is_private
-            or ip.is_loopback
-            or ip.is_link_local
-            or ip.is_multicast
-            or ip.is_reserved
-            or ip.is_unspecified
-        ):
-            return (
-                f"URL host {hostname!r} resolves to {raw_addr!r}, which is a "
-                "private/loopback/link-local/reserved address — refusing to "
-                "fetch (SSRF protection)"
-            )
-    return None
+class _PinnedHTTPHandler(urllib.request.HTTPHandler):
+    def http_open(self, req: Any) -> Any:
+        return self.do_open(_PinnedHTTPConnection, req)
+
+
+class _PinnedHTTPSHandler(urllib.request.HTTPSHandler):
+    def https_open(self, req: Any) -> Any:
+        return self.do_open(_PinnedHTTPSConnection, req)
 
 
 class _SsrfSafeRedirectHandler(urllib.request.HTTPRedirectHandler):
@@ -156,7 +270,14 @@ def _ssrf_safe_opener() -> urllib.request.OpenerDirector:
     additionally re-validates every subsequent redirect hop the same
     way, so a malicious/compromised server the initial URL legitimately
     points to cannot use a redirect to reach a private/internal target."""
-    return urllib.request.build_opener(_SsrfSafeRedirectHandler())
+    # Sol A09: pinned connections; environment proxies are not used (a
+    # proxy would do its own, unchecked name resolution)
+    return urllib.request.build_opener(
+        urllib.request.ProxyHandler({}),
+        _PinnedHTTPHandler(),
+        _PinnedHTTPSHandler(),
+        _SsrfSafeRedirectHandler(),
+    )
 
 
 def _ssrf_safe_curl_fetch(
@@ -198,6 +319,16 @@ def _ssrf_safe_curl_fetch(
         reason = _ssrf_denial_reason(current_url)
         if reason:
             return "", reason
+        # Sol A09: curl connects to the address that was just checked
+        # (--resolve), never resolving the name again; no proxies.
+        from urllib.parse import urlparse as _urlparse
+
+        _parsed = _urlparse(current_url)
+        _port = _parsed.port or (443 if _parsed.scheme == "https" else 80)
+        _ip, reason = resolve_checked(_parsed.hostname or "", _port)
+        if reason or _ip is None:
+            return "", reason or "Could not resolve host"
+        _pin = f"[{_ip}]" if ":" in _ip else _ip
 
         fd, body_path = tempfile.mkstemp()
         os.close(fd)
@@ -214,6 +345,10 @@ def _ssrf_safe_curl_fetch(
                     str(timeout),
                     "--user-agent",
                     "Gridiron-Agent/1.0",
+                    "--noproxy",
+                    "*",
+                    "--resolve",
+                    f"{_parsed.hostname}:{_port}:{_pin}",
                     current_url,
                 ],
                 capture_output=True,
