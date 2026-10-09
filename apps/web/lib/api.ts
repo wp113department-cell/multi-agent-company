@@ -102,7 +102,10 @@ export interface PipelineStateClient {
 export interface TaskPr {
   branchName: string | null;
   prUrl: string | null;
-  prStatus: "none" | "pending" | "pushed" | "failed";
+  prStatus: "none" | "pending" | "pushed" | "applied" | "failed";
+  /** Where approved work goes: a GitHub pull request, or the project's own
+   * folder (a project with no GitHub link). */
+  delivery?: "github" | "folder" | null;
 }
 
 export interface ArtifactRecord {

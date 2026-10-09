@@ -500,7 +500,8 @@ async def update_task_branch_name(
 async def update_task_pr(
     db: AsyncSession, task_id: int, pr_url: str | None, pr_status: str
 ) -> None:
-    """Day 14 — Git Push Workflow. pr_status: none|pending|pushed|failed."""
+    """Day 14 — Git Push Workflow. pr_status: none|pending|pushed|failed,
+    or "applied" (W2: a local-only project's work merged into its folder)."""
     await db.execute(
         update(DevTask)
         .where(DevTask.id == task_id)

@@ -163,6 +163,42 @@ async def _dispatch_decision(
             )
 
 
+async def _apply_to_local_folder(db: Any, task: Any) -> None:
+    """W2 (2026-10-09): delivery for a project that lives only on this
+    computer. Merges agent/task-{id} into the folder's current branch
+    (app/tools/git_local_apply.py: refuses with uncommitted changes, undoes
+    a conflicting merge). Success completes the task and removes its
+    worktree, exactly like a successful push; a refusal keeps both, with
+    pr_status "failed" and the reason in the task log, so "Try again"
+    works once the user has fixed it."""
+    from app.db.repository import append_log, transition_task, update_task_pr
+    from app.tools.git_local_apply import apply_task_branch
+
+    result = await apply_task_branch(task.id, task.repo.local_path, task.title)
+    await update_task_pr(db, task.id, None, "applied" if result.applied else "failed")
+    await append_log(db, task.id, "pipeline", result.message)
+    if not result.applied:
+        return
+    try:
+        await transition_task(db, task.id, "completed")
+    except Exception:
+        logger.debug(
+            "Could not auto-complete task %d after apply (non-fatal)",
+            task.id,
+            exc_info=True,
+        )
+    try:
+        from app.repo_tools.worktree import remove_worktree
+
+        await asyncio.to_thread(remove_worktree, task.id, task.repo.local_path)
+    except Exception:
+        logger.debug(
+            "Could not remove worktree for task %d after apply (non-fatal)",
+            task.id,
+            exc_info=True,
+        )
+
+
 async def dispatch_git_push_decision(task_id: int, approved: bool) -> None:
     """Day 14 — Git Push Workflow. On reject: mark pr_status="failed" (no
     push attempted). On approve: push the already-committed agent/task-{id}
@@ -182,6 +218,10 @@ async def dispatch_git_push_decision(task_id: int, approved: bool) -> None:
 
         if not approved:
             await update_task_pr(db, task_id, None, "failed")
+            return
+
+        if task.repo is not None and not task.repo.github_url and task.repo.local_path:
+            await _apply_to_local_folder(db, task)
             return
 
         if task.repo is None or not task.repo.github_url:

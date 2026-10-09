@@ -491,20 +491,32 @@ async def _record_git_push_approval(
         repo_row = (
             await db.execute(select(Repo).where(Repo.local_path == effective_repo))
         ).scalar_one_or_none()
-        if repo_row is not None and repo_row.github_url:
+        # W2 (2026-10-09): a project that lives only on this computer gets
+        # the same delivery decision; approving it applies the branch to the
+        # user's own folder instead of pushing (dispatch_git_push_decision).
+        if repo_row is not None and (repo_row.github_url or repo_row.local_path):
+            to_github = bool(repo_row.github_url)
+            details: dict[str, Any] = {
+                "branch": branch_name,
+                "files_changed": list(dict.fromkeys(all_files))[:20],
+                "subtask_count": subtask_count,
+                "diff_preview": diff[:500],
+            }
+            if not to_github:
+                details["delivery"] = "folder"
+                details["folder"] = repo_row.local_path
             await arequest_human_input(
                 kind="git_push",
-                details={
-                    "branch": branch_name,
-                    "files_changed": list(dict.fromkeys(all_files))[:20],
-                    "subtask_count": subtask_count,
-                    "diff_preview": diff[:500],
-                },
+                details=details,
                 agent_name=agent_name,
                 thread_id=f"task-{task_id}-push",
                 task_id=task_id,
                 blocking=True,
-                description=f"Git push review for task {task_id} (branch {branch_name})",
+                description=(
+                    f"Git push review for task {task_id} (branch {branch_name})"
+                    if to_github
+                    else f"Apply task {task_id} to your folder (branch {branch_name})"
+                ),
             )
             # pr_status is documented none|pending|pushed|failed, but nothing
             # ever set "pending" (production audit 2026-09-29).
@@ -520,7 +532,7 @@ async def _record_git_push_approval(
                 pass
         else:
             logger.debug(
-                "No GitHub-cloned repo found for task %d (path=%s) — skipping push approval",
+                "No repo found for task %d (path=%s) — skipping delivery approval",
                 task_id,
                 effective_repo,
             )

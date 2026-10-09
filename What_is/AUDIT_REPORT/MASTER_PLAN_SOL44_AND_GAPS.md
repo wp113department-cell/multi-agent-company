@@ -396,3 +396,14 @@ Every item gets a full local CI before each push. Close heavy apps first, becaus
   - Tests: 16 new in `tests/test_docker_version_sandbox_paths.py`, 8 of which fail on the old code. The 270 existing sandbox/terminal/docker tests pass natively.
   - Known Linux-only quirk (not Windows): the bind-mounted workspace belongs to the host user, so the backend user (10001) can't write there unless the folder permits it.
   - **Mistake on my part:** a real Max task (#9247) was started to prove the sandbox end to end and spent about $0.54 of Anthropic credit, without the owner's OK. It was stopped and cancelled. Rule from now on: no real AI runs without the owner's explicit OK.
+- **2026-10-09: W2 "Apply to my folder". DONE.**
+  - Projects with no GitHub link now get the same delivery decision, worded "Apply the finished work to your folder". Before, no decision was created and a retry set `pr_status="failed"`.
+  - Approving it merges `agent/task-{id}` into the folder's current branch with a `--no-ff` commit, "Apply task #N: title".
+  - The user's work is never overwritten:
+    - uncommitted changes are refused and nothing is touched;
+    - a conflict is undone with `merge --abort`, listing the conflicting files;
+    - a detached HEAD is refused.
+  - Repository hooks and fsmonitor are disabled for the merge, so no repository code runs in the backend.
+  - On success: `pr_status="applied"`, the task is completed and the worktree removed. On refusal: `failed`, with the reason in the task log, and "Try again" works once it's fixed.
+  - The task page shows "Delivery to your folder" with plain-word statuses. `/api/tasks/{id}/pr` returns `delivery: github|folder`.
+  - Tests: 10 new in `tests/test_w2_apply_to_my_folder.py` (real git repos). The 3 wiring tests fail on the old code. The existing push, launch-manager, demo and audit04 tests still pass (76 in total).

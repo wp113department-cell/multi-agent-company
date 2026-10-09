@@ -85,6 +85,15 @@ function AgentRatingWidget({ agentName, taskId }: { agentName: string; taskId: s
   );
 }
 
+// Delivery state in plain words (W2: "applied" = merged into the folder).
+const PR_STATUS_LABELS: Record<string, string> = {
+  none: "not sent yet",
+  pending: "waiting for your approval",
+  pushed: "sent to GitHub",
+  applied: "applied to your folder",
+  failed: "failed",
+};
+
 export default function TaskDetailPage() {
   const params = useParams<{ id: string }>();
   const qc = useQueryClient();
@@ -478,13 +487,15 @@ export default function TaskDetailPage() {
       {/* Git Push / Pull Request (Day 14) */}
       {taskPr && taskPr.branchName && (
         <div className="rounded-lg border border-slate-200 bg-white p-5">
-          <h2 className="mb-2 text-sm font-semibold text-slate-700">Git branch &amp; pull request</h2>
+          <h2 className="mb-2 text-sm font-semibold text-slate-700">
+            {taskPr.delivery === "folder" ? "Delivery to your folder" : "Git branch & pull request"}
+          </h2>
           <p className="mb-2 font-mono text-xs text-slate-700">{taskPr.branchName}</p>
           <div className="flex items-center gap-3">
             <span
               className={
                 "rounded px-2 py-0.5 text-xs font-medium " +
-                (taskPr.prStatus === "pushed"
+                (taskPr.prStatus === "pushed" || taskPr.prStatus === "applied"
                   ? "bg-green-100 text-green-800"
                   : taskPr.prStatus === "failed"
                   ? "bg-red-100 text-red-800"
@@ -493,7 +504,7 @@ export default function TaskDetailPage() {
                   : "bg-slate-100 text-slate-600")
               }
             >
-              {taskPr.prStatus}
+              {PR_STATUS_LABELS[taskPr.prStatus] ?? taskPr.prStatus}
             </span>
             {taskPr.prUrl && (
               <a
@@ -512,7 +523,11 @@ export default function TaskDetailPage() {
                 disabled={retryPushMutation.isPending}
                 className="rounded border border-slate-300 px-2 py-0.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
               >
-                {retryPushMutation.isPending ? "Retrying…" : "Retry push"}
+                {retryPushMutation.isPending
+                  ? "Retrying…"
+                  : taskPr.delivery === "folder"
+                    ? "Try again"
+                    : "Retry push"}
               </button>
             )}
           </div>

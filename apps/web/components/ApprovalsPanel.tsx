@@ -124,7 +124,9 @@ function ApprovalCard({
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <span className="text-xs font-semibold uppercase tracking-wide text-orange-700 dark:text-orange-300">
-              {ACTION_LABELS[approval.action] ?? approval.action.replace(/_/g, " ")}
+              {approval.action === "git_push" && approval.details.delivery === "folder"
+                ? "Apply the finished work to your folder"
+                : (ACTION_LABELS[approval.action] ?? approval.action.replace(/_/g, " "))}
             </span>
             {approval.agentName && (
               <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500 dark:bg-slate-800 dark:text-slate-400">

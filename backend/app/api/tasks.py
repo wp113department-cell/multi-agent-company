@@ -1164,10 +1164,18 @@ async def get_pr(
     task = await get_task(db, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+    repo = task.repo
     return {
         "branchName": task.branch_name,
         "prUrl": task.pr_url,
         "prStatus": task.pr_status,
+        # W2: where approved work goes — a pull request on GitHub, or the
+        # project's own folder when it has no GitHub link
+        "delivery": (
+            "github"
+            if repo is not None and repo.github_url
+            else "folder" if repo is not None and repo.local_path else None
+        ),
     }
 
 
