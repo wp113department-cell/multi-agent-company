@@ -368,7 +368,7 @@ async def _find_near_duplicate(
               AND embedding IS NOT NULL
               AND vector_norm(embedding) > 0
               AND archived = false
-              AND (CAST(:repo_id AS BIGINT) IS NULL OR repo_id IS NULL OR repo_id = CAST(:repo_id AS BIGINT))
+              AND (CAST(:repo_id AS BIGINT) IS NULL OR is_global OR repo_id = CAST(:repo_id AS BIGINT))
             ORDER BY embedding <=> CAST(:vec AS vector)
             LIMIT 1
         """)
@@ -653,7 +653,7 @@ async def query_similar_tasks(
                   -- bugs, preferences etc. have their own queries and were
                   -- being injected twice, once as "similar past tasks".
                   AND category = 'task'
-                  AND (CAST(:repo_id AS BIGINT) IS NULL OR repo_id IS NULL OR repo_id = CAST(:repo_id AS BIGINT))
+                  AND (CAST(:repo_id AS BIGINT) IS NULL OR is_global OR repo_id = CAST(:repo_id AS BIGINT))
                 ORDER BY embedding <=> CAST(:vec AS vector)
                 LIMIT :candidate_limit
             )
@@ -1052,7 +1052,7 @@ async def query_architecture_notes(
                   AND embedding IS NOT NULL
                   AND vector_norm(embedding) > 0
                   AND archived = false
-                  AND (CAST(:repo_id AS BIGINT) IS NULL OR repo_id IS NULL OR repo_id = CAST(:repo_id AS BIGINT))
+                  AND (CAST(:repo_id AS BIGINT) IS NULL OR is_global OR repo_id = CAST(:repo_id AS BIGINT))
                 ORDER BY embedding <=> CAST(:vec AS vector)
                 LIMIT :candidate_limit
             )
@@ -1211,7 +1211,7 @@ async def query_failures(
                   AND embedding IS NOT NULL
                   AND vector_norm(embedding) > 0
                   AND archived = false
-                  AND (CAST(:repo_id AS BIGINT) IS NULL OR repo_id IS NULL OR repo_id = CAST(:repo_id AS BIGINT))
+                  AND (CAST(:repo_id AS BIGINT) IS NULL OR is_global OR repo_id = CAST(:repo_id AS BIGINT))
                 ORDER BY embedding <=> CAST(:vec AS vector)
                 LIMIT :candidate_limit
             )
@@ -1263,6 +1263,7 @@ async def embed_learning_signal(
     outcome_summary: str,
     db: AsyncSession,
     repo_id: int | None = None,
+    is_global: bool = False,
 ) -> MemoryEmbedding | None:
     """Store a fleet self-improvement learning signal — Doc 11's 4th memory
     category ("which prompts/tool combos correlated with retries/failures"),
@@ -1305,6 +1306,8 @@ async def embed_learning_signal(
         row = MemoryEmbedding(
             task_id=f"fleet-{agent_name}",
             repo_id=repo_id,
+            # Sol A08: shared across projects only when explicitly approved
+            is_global=is_global,
             outcome="learning",
             category="learning",
             description=description[:500],
@@ -1407,7 +1410,7 @@ async def query_learning_signals(
                   AND embedding IS NOT NULL
                   AND vector_norm(embedding) > 0
                   AND archived = false
-                  AND (CAST(:repo_id AS BIGINT) IS NULL OR repo_id IS NULL OR repo_id = CAST(:repo_id AS BIGINT))
+                  AND (CAST(:repo_id AS BIGINT) IS NULL OR is_global OR repo_id = CAST(:repo_id AS BIGINT))
                 ORDER BY embedding <=> CAST(:vec AS vector)
                 LIMIT :candidate_limit
             )
@@ -1594,7 +1597,7 @@ async def query_procedures(
                   AND embedding IS NOT NULL
                   AND vector_norm(embedding) > 0
                   AND archived = false
-                  AND (CAST(:repo_id AS BIGINT) IS NULL OR repo_id IS NULL OR repo_id = CAST(:repo_id AS BIGINT))
+                  AND (CAST(:repo_id AS BIGINT) IS NULL OR is_global OR repo_id = CAST(:repo_id AS BIGINT))
                 ORDER BY embedding <=> CAST(:vec AS vector)
                 LIMIT :candidate_limit
             )
@@ -1801,7 +1804,7 @@ async def query_preferences(
                   AND embedding IS NOT NULL
                   AND vector_norm(embedding) > 0
                   AND archived = false
-                  AND (CAST(:repo_id AS BIGINT) IS NULL OR repo_id IS NULL OR repo_id = CAST(:repo_id AS BIGINT))
+                  AND (CAST(:repo_id AS BIGINT) IS NULL OR is_global OR repo_id = CAST(:repo_id AS BIGINT))
                 ORDER BY embedding <=> CAST(:vec AS vector)
                 LIMIT :candidate_limit
             )
@@ -2131,7 +2134,7 @@ async def query_bugs(
                   AND embedding IS NOT NULL
                   AND vector_norm(embedding) > 0
                   AND archived = false
-                  AND (CAST(:repo_id AS BIGINT) IS NULL OR repo_id IS NULL OR repo_id = CAST(:repo_id AS BIGINT))
+                  AND (CAST(:repo_id AS BIGINT) IS NULL OR is_global OR repo_id = CAST(:repo_id AS BIGINT))
                 ORDER BY embedding <=> CAST(:vec AS vector)
                 LIMIT :candidate_limit
             )
@@ -2207,7 +2210,7 @@ async def query_prompt_changes(
                   AND embedding IS NOT NULL
                   AND vector_norm(embedding) > 0
                   AND archived = false
-                  AND (CAST(:repo_id AS BIGINT) IS NULL OR repo_id IS NULL OR repo_id = CAST(:repo_id AS BIGINT))
+                  AND (CAST(:repo_id AS BIGINT) IS NULL OR is_global OR repo_id = CAST(:repo_id AS BIGINT))
                 ORDER BY embedding <=> CAST(:vec AS vector)
                 LIMIT :candidate_limit
             )

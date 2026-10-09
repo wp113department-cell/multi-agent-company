@@ -122,6 +122,8 @@ async def test_promote_triggers_sync_to_memory_embeddings_with_real_content() ->
     fake_draft.state = "draft"
     fake_draft.supersedes_id = None
     fake_draft.created_at = None
+    fake_draft.repo_id = None
+    fake_draft.is_global = False
 
     with (
         patch(
@@ -136,6 +138,8 @@ async def test_promote_triggers_sync_to_memory_embeddings_with_real_content() ->
         result = await store._promote("lesson-abc", agent_name="knowledge_curator")
 
     assert result.state == "published"
+    # Sol A08: a human-promoted lesson with no project becomes explicitly
+    # global (repo None, is_global True) — the approval is the decision
     mock_sync.assert_awaited_once_with(
-        "td_sync_topic", "a brand new lesson", "knowledge_curator"
+        "td_sync_topic", "a brand new lesson", "knowledge_curator", None, True
     )

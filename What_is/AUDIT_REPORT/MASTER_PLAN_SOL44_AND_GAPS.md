@@ -589,3 +589,13 @@ Every item gets a full local CI before each push. Close heavy apps first, becaus
     - keeps the append-only audit log (legal-obligation basis, stated in the response).
   - The response lists `removed`, `pseudonymized` (with counts) and `retained`.
   - Tests: 2 in `tests/test_a14_privacy_inventory.py`, failing on the old code. 112 existing privacy-related tests pass.
+- **2026-10-09: Batch 6, A08 memory scope. DONE. Batch 6 complete (A12, A07, A14, A08).**
+  - **The rule:** what is learned in a project stays in that project. Knowledge is shared fleet-wide only when a human approved it.
+  - **Database memory** (migration 069, `memory_embeddings.is_global`):
+    - All 9 memory queries changed from "no project = visible to every project" to "this project's rows + `is_global` rows".
+    - Unscoped rows that are not marked global are no longer shown to projects. Existing rows start not-global (conservative).
+    - Writers set `is_global` only for human-approved knowledge: the Fleet dashboard apply, and a human-promoted versioned lesson with no project.
+  - **Versioned lessons:** the project is carried through publish, similar-lesson matching, the promotion sweep, proactive consolidation (now per project) and the sync into memory. A lesson is never matched or merged with another project's. Unscoped published lessons form the human-approved fleet-wide pool.
+  - **In-process LessonStore:** each lesson records its project folder (`repo_key`, persisted via migration 069). Retrieval, dedup and compaction stay within one project.
+  - **The old Cluster O design changed:** "unscoped = shared fallback" / "learning signals always global". 6 tests that encoded it were updated to the new rule (global must be explicit), and the Fleet dashboard and versioned-sync tests now assert the explicit flag.
+  - Tests: 3 in `tests/test_a08_memory_scope.py`, all failing on the old code: project A's fact is not shown to project B through the database, versioned lessons or LessonStore. 398 memory/lesson/fleet tests pass.

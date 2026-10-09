@@ -45,7 +45,7 @@ from unittest.mock import patch
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import delete
+from sqlalchemy import delete, update
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -125,6 +125,13 @@ async def test_search_memory_api_isolates_two_real_repos_plus_global(
                 db=session,
                 # repo_id intentionally omitted — global/legacy row
             )
+            # Sol A08 (2026-10-09): shared knowledge is explicitly marked global
+            await session.execute(
+                update(MemoryEmbedding)
+                .where(MemoryEmbedding.task_id == task_legacy)
+                .values(is_global=True)
+            )
+            await session.commit()
 
             # 1. repo_id=A: sees A + global, never B
             results_a = await search_memory(

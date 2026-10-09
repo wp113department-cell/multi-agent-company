@@ -43,7 +43,7 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
-from sqlalchemy import delete
+from sqlalchemy import delete, update
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -490,8 +490,9 @@ async def test_learning_signal_stays_global_across_two_real_repos(
                 description=marker,
                 outcome_summary="a tool timeout pattern, not about any repo's code",
                 db=session,
-                # repo_id intentionally omitted — matches the real
-                # record_learning tool / fleet_dashboard.py call sites.
+                # Sol A08 (2026-10-09): global only when explicitly marked —
+                # as the human-approved fleet_dashboard.py apply now does
+                is_global=True,
             )
 
             results_from_a = await query_learning_signals(
@@ -575,6 +576,13 @@ async def test_mixed_workload_scoped_a_scoped_b_and_global_together(
                 db=session,
                 # repo_id omitted — global/legacy category
             )
+            # Sol A08 (2026-10-09): shared knowledge is explicitly marked global
+            await session.execute(
+                update(MemoryEmbedding)
+                .where(MemoryEmbedding.task_id == task_legacy)
+                .values(is_global=True)
+            )
+            await session.commit()
 
             results_for_a = await query_similar_tasks(
                 "irrelevant", session, top_k=1000, repo_id=repo_a

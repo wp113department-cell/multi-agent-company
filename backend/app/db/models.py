@@ -895,6 +895,11 @@ class MemoryEmbedding(Base):
     repo_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("repos.id", ondelete="SET NULL"), nullable=True
     )
+    # Sol A08: shared with every project only when explicitly marked;
+    # otherwise private to repo_id
+    is_global: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
     outcome: Mapped[str] = mapped_column(
         String(50)
     )  # completed | blocked | architecture | failure
@@ -1121,6 +1126,11 @@ class VersionedLesson(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     repo_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("repos.id", ondelete="SET NULL"), nullable=True
+    )
+    # Sol A08: shared with every project only when explicitly marked;
+    # otherwise private to repo_id
+    is_global: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
     )
     embedding: Mapped[Any] = mapped_column(Vector(1536), nullable=True)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)

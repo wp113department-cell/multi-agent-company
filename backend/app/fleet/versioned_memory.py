@@ -112,7 +112,11 @@ async def _lesson_lock(key: str) -> AsyncIterator[None]:
         await engine.dispose()
 
 
-async def _find_most_similar_published(vector: list[float]) -> tuple[Any, float] | None:
+async def _find_most_similar_published(
+    vector: list[float], repo_id: int | None = None, is_global: bool = False
+) -> tuple[Any, float] | None:
+    """Most similar PUBLISHED lesson within the same scope (Sol A08: a
+    project's lesson is never merged with another project's)."""
     from app.memory.store import _ZERO_VECTOR_1536
     from sqlalchemy import text as sa_text
     from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -129,10 +133,13 @@ async def _find_most_similar_published(vector: list[float]) -> tuple[Any, float]
                        1 - (embedding <=> CAST(:vec AS vector)) AS similarity
                 FROM versioned_lessons
                 WHERE state = 'published' AND embedding IS NOT NULL
+                  AND repo_id IS NOT DISTINCT FROM CAST(:rid AS BIGINT)
                 ORDER BY embedding <=> CAST(:vec AS vector)
                 LIMIT 1
                 """)
-            row = (await session.execute(sql, {"vec": vec_str})).fetchone()
+            row = (
+                await session.execute(sql, {"vec": vec_str, "rid": repo_id})
+            ).fetchone()
             return (row, float(row.similarity)) if row is not None else None
     finally:
         await engine.dispose()
@@ -147,6 +154,8 @@ async def _insert(
     version: int,
     state: str,
     supersedes_id: int | None,
+    repo_id: int | None = None,
+    is_global: bool = False,
 ) -> Any:
     from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -163,6 +172,8 @@ async def _insert(
                 version=version,
                 state=state,
                 supersedes_id=supersedes_id,
+                repo_id=repo_id,
+                is_global=is_global,
             )
             session.add(row)
             await session.commit()
@@ -278,7 +289,13 @@ async def _archive_expired(cutoff: datetime) -> int:
         await engine.dispose()
 
 
-async def _sync_to_memory_embeddings(topic: str, content: str, agent_name: str) -> None:
+async def _sync_to_memory_embeddings(
+    topic: str,
+    content: str,
+    agent_name: str,
+    repo_id: int | None = None,
+    is_global: bool = False,
+) -> None:
     """Phase 1.2 (MASTER_AGENT_v2.md) — bridge a PUBLISHED versioned lesson into
     memory_embeddings (category="learning") so it's reachable by the exact same
     query path (query_learning_signals) every live agent run already reads
@@ -298,6 +315,9 @@ async def _sync_to_memory_embeddings(topic: str, content: str, agent_name: str) 
                 description=content,
                 outcome_summary=f"Published versioned lesson (topic: {topic})",
                 db=session,
+                # Sol A08: the lesson's own scope, never "global by omission"
+                repo_id=repo_id,
+                is_global=is_global,
             )
     except Exception:
         logger.warning(
@@ -310,7 +330,12 @@ async def _sync_to_memory_embeddings(topic: str, content: str, agent_name: str) 
 
 
 async def _sweep_and_merge_similar_published(
-    promoted_row_id: int, vector: list[float], threshold: float, max_merge: int
+    promoted_row_id: int,
+    vector: list[float],
+    threshold: float,
+    max_merge: int,
+    repo_id: int | None = None,
+    is_global: bool = False,
 ) -> list[int]:
     """plan14 Day 3 Task 5 (Memory Consolidation) — N-way generalization of
     publish()'s own pairwise merge-at-draft-time check, applied at promote()
@@ -353,6 +378,7 @@ async def _sweep_and_merge_similar_published(
             sql = sa_text("""
                 SELECT id FROM versioned_lessons
                 WHERE state = 'published' AND embedding IS NOT NULL AND id != :self_id
+                  AND repo_id IS NOT DISTINCT FROM CAST(:rid AS BIGINT)
                   AND 1 - (embedding <=> CAST(:vec AS vector)) >= :threshold
                 LIMIT :max_merge
             """)
@@ -363,6 +389,7 @@ async def _sweep_and_merge_similar_published(
                         "self_id": promoted_row_id,
                         "vec": vec_str,
                         "threshold": threshold,
+                        "rid": repo_id,
                         "max_merge": max_merge,
                     },
                 )
@@ -389,6 +416,28 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
     if denom == 0.0:
         return 0.0
     return float(np.dot(va, vb) / denom)
+
+
+async def _published_scopes() -> list[tuple[int | None, bool]]:
+    """Every (repo_id, is_global) scope that has published lessons."""
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from app.db.models import VersionedLesson
+
+    engine = _new_isolated_db_engine()
+    try:
+        async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+            rows = await session.execute(
+                select(VersionedLesson.repo_id)
+                .where(VersionedLesson.state == "published")
+                .distinct()
+            )
+            # a lesson's scope is its project; no project = the fleet-wide
+            # pool (published only through a human's promotion)
+            return [(r[0], r[0] is None) for r in rows]
+    finally:
+        await engine.dispose()
 
 
 def _cluster_by_similarity(
@@ -457,6 +506,7 @@ async def _merge_via_llm_n(contents: list[str], model: str) -> str:
 
 async def _fetch_published_candidates(
     max_candidates: int,
+    scope: tuple[int | None, bool] | None = None,
 ) -> list[tuple[int, str, str, list[float]]]:
     """Deliberately an ORM select(), not a raw text() query: pgvector's
     SQLAlchemy Vector type only applies its own result-decoding (wire format
@@ -481,6 +531,11 @@ async def _fetch_published_candidates(
                         .where(
                             VersionedLesson.state == "published",
                             VersionedLesson.embedding.is_not(None),
+                            *(
+                                [VersionedLesson.repo_id.is_not_distinct_from(scope[0])]
+                                if scope is not None
+                                else []
+                            ),
                         )
                         .order_by(VersionedLesson.created_at.desc())
                         .limit(max_candidates)
@@ -514,15 +569,19 @@ async def _consolidate_published_lessons(
     cluster size)."""
     from app.memory.store import _embed
 
-    candidates = await _fetch_published_candidates(max_candidates)
-    clusters = [
-        c
-        for c in _cluster_by_similarity(candidates, threshold)
-        if len(c) >= min_cluster_size
-    ]
+    # Sol A08: lessons are only ever merged within one scope (a project, or
+    # the explicitly global knowledge) — never across projects
+    clusters: list[tuple[tuple[int | None, bool], Any]] = []
+    for scope in await _published_scopes():
+        candidates = await _fetch_published_candidates(max_candidates, scope)
+        clusters += [
+            (scope, c)
+            for c in _cluster_by_similarity(candidates, threshold)
+            if len(c) >= min_cluster_size
+        ]
 
     created: list[VersionedLessonRecord] = []
-    for cluster in clusters:
+    for scope, cluster in clusters:
         contents = [c[2] for c in cluster]
         merged_content = await _merge_via_llm_n(contents, model)
         merged_vector = await _embed(merged_content)
@@ -540,6 +599,8 @@ async def _consolidate_published_lessons(
             version=1,
             state="draft",
             supersedes_id=primary_id,
+            repo_id=scope[0],
+            is_global=scope[1],
         )
         logger.info(
             "versioned_memory: proactive consolidation proposed draft "
@@ -582,7 +643,12 @@ async def _merge_via_llm(old_content: str, new_content: str, model: str) -> str:
 
 class VersionedMemoryStore:
     def publish(
-        self, topic: str, content: str, agent_name: str = ""
+        self,
+        topic: str,
+        content: str,
+        agent_name: str = "",
+        repo_id: int | None = None,
+        is_global: bool = False,
     ) -> VersionedLessonRecord:
         """File a lesson as a DRAFT — never directly published. Gap-closure
         Day 6 (root cause 3, answers.md Q75/Q93): before this, a single
@@ -608,10 +674,17 @@ class VersionedMemoryStore:
         duplicating — the existing published lesson stays exactly as-is,
         visible and in use, until a human approves promoting the merged
         draft, at which point promote() flips the old one to superseded."""
-        return asyncio.run(self._publish(topic, content, agent_name))
+        return asyncio.run(
+            self._publish(topic, content, agent_name, repo_id, is_global)
+        )
 
     async def _publish(
-        self, topic: str, content: str, agent_name: str = ""
+        self,
+        topic: str,
+        content: str,
+        agent_name: str = "",
+        repo_id: int | None = None,
+        is_global: bool = False,
     ) -> VersionedLessonRecord:
         from app.memory.store import _embed
 
@@ -619,7 +692,7 @@ class VersionedMemoryStore:
         vector = await _embed(content)
 
         async with _lesson_lock(topic):
-            match = await _find_most_similar_published(vector)
+            match = await _find_most_similar_published(vector, repo_id, is_global)
 
             if match is None or match[1] < s.memory_merge_similarity_threshold:
                 lesson_id = str(uuid.uuid4())
@@ -631,6 +704,8 @@ class VersionedMemoryStore:
                     version=1,
                     state="draft",
                     supersedes_id=None,
+                    repo_id=repo_id,
+                    is_global=is_global,
                 )
                 return _to_record(row)
 
@@ -647,6 +722,8 @@ class VersionedMemoryStore:
                 version=existing_row.version + 1,
                 state="draft",
                 supersedes_id=existing_row.id,
+                repo_id=repo_id,
+                is_global=is_global,
             )
             return _to_record(merged_row)
 
@@ -672,6 +749,13 @@ class VersionedMemoryStore:
                 await _set_state(row.supersedes_id, "superseded")
             await _set_state(row.id, "published")
 
+        # Sol A08: a lesson keeps its project. A lesson with no project that a
+        # human promotes is, by that approval, fleet-wide knowledge — the
+        # only way something becomes global (never "global by omission").
+        raw_repo = getattr(row, "repo_id", None)
+        row_repo = raw_repo if isinstance(raw_repo, int) else None
+        row_global = row_repo is None
+
         # plan14 Day 3 Task 5 (Memory Consolidation) — N-way sweep for any
         # OTHER currently-published lesson similar enough to merge, run
         # outside the per-lesson lock above (it spans potentially many other
@@ -687,6 +771,8 @@ class VersionedMemoryStore:
                         list(row.embedding) if row.embedding is not None else [],
                         settings.memory_merge_similarity_threshold,
                         settings.memory_consolidation_max_merge_per_promote,
+                        row_repo,
+                        row_global,
                     )
                 if merged_ids:
                     logger.info(
@@ -711,7 +797,9 @@ class VersionedMemoryStore:
         # Non-fatal sync to memory_embeddings — deliberately outside the lock,
         # since it doesn't read or write versioned_lessons state and holding
         # the lock across it would only add unnecessary contention.
-        await _sync_to_memory_embeddings(row.topic, row.content, agent_name)
+        await _sync_to_memory_embeddings(
+            row.topic, row.content, agent_name, row_repo, row_global
+        )
 
         record = _to_record(row)
         record.state = "published"

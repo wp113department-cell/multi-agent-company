@@ -466,6 +466,9 @@ async def _run_apply_phase(
                         description,
                         result.summary,
                         session,
+                        # Sol A08: a human approved this fleet improvement —
+                        # explicitly shared with every project
+                        is_global=True,
                     )
             except Exception:
                 logger.warning(

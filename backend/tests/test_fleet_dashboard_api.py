@@ -355,6 +355,7 @@ async def test_run_apply_phase_records_learning_signal_on_success() -> None:
         "Reduce false positives",
         "Tightened reviewer prompt",
         session_cm,
+        is_global=True,  # Sol A08: human-approved -> explicitly shared
     )
 
 

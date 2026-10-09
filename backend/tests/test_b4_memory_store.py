@@ -148,9 +148,9 @@ async def test_project_memory_is_isolated_per_repo(repos) -> None:
     }
     assert f"{TAG}-iso-a" in in_a and f"{TAG}-iso-b" not in in_a
     assert f"{TAG}-iso-b" in in_b and f"{TAG}-iso-a" not in in_b
-    assert (
-        f"{TAG}-iso-legacy" in in_a and f"{TAG}-iso-legacy" in in_b
-    )  # unscoped = shared fallback
+    # Sol A08 (2026-10-09): no project no longer means "shared with every
+    # project" — only rows explicitly marked is_global are
+    assert f"{TAG}-iso-legacy" not in in_a and f"{TAG}-iso-legacy" not in in_b
 
 
 async def test_near_duplicate_is_reused_not_reinserted(repos) -> None:

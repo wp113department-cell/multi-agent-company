@@ -21,7 +21,7 @@ import uuid
 from unittest.mock import patch
 
 import pytest
-from sqlalchemy import delete
+from sqlalchemy import delete, update
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -142,7 +142,7 @@ async def test_project_a_scoped_memory_never_returned_by_project_bs_scoped_query
 
 @pytest.mark.asyncio
 @patch("app.memory.store._embed", side_effect=_vector_for)
-async def test_legacy_unscoped_row_stays_visible_to_every_scoped_query(
+async def test_unscoped_row_is_not_shared_unless_marked_global(
     _mock_embed: object,
 ) -> None:
     """A pre-Day-2-shaped row (repo_id=NULL, no repo_id passed at write time)
@@ -166,14 +166,22 @@ async def test_legacy_unscoped_row_stays_visible_to_every_scoped_query(
                 # repo_id intentionally omitted — simulates a pre-Day-2 row.
             )
 
+            # Sol A08 (2026-10-09): replaces the old "legacy rows are shared
+            # fallback" rule — an unscoped row is private until marked global
             results = await query_similar_tasks(
                 "irrelevant query text", session, top_k=1000, repo_id=repo_id
             )
-            task_ids = {r["task_id"] for r in results}
-            assert task_legacy in task_ids, (
-                "a legacy/unscoped row must still surface for a real, "
-                "unrelated project's scoped query"
+            assert task_legacy not in {r["task_id"] for r in results}
+            await session.execute(
+                update(MemoryEmbedding)
+                .where(MemoryEmbedding.task_id == task_legacy)
+                .values(is_global=True)
             )
+            await session.commit()
+            results = await query_similar_tasks(
+                "irrelevant query text", session, top_k=1000, repo_id=repo_id
+            )
+            assert task_legacy in {r["task_id"] for r in results}
 
             await session.execute(
                 delete(MemoryEmbedding).where(MemoryEmbedding.task_id == task_legacy)

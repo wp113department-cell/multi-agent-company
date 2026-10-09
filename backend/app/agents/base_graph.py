@@ -314,6 +314,10 @@ class Lesson:
     pattern: str
     category: str
     reusable: bool = True
+    # Sol A08: the project folder the lesson was learned in. A run in a
+    # project only sees that project's lessons; None = learned outside any
+    # project (seen only by runs outside any project).
+    repo_key: str | None = None
 
     def as_context_line(self) -> str:
         return f"- [{self.category}] {self.lesson}"
@@ -349,8 +353,9 @@ def _persist_lesson_async(lesson: Lesson) -> None:
                     await session.execute(
                         text(
                             "INSERT INTO lessons "
-                            "(agent_name, lesson, pattern, category, reusable) "
-                            "VALUES (:agent_name, :lesson, :pattern, :category, :reusable)"
+                            "(agent_name, lesson, pattern, category, reusable, repo_key) "
+                            "VALUES (:agent_name, :lesson, :pattern, :category, "
+                            ":reusable, :repo_key)"
                         ),
                         {
                             "agent_name": lesson.agent_name,
@@ -358,6 +363,7 @@ def _persist_lesson_async(lesson: Lesson) -> None:
                             "pattern": lesson.pattern,
                             "category": lesson.category,
                             "reusable": lesson.reusable,
+                            "repo_key": lesson.repo_key,
                         },
                     )
                     await session.commit()
@@ -403,7 +409,7 @@ def _group_compressible_lessons(
     blocks other threads."""
     by_category: dict[str, list[Lesson]] = {}
     for ls in lessons:
-        by_category.setdefault(ls.category, []).append(ls)
+        by_category.setdefault(f"{ls.category}\x00{ls.repo_key}", []).append(ls)
 
     best_group: list[Lesson] = []
     for category_lessons in by_category.values():
@@ -518,6 +524,8 @@ class LessonStore:
                 for existing in self._lessons:
                     if existing.category != lesson.category:
                         continue
+                    if existing.repo_key != lesson.repo_key:
+                        continue
                     if (
                         self._jaccard(new_tokens, self._tokens(existing))
                         >= settings.lesson_dedup_similarity_threshold
@@ -606,6 +614,7 @@ class LessonStore:
             pattern=group[0].pattern,
             category=group[0].category,
             reusable=True,
+            repo_key=group[0].repo_key,
         )
 
     async def refresh_from_db(self) -> int:
@@ -629,8 +638,9 @@ class LessonStore:
             async with get_session_factory()() as session:
                 result = await session.execute(
                     text(
-                        "SELECT id, agent_name, lesson, pattern, category, reusable "
-                        "FROM lessons WHERE id > :last_id ORDER BY id ASC LIMIT 500"
+                        "SELECT id, agent_name, lesson, pattern, category, reusable, "
+                        "repo_key FROM lessons WHERE id > :last_id ORDER BY id ASC "
+                        "LIMIT 500"
                     ),
                     {"last_id": self._last_synced_id},
                 )
@@ -650,6 +660,7 @@ class LessonStore:
                     pattern=row["pattern"],
                     category=row["category"],
                     reusable=bool(row["reusable"]),
+                    repo_key=row.get("repo_key"),
                 ),
                 _persist=False,
             )
@@ -657,13 +668,17 @@ class LessonStore:
             merged += 1
         return merged
 
-    def retrieve(self, query: str, top_k: int = 3) -> list[Lesson]:
+    def retrieve(
+        self, query: str, top_k: int = 3, repo_key: str | None = None
+    ) -> list[Lesson]:
         query_tokens = set(query.lower().split())
         with self._lock:
             lessons = list(self._lessons)
         scored: list[tuple[float, Lesson]] = []
         for lesson in lessons:
             if not lesson.reusable:
+                continue
+            if lesson.repo_key != repo_key:  # Sol A08: never across projects
                 continue
             text = f"{lesson.lesson} {lesson.pattern} {lesson.category}".lower()
             score = len(query_tokens & set(text.split()))
@@ -672,8 +687,10 @@ class LessonStore:
         scored.sort(key=lambda x: x[0], reverse=True)
         return [ls for _, ls in scored[:top_k]]
 
-    def format_for_injection(self, query: str, top_k: int = 3) -> str:
-        retrieved = self.retrieve(query, top_k=top_k)
+    def format_for_injection(
+        self, query: str, top_k: int = 3, repo_key: str | None = None
+    ) -> str:
+        retrieved = self.retrieve(query, top_k=top_k, repo_key=repo_key)
         if not retrieved:
             return ""
         lines = ["## Relevant past insights:"] + [
@@ -1634,7 +1651,9 @@ def _make_memory_hook_node(
 
         # 1. Retrieve relevant past lessons from in-process LessonStore — fast,
         # zero-latency, but ephemeral (wiped on restart) and process-local.
-        lesson_block = get_lesson_store().format_for_injection(query, top_k=3)
+        lesson_block = get_lesson_store().format_for_injection(
+            query, top_k=3, repo_key=lesson_repo_key(repo_path)
+        )
         if lesson_block:
             context_blocks.append(lesson_block)
 
@@ -3189,11 +3208,20 @@ def _make_execute_tools_node(
 # ---------------------------------------------------------------------------
 
 
+def lesson_repo_key(repo_path: str | None) -> str | None:
+    """Sol A08: the scope key for in-process lessons — the project folder's
+    real path (None outside any project)."""
+    import os
+
+    return os.path.realpath(repo_path) if repo_path else None
+
+
 def _extract_and_store_lesson(
     final_state: AgentRunState,
     role_name: str,
     model_haiku: str,
     trace_id: str = "",
+    repo_path: str | None = None,
 ) -> None:
     """Extract a reusable lesson from the completed run and store in LessonStore.
     Non-fatal — any failure is logged and swallowed.
@@ -3235,6 +3263,7 @@ def _extract_and_store_lesson(
             pattern=str(data.get("pattern", "")),
             category=str(data.get("category", "general")),
             reusable=bool(data.get("reusable", True)),
+            repo_key=lesson_repo_key(repo_path),
         )
         if lesson.lesson:
             get_lesson_store().add(lesson)
@@ -4265,7 +4294,11 @@ def run_agent_graph(
         # Post-graph lesson extraction (non-fatal, runs after graph completes)
         if enable_lesson and final_state.get("submitted"):
             _extract_and_store_lesson(
-                final_state, role_name, model_haiku or model, trace_id=tid
+                final_state,
+                role_name,
+                model_haiku or model,
+                trace_id=tid,
+                repo_path=repo_path,
             )
             _maybe_store_procedure(final_state, role_name, task_id)
 
