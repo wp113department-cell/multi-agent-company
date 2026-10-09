@@ -496,10 +496,30 @@ async def run_task(
                 raise HTTPException(status_code=400, detail=saved.message)
             saved_note = saved.message
 
+    # W7: a GitHub project starts from GitHub's latest code (fast-forward
+    # only; never blocks the task, never overwrites local work)
+    sync_note: str | None = None
+    repo_row = task.repo
+    if (
+        getattr(task, "project_id", None)
+        and repo_path
+        and repo_row is not None
+        and repo_row.github_url
+        and os.path.isdir(repo_path)
+    ):
+        from app.security.credential_vault import CredentialVault
+        from app.tools.git_local_apply import update_from_github
+
+        creds = await CredentialVault().load(db, repo_row.id)
+        token = creds.github_token.get_secret_value() if creds.github_token else None
+        sync_note = (await update_from_github(repo_path, token)).message
+
     await transition_task(db, task_id, "planning")
     await append_log(db, task_id, "pipeline", "Planning triggered")
     if saved_note:
         await append_log(db, task_id, "pipeline", saved_note)
+    if sync_note:
+        await append_log(db, task_id, "pipeline", sync_note)
 
     settings = get_settings()
     # UI redesign: Max always runs the full pipeline (its quality cost profile

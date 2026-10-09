@@ -437,3 +437,12 @@ Every item gets a full local CI before each push. Close heavy apps first, becaus
   - Its text goes into every agent's repo context (`base_graph` memory hook), so the planner knows the stack and the test command automatically.
   - **AI summary only on click:** "Understand with AI" in Start → project → Tools → Overview (a new first tab) runs the existing read-only agent runtime with read-only tools only. It is budget-gated, stored per project, and deleted with the project.
   - Tests: 9 new in `tests/test_w1_project_overview.py`. The 3 wiring tests fail on the old code. The 238 existing project, context and memory-hook tests pass.
+- **2026-10-09: W7 "start from the latest code". DONE.**
+  - Before a GitHub project's task starts, its folder fetches the current branch from GitHub (with the project's stored token for private repos) and fast-forwards when it is simply behind.
+  - It never overwrites anything:
+    - unsaved edits: skipped;
+    - the copy has its own commits: skipped;
+    - GitHub unreachable: the task works from the local copy.
+  - Each outcome is written to the task log. It never blocks the task, and hooks never run.
+  - Tests: 7 new in `tests/test_w7_latest_code.py` (a local bare repo stands in for GitHub). The start-wiring test fails on the old code. The 370 existing task-start tests pass.
+- **2026-10-09: GitHub CI green** for `f9b9f2e5` (sandbox, W2, W6, W4, Next.js 15.5.27).

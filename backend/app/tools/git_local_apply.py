@@ -156,3 +156,81 @@ async def save_changes(folder: str, task_id: int) -> ApplyResult:
     return ApplyResult(
         True, "Your changes were saved in git before the task started.", head
     )
+
+
+# -- W7: start from the latest code (2026-10-09) ------------------------------
+# A GitHub project's folder is a clone; without an update a task could start
+# from code that is days old. Before a task starts the folder is fast-
+# forwarded to GitHub's latest when that's safe; otherwise it is left as it
+# is and the task log says why. Never blocks the task.
+
+
+async def update_from_github(folder: str, token: str | None) -> ApplyResult:
+    """Fast-forward the folder's current branch to origin's. `applied` is
+    True only when new commits were brought in."""
+    from app.services.git_service import (
+        NON_INTERACTIVE_GIT_ENV,
+        _auth_env,
+        _validate_remote_url,
+    )
+
+    rc, branch = await _git(folder, "symbolic-ref", "--short", "-q", "HEAD")
+    if rc != 0 or not branch:
+        return ApplyResult(
+            False, "Not updated from GitHub: the folder is not on a branch."
+        )
+    rc, url = await _git(folder, "remote", "get-url", "origin")
+    if rc != 0 or not url:
+        return ApplyResult(
+            False, "Not updated from GitHub: the folder has no GitHub link."
+        )
+    try:
+        _validate_remote_url(url)
+    except Exception:
+        return ApplyResult(
+            False, "Not updated: the folder's remote is not an allowed host."
+        )
+    env = _auth_env(url, token) if token else dict(NON_INTERACTIVE_GIT_ENV)
+    rc_f, out, err, timed_out = await run_git_process(
+        ["git", "-C", folder, *_SAFE, "fetch", "--quiet", "origin", branch],
+        folder,
+        env,
+        120,
+    )
+    if rc_f != 0 or timed_out:
+        reason = "timed out" if timed_out else (err or out).decode(errors="replace")
+        from app.services.git_service import scrub_secret
+
+        return ApplyResult(
+            False,
+            "Could not reach GitHub, so the task works from the copy on this "
+            f"computer ({scrub_secret(reason.strip(), token)[:200]}).",
+        )
+    upstream = f"refs/remotes/origin/{branch}"
+    rc, _ = await _git(folder, "rev-parse", "--verify", "--quiet", upstream)
+    if rc != 0:
+        return ApplyResult(False, f"Not updated: GitHub has no branch {branch}.")
+    rc, behind = await _git(folder, "rev-list", "--count", f"HEAD..{upstream}")
+    if rc != 0 or behind.strip() in ("", "0"):
+        return ApplyResult(False, "Already up to date with GitHub.")
+    _, dirty = await _git(folder, "status", "--porcelain", "--untracked-files=no")
+    if dirty:
+        return ApplyResult(
+            False,
+            f"Not updated from GitHub ({behind} newer commits there): the folder "
+            "has unsaved changes.",
+        )
+    rc, _ = await _git(folder, "merge-base", "--is-ancestor", "HEAD", upstream)
+    if rc != 0:
+        return ApplyResult(
+            False,
+            f"Not updated from GitHub ({behind} newer commits there): this copy "
+            "has its own commits, so it was not changed automatically.",
+        )
+    rc, merged = await _git(folder, "merge", "--ff-only", upstream)
+    if rc != 0:
+        return ApplyResult(False, f"Not updated from GitHub: {merged[:200]}")
+    _, head = await _git(folder, "rev-parse", "HEAD")
+    return ApplyResult(
+        True, f"Updated to the latest code from GitHub ({behind} new commits).", head
+    )
