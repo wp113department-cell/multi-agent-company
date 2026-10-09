@@ -476,3 +476,7 @@ Every item gets a full local CI before each push. Close heavy apps first, becaus
     - API: `GET/POST /api/projects/{id}/notes`, `DELETE /api/projects/{id}/notes/{note}`.
   - **C5:** while the AI works, a live line above the chat input says what it is doing in plain words, e.g. "Reading app/page.tsx…", "Running: npm run build…", "Running tests…", "Waiting for your approval", "Writing the answer…". It is built from the same stream as the tool cards (`lib/chatActivity.ts`).
   - Tests: 5 new for C3 (4 fail on the old code; the deletion test passes trivially there) and 4 new vitest tests for C5.
+- **2026-10-09: Step 0 leftovers (from 2026-10-06).**
+  - Done: tests for the fast clone and folder browser (`tests/test_step0_clone_and_folder_browser.py`, 5 tests): shallow by default, full history on request, falls back to a full clone without shallow support, a non-empty folder gets `<folder>/<repo>`, and `GET /api/console/workspace/root`. `test_b7_auth_and_agent_authorization.py` and the repo-clone tests pass (196).
+  - Done: the Docker check of the workspace mount, during today's sandbox work (real container: a folder in the workspace and a worktree, files visible both ways).
+  - Open: asking the owner how the Windows laptop run went (launcher, clone speed, folder browser).
