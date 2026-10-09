@@ -811,13 +811,60 @@ export async function deleteCustomSecret(
 // Chat (streaming conversational interface)
 // ---------------------------------------------------------------------------
 
-export async function createChatSession(repoPath: string): Promise<{ session_id: string }> {
+export async function createChatSession(
+  repoPath: string,
+  projectId?: number | null,
+): Promise<{ session_id: string }> {
   const res = await apiFetch("/api/chat/sessions", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ repo_path: repoPath }),
+    body: JSON.stringify({ repo_path: repoPath, project_id: projectId ?? null }),
   });
   return handleResponse(res);
+}
+
+/** C2: a past chat in the list. */
+export interface ChatSummary {
+  id: string;
+  title: string;
+  projectId: number | null;
+  repoPath: string;
+  createdAt: string | null;
+  lastMessageAt: string | null;
+}
+
+export async function listChats(projectId?: number | null): Promise<ChatSummary[]> {
+  const q = projectId ? `?project_id=${projectId}` : "";
+  const data = await handleResponse<{ chats: ChatSummary[] }>(
+    await apiFetch(`/api/chat/sessions${q}`),
+  );
+  return data.chats;
+}
+
+export async function renameChat(sessionId: string, title: string): Promise<ChatSummary> {
+  return handleResponse<ChatSummary>(
+    await apiFetch(`/api/chat/sessions/${sessionId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title }),
+    }),
+  );
+}
+
+/** Removes the chat and its messages for good (closing keeps them). */
+export async function deleteChatForever(sessionId: string): Promise<void> {
+  await handleResponse(await apiFetch(`/api/chat/history/${sessionId}`, { method: "DELETE" }));
+}
+
+export async function getChatHistory(
+  sessionId: string,
+): Promise<{ role: "user" | "assistant"; content: string }[]> {
+  const data = await handleResponse<{ history: { role: string; content: string }[] }>(
+    await apiFetch(`/api/chat/sessions/${sessionId}/history`),
+  );
+  return data.history
+    .filter((m) => m.role === "user" || m.role === "assistant")
+    .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
 }
 
 export async function confirmChatAction(

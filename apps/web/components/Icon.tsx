@@ -8,6 +8,7 @@ import type { ReactNode } from "react";
 
 const PATHS: Record<string, ReactNode> = {
   x: <path d="M18 6 6 18M6 6l12 12" />,
+  trash: <path d="M3 6h18M8 6V4h8v2m-9 0 1 14h8l1-14M10 11v6M14 11v6" />,
   check: <path d="M20 6 9 17l-5-5" />,
   "check-circle": (
     <>

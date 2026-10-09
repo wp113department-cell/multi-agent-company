@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app.api.budget_gate import require_daily_budget
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -40,14 +40,25 @@ router = APIRouter(prefix="/api/chat", tags=["chat"])
 
 class CreateSessionRequest(BaseModel):
     repo_path: str
+    # C2: the project the chat belongs to (shown in the list of past chats)
+    project_id: int | None = None
 
 
 class CreateSessionResponse(BaseModel):
     session_id: str
 
 
+class ChatAttachment(BaseModel):
+    """C1: a file the user attached to a chat message (base64 content)."""
+
+    name: str = Field(..., min_length=1, max_length=200)
+    media_type: str = Field(..., max_length=100)
+    data: str
+
+
 class SendMessageRequest(BaseModel):
     message: str
+    attachments: list[ChatAttachment] = Field(default_factory=list, max_length=5)
 
 
 class ConfirmActionRequest(BaseModel):
@@ -90,11 +101,14 @@ async def _require_session_restoring(session_id: str) -> ChatSession:
 
     try:
         async with get_session_factory()() as db:
+            # C2: a listed chat knows its folder even before its first message
             row = (
                 await db.execute(
                     text(
-                        "SELECT repo_path FROM chat_messages WHERE session_id = :sid "
-                        "ORDER BY created_at DESC LIMIT 1"
+                        "SELECT repo_path FROM chat_sessions WHERE id = :sid "
+                        "UNION ALL (SELECT repo_path FROM chat_messages "
+                        "WHERE session_id = :sid ORDER BY created_at DESC LIMIT 1) "
+                        "LIMIT 1"
                     ),
                     {"sid": session_id},
                 )
@@ -104,6 +118,110 @@ async def _require_session_restoring(session_id: str) -> ChatSession:
     except Exception:
         logger.warning("could not restore chat session %s", session_id, exc_info=True)
     raise HTTPException(status_code=404, detail=f"Session {session_id!r} not found")
+
+
+# ---------------------------------------------------------------------------
+# C1 (2026-10-09): attachments — images go to the model as pictures; PDFs and
+# text/code files become text in the message. Limits keep cost and memory sane.
+# ---------------------------------------------------------------------------
+
+_IMAGE_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
+_MAX_IMAGE_BYTES = 5 * 1024 * 1024
+_MAX_PDF_BYTES = 20 * 1024 * 1024
+_MAX_TEXT_BYTES = 300 * 1024
+_MAX_TEXT_CHARS = 60_000
+
+
+def _prepare_attachments(
+    attachments: list[ChatAttachment],
+) -> tuple[str, list[dict[str, Any]]]:
+    import base64
+    import binascii
+
+    extra: list[str] = []
+    images: list[dict[str, Any]] = []
+    for att in attachments:
+        try:
+            raw = base64.b64decode(att.data, validate=True)
+        except (binascii.Error, ValueError):
+            raise HTTPException(
+                status_code=400, detail=f"{att.name!r} could not be read."
+            ) from None
+        media = att.media_type.lower()
+        if media in _IMAGE_TYPES:
+            if len(raw) > _MAX_IMAGE_BYTES:
+                raise HTTPException(
+                    status_code=400, detail=f"Image {att.name!r} is larger than 5 MB."
+                )
+            images.append(
+                {
+                    "type": "image",
+                    "source": {"type": "base64", "media_type": media, "data": att.data},
+                    # stripped before the block reaches the model or the DB
+                    "_name": att.name,
+                }
+            )
+        elif media == "application/pdf" or att.name.lower().endswith(".pdf"):
+            if len(raw) > _MAX_PDF_BYTES:
+                raise HTTPException(
+                    status_code=400, detail=f"PDF {att.name!r} is larger than 20 MB."
+                )
+            from app.api.tasks import _extract_pdf_text
+
+            text = _extract_pdf_text(raw, att.name)[:_MAX_TEXT_CHARS]
+            extra.append(f"\n\n--- Attached PDF: {att.name} ---\n{text}")
+        else:
+            if len(raw) > _MAX_TEXT_BYTES:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"{att.name!r} is larger than 300 KB; attach a smaller part.",
+                )
+            if b"\x00" in raw:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"{att.name!r} is not a text file (images, PDFs and "
+                    "text/code files can be attached).",
+                )
+            text = raw.decode("utf-8", errors="replace")[:_MAX_TEXT_CHARS]
+            extra.append(f"\n\n--- Attached file: {att.name} ---\n{text}")
+    for img in images:
+        img.pop("_name", None)
+    return "".join(extra), images
+
+
+def _without_image_data(content: Any) -> Any:
+    """Stored history keeps a note instead of the picture itself."""
+    if not isinstance(content, list):
+        return content
+    return [
+        (
+            {"type": "text", "text": "[an image was attached]"}
+            if isinstance(block, dict) and block.get("type") == "image"
+            else block
+        )
+        for block in content
+    ]
+
+
+async def _touch_chat_record(db: AsyncSession, session_id: str, message: str) -> None:
+    """C2: a new message moves the chat to the top of the list; the first
+    one names it. Non-fatal: the list must never block a chat turn."""
+    from datetime import datetime, timezone
+
+    from app.db.models import ChatSessionRecord
+
+    try:
+        rec = await db.get(ChatSessionRecord, session_id)
+        if rec is None:
+            return
+        rec.last_message_at = datetime.now(timezone.utc)
+        if rec.title == "New chat" and message.strip():
+            first_line = message.strip().splitlines()[0]
+            rec.title = first_line[:80] + ("…" if len(first_line) > 80 else "")
+        await db.commit()
+    except Exception:
+        logger.debug("chat list update skipped", exc_info=True)
+        await db.rollback()
 
 
 async def _event_stream(session: ChatSession) -> AsyncGenerator[str, None]:
@@ -153,6 +271,19 @@ async def create_chat_session(
         repo_id = None
 
     session = create_session(repo_path=body.repo_path, repo_id=repo_id)
+    # C2: the chat appears in the list of past chats
+    from app.db.models import ChatSessionRecord
+
+    db.add(
+        ChatSessionRecord(
+            id=session.session_id,
+            project_id=body.project_id,
+            repo_path=body.repo_path,
+            title="New chat",
+            created_by=_actor,
+        )
+    )
+    await db.commit()
     return CreateSessionResponse(session_id=session.session_id)
 
 
@@ -190,7 +321,14 @@ async def send_message(
             detail="Session already has an active message being processed",
         )
 
+    extra_text, images = _prepare_attachments(body.attachments)
+    if not body.message.strip() and not body.attachments:
+        raise HTTPException(status_code=400, detail="Type a message or attach a file.")
+    message = body.message + extra_text
     session.active = True
+    await _touch_chat_record(
+        db, session_id, body.message or ", ".join(a.name for a in body.attachments)
+    )
 
     # Launch agent in background — it pushes events to the queue. Reused
     # (not freshly constructed) so the same ChatAgent instance — and thus
@@ -199,7 +337,7 @@ async def send_message(
     # resume() it later (MASTER_AGENT_v2.md Phase 5.2).
     agent = get_or_create_chat_agent(session)
     factory = get_session_factory()
-    asyncio.create_task(_run_agent(agent, body.message, session, factory))
+    asyncio.create_task(_run_agent(agent, message, session, factory, images))
 
     return StreamingResponse(
         _event_stream(session),
@@ -258,7 +396,7 @@ async def _persist_new_messages(
             async with db_factory() as db:
                 for msg in new_messages:
                     role = str(msg.get("role", ""))
-                    content = msg.get("content", "")
+                    content = _without_image_data(msg.get("content", ""))
                     text = content if isinstance(content, str) else json.dumps(content)
                     await save_message_to_db(
                         session.session_id, session.repo_path, role, text, db
@@ -272,12 +410,19 @@ async def _persist_new_messages(
 
 
 async def _run_agent(
-    agent: Any, message: str, session: ChatSession, db_factory: Any
+    agent: Any,
+    message: str,
+    session: ChatSession,
+    db_factory: Any,
+    images: list[dict[str, Any]] | None = None,
 ) -> None:
     """Background task: run the agent, then persist user message + assistant reply to DB."""
     history_len_before = len(session.history)
     try:
-        await agent.run(message)
+        if images:
+            await agent.run(message, images=images)
+        else:
+            await agent.run(message)
     except Exception as e:
         logger.exception("Unhandled error in chat agent")
         await session.push({"type": "error", "message": f"Internal error: {e}"})
@@ -426,6 +571,108 @@ async def close_session(
     from app.agents.chat_agent import delete_chat_agent
 
     _require_session(session_id)
+    delete_session(session_id)
+    delete_chat_agent(session_id)
+    return {"status": "deleted"}
+
+
+# ---------------------------------------------------------------------------
+# C2 (2026-10-09): the list of past chats — reopen, rename, delete
+# ---------------------------------------------------------------------------
+
+
+class RenameChatRequest(BaseModel):
+    title: str
+
+
+async def _owned_chat(db: AsyncSession, session_id: str, actor: str) -> Any:
+    """The chat's list record, if this user may manage it (its creator; chats
+    from before C2 have no recorded owner and are shared)."""
+    from app.db.models import ChatSessionRecord
+
+    rec = await db.get(ChatSessionRecord, session_id)
+    if rec is None or (rec.created_by not in (None, actor)):
+        raise HTTPException(status_code=404, detail="Chat not found")
+    return rec
+
+
+def _chat_dict(rec: Any) -> dict[str, object]:
+    return {
+        "id": rec.id,
+        "title": rec.title,
+        "projectId": rec.project_id,
+        "repoPath": rec.repo_path,
+        "createdAt": rec.created_at.isoformat() if rec.created_at else None,
+        "lastMessageAt": (
+            rec.last_message_at.isoformat() if rec.last_message_at else None
+        ),
+    }
+
+
+@router.get("/sessions")
+async def list_chats(
+    project_id: int | None = None,
+    limit: int = 50,
+    db: AsyncSession = Depends(get_db),
+    actor: str = Depends(require_authenticated),
+) -> dict[str, object]:
+    """This user's past chats, newest first (optionally for one project)."""
+    from sqlalchemy import or_, select
+
+    from app.db.models import ChatSessionRecord
+
+    q = (
+        select(ChatSessionRecord)
+        .where(
+            or_(
+                ChatSessionRecord.created_by == actor,
+                ChatSessionRecord.created_by.is_(None),
+            )
+        )
+        .order_by(ChatSessionRecord.last_message_at.desc())
+        .limit(max(1, min(limit, 200)))
+    )
+    if project_id is not None:
+        q = q.where(ChatSessionRecord.project_id == project_id)
+    rows = (await db.execute(q)).scalars().all()
+    return {"chats": [_chat_dict(r) for r in rows]}
+
+
+@router.patch("/sessions/{session_id}")
+async def rename_chat(
+    session_id: str,
+    body: RenameChatRequest,
+    db: AsyncSession = Depends(get_db),
+    actor: str = Depends(require_approver),
+) -> dict[str, object]:
+    title = body.title.strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="Give the chat a name.")
+    rec = await _owned_chat(db, session_id, actor)
+    rec.title = title[:200]
+    await db.commit()
+    return _chat_dict(rec)
+
+
+@router.delete("/history/{session_id}")
+async def delete_chat_forever(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+    actor: str = Depends(require_approver),
+) -> dict[str, str]:
+    """Remove a chat and its messages permanently (DELETE /sessions/{id}
+    only closes the live conversation and keeps the history)."""
+    from sqlalchemy import text
+
+    from app.agents.chat_agent import delete_chat_agent
+
+    rec = await _owned_chat(db, session_id, actor)
+    if rec is not None:
+        await db.delete(rec)
+    await db.execute(
+        text("DELETE FROM chat_messages WHERE session_id = :sid"), {"sid": session_id}
+    )
+    await db.commit()
     delete_session(session_id)
     delete_chat_agent(session_id)
     return {"status": "deleted"}

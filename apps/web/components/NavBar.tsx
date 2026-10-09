@@ -77,6 +77,7 @@ function ThemeToggle() {
 const NAV_LINKS = [
   { href: "/start", label: "Start" },
   { href: "/tasks", label: "Tasks" },
+  { href: "/chat", label: "Chat" },
   { href: "/agents", label: "Agents" },
   { href: "/fleet", label: "Fleet & Approvals" },
   { href: "/roadmap", label: "Roadmap" },

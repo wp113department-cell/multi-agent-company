@@ -45,7 +45,7 @@ function base64ToBytes(b64: string): Uint8Array {
 // Matches the close codes backend/app/api/terminal.py defines.
 const CLOSE_REASONS: Record<number, string> = {
   4404: "The terminal is turned off on this server. To use it, set PTY_TERMINAL_ENABLED=true in backend/.env and restart.",
-  4004: "This chat session has ended (the server was restarted). Click “End Session” and start a new one.",
+  4004: "This chat session has ended (the server was restarted). Click “Close chat” and open it again from the list.",
   4403: "Only approvers and admins can open a terminal.",
   4503: "The terminal needs Docker, and Docker is not reachable right now.",
 };

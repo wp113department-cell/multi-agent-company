@@ -4823,7 +4823,9 @@ class ChatAgent:
         # effect for every session created afterward.
         return graph.compile(checkpointer=_chat_checkpointer)
 
-    async def run(self, user_message: str) -> None:
+    async def run(
+        self, user_message: str, images: list[dict[str, Any]] | None = None
+    ) -> None:
         """
         Process user_message through the full agentic loop.
         Events are pushed to session.push() for SSE delivery.
@@ -4929,7 +4931,16 @@ class ChatAgent:
         except Exception:
             logger.debug("active_branch lookup skipped (non-fatal)", exc_info=True)
 
-        self.session.history.append({"role": "user", "content": user_message})
+        if images:
+            # C1: pictures the user attached, sent to the model as images
+            self.session.history.append(
+                {
+                    "role": "user",
+                    "content": [{"type": "text", "text": user_message}, *images],
+                }
+            )
+        else:
+            self.session.history.append({"role": "user", "content": user_message})
         memory_block = await self._memory_read_context(user_message)
         system_prompt = (
             (f"{self._system}\n\n{memory_block}" if memory_block else self._system)

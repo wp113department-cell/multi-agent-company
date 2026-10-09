@@ -4,12 +4,16 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   confirmChatAction,
   createChatSession,
+  deleteChatForever,
   deleteChatSession,
+  getChatHistory,
   getCurrentProjectId,
+  listChats,
   listProjects,
+  renameChat,
   stopChatTurn,
 } from "@/lib/api";
-import type { Project } from "@/lib/api";
+import type { ChatSummary, Project } from "@/lib/api";
 import { authHeaders } from "@/lib/auth";
 import { TerminalTabs } from "@/components/TerminalTabs";
 import { Icon } from "../../components/Icon";
@@ -72,6 +76,25 @@ type ChatMessage = TextMessage | ToolCallMessage | ConfirmMessage;
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/** C1: a picked file as the chat API expects it (base64 content). */
+function encodeAttachment(
+  file: File,
+): Promise<{ name: string; media_type: string; data: string }> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const url = String(reader.result ?? "");
+      resolve({
+        name: file.name,
+        media_type: file.type || "text/plain",
+        data: url.slice(url.indexOf(",") + 1),
+      });
+    };
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
 
 function uid() {
   return Math.random().toString(36).slice(2);
@@ -241,6 +264,9 @@ export default function ChatPage() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
+  // C1: files attached to the next message
+  const [attachments, setAttachments] = useState<File[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -292,13 +318,28 @@ export default function ChatPage() {
   }, [messages]);
 
   const repoPath = selectedRepo || customPath;
+  const selectedProject = repos.find((r) => r.localPath === selectedRepo) ?? null;
+
+  // ---- C2: the list of past chats (per project) ----
+  const [chats, setChats] = useState<ChatSummary[]>([]);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameText, setRenameText] = useState("");
+  const refreshChats = useCallback(() => {
+    listChats(selectedProject?.id ?? null)
+      .then(setChats)
+      .catch(() => setChats([]));
+  }, [selectedProject?.id]);
+  useEffect(() => {
+    refreshChats();
+  }, [refreshChats]);
 
   // ---- Session management ----
   const startSession = useCallback(async () => {
     if (!repoPath) return;
     try {
-      const data = await createChatSession(repoPath);
+      const data = await createChatSession(repoPath, selectedProject?.id ?? null);
       setSessionId(data.session_id);
+      refreshChats();
       setMessages([]);
       setError(null);
       setActiveView("chat");
@@ -306,7 +347,7 @@ export default function ChatPage() {
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, [repoPath]);
+  }, [repoPath, selectedProject?.id, refreshChats]);
 
   const endSession = useCallback(async () => {
     if (!sessionId) return;
@@ -322,7 +363,57 @@ export default function ChatPage() {
     setReconnecting(false);
     setActiveView("chat");
     setTerminalEverOpened(false);
-  }, [sessionId]);
+    refreshChats();
+  }, [sessionId, refreshChats]);
+
+  // C2: reopen a past chat — its conversation is rebuilt on the server from
+  // the stored messages the first time a new message is sent
+  const openChat = useCallback(
+    async (chat: ChatSummary) => {
+      if (streaming || chat.id === sessionId) return;
+      reachedTerminalRef.current = true;
+      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
+      esRef.current?.close();
+      esRef.current = null;
+      abortRef.current?.abort();
+      if (sessionId) await deleteChatSession(sessionId).catch(() => {});
+      try {
+        const history = await getChatHistory(chat.id);
+        setMessages(
+          history.map((m) => ({ role: m.role, kind: "text", id: uid(), content: m.content })),
+        );
+        setSessionId(chat.id);
+        setError(null);
+        setReconnecting(false);
+        setActiveView("chat");
+        setTerminalEverOpened(false);
+      } catch (e: unknown) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
+    },
+    [streaming, sessionId],
+  );
+
+  const saveRename = useCallback(async () => {
+    if (!renamingId) return;
+    const title = renameText.trim();
+    if (title) await renameChat(renamingId, title).catch(() => undefined);
+    setRenamingId(null);
+    refreshChats();
+  }, [renamingId, renameText, refreshChats]);
+
+  const removeChat = useCallback(
+    async (chat: ChatSummary) => {
+      if (!window.confirm(`Delete the chat "${chat.title}" and its messages?`)) return;
+      await deleteChatForever(chat.id).catch(() => undefined);
+      if (chat.id === sessionId) {
+        setSessionId(null);
+        setMessages([]);
+      }
+      refreshChats();
+    },
+    [sessionId, refreshChats],
+  );
 
   // Unmount safety — mirrors the task activity feed's cleanup.
   useEffect(() => {
@@ -542,10 +633,21 @@ export default function ChatPage() {
 
   // ---- Send message ----
   const sendMessage = useCallback(async () => {
-    if (!input.trim() || !sessionId || streaming) return;
+    if ((!input.trim() && attachments.length === 0) || !sessionId || streaming) return;
 
-    const userText = input.trim();
+    let encoded: { name: string; media_type: string; data: string }[] = [];
+    try {
+      encoded = await Promise.all(attachments.map(encodeAttachment));
+    } catch {
+      setError("A file could not be read. Remove it and try again.");
+      return;
+    }
+    const names = attachments.map((f) => f.name);
+    const userText =
+      input.trim() + (names.length ? `${input.trim() ? "\n\n" : ""}Attached: ${names.join(", ")}` : "");
+    const typedText = input.trim();
     setInput("");
+    setAttachments([]);
     setError(null);
     setStreaming(true);
     reachedTerminalRef.current = false;
@@ -569,7 +671,7 @@ export default function ChatPage() {
       const res = await fetch(`/api/chat/sessions/${sessionId}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders() },
-        body: JSON.stringify({ message: userText }),
+        body: JSON.stringify({ message: typedText, attachments: encoded }),
         signal: abortCtrl.signal,
       });
 
@@ -578,6 +680,7 @@ export default function ChatPage() {
         const detail = body?.detail;
         throw new Error(typeof detail === "string" ? detail : `HTTP ${res.status}`);
       }
+      refreshChats();
 
       if (!res.body) throw new Error("No response body");
       dispatched = true;
@@ -637,7 +740,7 @@ export default function ChatPage() {
       abortRef.current = null;
       setTimeout(() => inputRef.current?.focus(), 100);
     }
-  }, [input, sessionId, streaming, handleSseEvent, reconnect]);
+  }, [input, attachments, sessionId, streaming, handleSseEvent, reconnect, refreshChats]);
 
   // Keyboard: Ctrl+Enter or Enter to send
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -652,7 +755,99 @@ export default function ChatPage() {
   // ---------------------------------------------------------------------------
 
   return (
-    <div className="flex h-[calc(100vh-120px)] flex-col">
+    <div className="flex h-[calc(100vh-120px)] flex-col gap-4 lg:flex-row">
+      {/* C2/C4: projects and past chats */}
+      <aside className="flex max-h-56 shrink-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white lg:max-h-none lg:w-72 dark:border-slate-700 dark:bg-slate-900">
+        <div className="space-y-2 border-b border-slate-100 p-3 dark:border-slate-800">
+          <select
+            aria-label="Project for chats"
+            value={selectedRepo}
+            onChange={(e) => setSelectedRepo(e.target.value)}
+            disabled={streaming}
+            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
+          >
+            <option value="">Choose a project</option>
+            {repos.map((r) => (
+              <option key={r.id} value={r.localPath ?? ""}>
+                {r.name}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={() => void (sessionId ? endSession().then(startSession) : startSession())}
+            disabled={!repoPath || streaming}
+            className="w-full rounded-lg bg-orange-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"
+          >
+            + New chat
+          </button>
+        </div>
+        <ul className="flex-1 overflow-y-auto p-2" aria-label="Past chats">
+          {chats.length === 0 && (
+            <li className="px-2 py-3 text-xs text-slate-400">No chats yet for this project.</li>
+          )}
+          {chats.map((c) => (
+            <li key={c.id} className="group">
+              {renamingId === c.id ? (
+                <input
+                  aria-label="Chat name"
+                  ref={(el) => el?.focus()}
+                  value={renameText}
+                  onChange={(e) => setRenameText(e.target.value)}
+                  onBlur={() => void saveRename()}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") void saveRename();
+                    if (e.key === "Escape") setRenamingId(null);
+                  }}
+                  className="w-full rounded-lg border border-orange-300 px-2 py-1.5 text-sm dark:bg-slate-800"
+                />
+              ) : (
+                <div
+                  className={`flex items-center gap-1 rounded-lg px-2 py-1.5 ${
+                    c.id === sessionId
+                      ? "bg-orange-50 text-orange-900 dark:bg-orange-900/20 dark:text-orange-200"
+                      : "hover:bg-slate-50 dark:hover:bg-slate-800"
+                  }`}
+                >
+                  <button
+                    type="button"
+                    onClick={() => void openChat(c)}
+                    disabled={streaming}
+                    title={c.title}
+                    className="min-w-0 flex-1 text-left"
+                  >
+                    <span className="block truncate text-sm">{c.title}</span>
+                    <span className="block text-[11px] text-slate-400">
+                      {c.lastMessageAt ? new Date(c.lastMessageAt).toLocaleString() : ""}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`Rename ${c.title}`}
+                    onClick={() => {
+                      setRenamingId(c.id);
+                      setRenameText(c.title);
+                    }}
+                    className="rounded p-1 text-slate-400 opacity-0 hover:text-slate-700 group-hover:opacity-100 focus:opacity-100"
+                  >
+                    <Icon name="edit" size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`Delete ${c.title}`}
+                    onClick={() => void removeChat(c)}
+                    className="rounded p-1 text-slate-400 opacity-0 hover:text-red-600 group-hover:opacity-100 focus:opacity-100"
+                  >
+                    <Icon name="trash" size={14} />
+                  </button>
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+      </aside>
+
+      <div className="flex min-w-0 flex-1 flex-col">
       {/* Header */}
       <div className="mb-4 flex items-center justify-between">
         <div>
@@ -673,7 +868,7 @@ export default function ChatPage() {
               onClick={() => void endSession()}
               className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-400"
             >
-              End Session
+              Close chat
             </button>
           </div>
         )}
@@ -872,7 +1067,51 @@ export default function ChatPage() {
 
           {/* Input area */}
           <div className="border-t border-slate-200 p-3 dark:border-slate-700">
+            {attachments.length > 0 && (
+              <ul className="mb-2 flex flex-wrap gap-2" aria-label="Attached files">
+                {attachments.map((f, i) => (
+                  <li
+                    key={`${f.name}-${i}`}
+                    className="flex items-center gap-1 rounded-full bg-slate-100 py-1 pl-3 pr-1 text-xs text-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                  >
+                    <Icon name="paperclip" size={12} />
+                    <span className="max-w-[12rem] truncate">{f.name}</span>
+                    <button
+                      type="button"
+                      aria-label={`Remove ${f.name}`}
+                      onClick={() => setAttachments((prev) => prev.filter((_, j) => j !== i))}
+                      className="rounded-full p-0.5 text-slate-400 hover:text-red-600"
+                    >
+                      <Icon name="x" size={12} />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
             <div className="flex items-end gap-2">
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept="image/png,image/jpeg,image/gif,image/webp,application/pdf,.txt,.md,.log,.json,.csv,.yml,.yaml,.py,.js,.jsx,.ts,.tsx,.html,.css,.sql,.sh,.java,.go,.rs,.rb,.php,.c,.cpp,.h,.cs,.kt,.swift,.xml,.toml,.ini,.env.example"
+                className="hidden"
+                aria-label="Attach files"
+                onChange={(e) => {
+                  const picked = Array.from(e.target.files ?? []);
+                  setAttachments((prev) => [...prev, ...picked].slice(0, 5));
+                  e.target.value = "";
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={streaming || attachments.length >= 5}
+                title="Attach images, PDFs or text/code files (up to 5)"
+                aria-label="Attach files (images, PDFs, text or code)"
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 text-slate-500 hover:text-orange-600 disabled:opacity-40 dark:border-slate-600"
+              >
+                <Icon name="paperclip" size={18} />
+              </button>
               <textarea
                 ref={inputRef}
                 value={input}
@@ -904,7 +1143,7 @@ export default function ChatPage() {
               ) : (
                 <button
                   onClick={() => void sendMessage()}
-                  disabled={!input.trim()}
+                  disabled={!input.trim() && attachments.length === 0}
                   className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 shrink-0"
                 >
                   <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -919,6 +1158,7 @@ export default function ChatPage() {
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }

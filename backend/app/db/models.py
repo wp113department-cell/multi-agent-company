@@ -719,6 +719,28 @@ class Goal(Base):
     )
 
 
+class ChatSessionRecord(Base):
+    """C2 (2026-10-09): a chat as the user sees it in the list of past
+    chats. Its messages stay in chat_messages (same session id); the live
+    conversation state stays in memory (app.models.chat)."""
+
+    __tablename__ = "chat_sessions"
+
+    id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    project_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("projects.id", ondelete="SET NULL"), nullable=True
+    )
+    repo_path: Mapped[str] = mapped_column(Text)
+    title: Mapped[str] = mapped_column(String(200), default="New chat")
+    created_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    last_message_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class Project(Base):
     """What the user works on (UI redesign, migration 064). Its identity is
     the user's project name; the code may live in a local folder, a GitHub

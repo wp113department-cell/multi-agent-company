@@ -36,6 +36,12 @@ const STEPS: Step[] = [
     text: "Pick a project and describe what you need in plain words. Optionally link it to a goal or an epic, choose Economy or Max, and press Start.",
   },
   {
+    target: "/chat",
+    icon: "message",
+    title: "Chat",
+    text: "Talk with the team about a project: ask questions, have it look into or change code. Your past chats are listed on the left, so you can come back to any of them.",
+  },
+  {
     target: "/agents",
     icon: "bot",
     title: "Agents",

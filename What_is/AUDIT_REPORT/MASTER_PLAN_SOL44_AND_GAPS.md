@@ -452,3 +452,20 @@ Every item gets a full local CI before each push. Close heavy apps first, becaus
   - The work goes through the normal pipeline: plan approval, its own worktree, tests in the sandbox, delivery approval (apply to folder or PR).
   - The overview injection no longer depends on the file indexer, which can fail on an almost-empty folder.
   - Tests: 5 new in `tests/test_w5_new_project.py`, all failing on the old code. One W1 expectation was updated on purpose (an empty folder now gets the "new project" guidance). The bootstrap, memory-hook and W1 tests pass (70).
+- **2026-10-09: C2 list of past chats + C4 chat menu/layout + C1 attachments. DONE (visual check pending).**
+  - **C2:**
+    - New `chat_sessions` table (migration 067, additive, reversible; back-filled from `chat_messages`, with the first user message as the title).
+    - A chat is recorded at creation (project, owner), named after its first message and moved to the top by each message.
+    - `GET /api/chat/sessions` lists the user's chats, optionally per project, newest first.
+    - `PATCH` renames a chat; `DELETE /api/chat/history/{id}` removes it with its messages. `DELETE /sessions/{id}` still only closes the chat and keeps the history.
+    - Another user's chat is neither listed nor editable. Chats from before C2 have no recorded owner and are shared.
+    - Reopening rebuilds the conversation from its record.
+  - **C4:**
+    - The chat page has a left sidebar: project, "+ New chat", and the past chats with rename and delete.
+    - "End Session" became "Close chat".
+    - A Chat entry was added to the menu and the guided tour.
+  - **C1:**
+    - Up to 5 files per message, picked with the paperclip button.
+    - Images (png/jpeg/gif/webp, ≤5 MB) go to the model as images. PDFs (≤20 MB) are turned into text. Text/code files (≤300 KB) are inlined. Binary files are refused.
+    - Stored history keeps "[an image was attached]" instead of the picture data.
+  - Tests: 6 new (C2) and 11 new (C1), all failing on the old code. The 2,857 chat-related and 210 chat-file existing tests pass (the only failures were environmental: `python` missing from PATH, and a Docker timing test that passes on rerun).
