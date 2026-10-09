@@ -138,7 +138,9 @@ async def test_run_migration_accepts_every_real_alembic_revision_shape(
         patch.object(
             agent, "_confirm", new=AsyncMock(return_value=True)
         ) as mock_confirm,
-        patch("app.agents.chat_agent._run_subprocess", return_value="ok") as mock_run,
+        patch(
+            "app.agents.chat_agent._run_repo_db_command", return_value="ok"
+        ) as mock_run,
     ):
         result = await agent._execute_tool(
             "run_migration", {"direction": "upgrade", "revision": revision}
@@ -146,6 +148,8 @@ async def test_run_migration_accepts_every_real_alembic_revision_shape(
 
     mock_confirm.assert_awaited_once()
     mock_run.assert_called_once()
+    # 2026-10-09: runs in the sandbox helper, never a host shell
+    assert mock_run.call_args.args[0] == f"alembic upgrade {revision}"
     assert result == "ok"
 
 
@@ -161,7 +165,7 @@ async def test_run_migration_confirmation_still_gates_a_valid_request(
         patch.object(
             agent, "_confirm", new=AsyncMock(return_value=False)
         ) as mock_confirm,
-        patch("app.agents.chat_agent._run_subprocess") as mock_run,
+        patch("app.agents.chat_agent._run_repo_db_command") as mock_run,
     ):
         result = await agent._execute_tool(
             "run_migration", {"direction": "upgrade", "revision": "head"}
@@ -183,7 +187,9 @@ async def test_run_migration_downgrade_default_revision_still_works(
         patch.object(
             agent, "_confirm", new=AsyncMock(return_value=True)
         ) as mock_confirm,
-        patch("app.agents.chat_agent._run_subprocess", return_value="ok") as mock_run,
+        patch(
+            "app.agents.chat_agent._run_repo_db_command", return_value="ok"
+        ) as mock_run,
     ):
         result = await agent._execute_tool("run_migration", {"direction": "downgrade"})
 

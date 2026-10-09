@@ -636,6 +636,43 @@ def _run_subprocess(
         return f"[ERROR] {e}"
 
 
+def _run_repo_db_command(command: str, cwd: str, timeout: int = 120) -> str:
+    """Run repository code that needs a database (alembic migrations, seed
+    scripts) the way the DevOps migration agent does: in the toolchain
+    sandbox, with DATABASE_URL set to the TARGET project's database
+    (MIGRATION_DATABASE_URL) — never the platform's own — and only the
+    network the owner configured for migrations."""
+    from app.config import get_settings
+    from app.tools.execution.bash import _run_bash_command
+
+    settings = get_settings()
+    if not settings.migration_database_url:
+        return (
+            "[POLICY DENIED] No target database configured: set "
+            "MIGRATION_DATABASE_URL to the project's own database (the "
+            "platform's database is never handed to repository code)."
+        )
+    try:
+        stdout, stderr, code, timed_out = _run_bash_command(
+            command,
+            cwd,
+            timeout=timeout,
+            extra_env={"DATABASE_URL": settings.migration_database_url},
+            image=settings.bash_sandbox_toolchain_image,
+            network=settings.bash_tool_sandbox_network.get("migration"),
+        )
+    except Exception as e:
+        return f"[ERROR] {e}"
+    if timed_out:
+        return f"[ERROR] Command timed out after {timeout}s"
+    out = stdout
+    if stderr:
+        out += "\n[stderr]\n" + stderr
+    if code != 0:
+        out += f"\n[exit {code}]"
+    return out.strip() or "(no output)"
+
+
 def _run_bash_tool(
     command: str,
     cwd: str,
@@ -3762,16 +3799,16 @@ class ChatAgent:
             rmig_backend = (
                 str(root / "backend") if (root / "backend").exists() else repo
             )
-            # POSIX `.` + existence guard — `source` does not exist in dash
-            # (/bin/sh on Ubuntu/Debian); see tools._venv_activate_snippet.
-            import shlex as _shlex_rmig
-
-            _rmig_act = _shlex_rmig.quote(f"{rmig_backend}/.venv/bin/activate")
-            activate = f"if [ -f {_rmig_act} ]; then . {_rmig_act}; fi"
-            rmig_cmd = (
-                f"{activate} && cd {rmig_backend} && alembic {rmig_dir} {rmig_rev} 2>&1"
+            # Sol A01/A11 (2026-10-09): alembic runs the repository's own
+            # migrations/env.py, so it runs in the sandbox against the TARGET
+            # project's database — never on the server with the platform's
+            # environment (it did: a raw host shell, platform DATABASE_URL).
+            return await asyncio.to_thread(
+                _run_repo_db_command,
+                f"alembic {rmig_dir} {rmig_rev}",
+                rmig_backend,
+                120,
             )
-            return await asyncio.to_thread(_run_subprocess, rmig_cmd, rmig_backend, 120)
 
         if tool_name == "generate_changelog":
             # tool_enhance.md productionization pass, tool #100
@@ -4016,9 +4053,16 @@ class ChatAgent:
             # cwd=repo, so the shell's starting directory is already repo,
             # matching this line's previous absolute-path behavior exactly
             # on POSIX while adding a real Windows branch).
-            activate = _venv_activate_snippet()
-            seeddb_cmd = f"{activate} && python3 {str(seeddb_fp)} 2>&1"
-            return await asyncio.to_thread(_run_subprocess, seeddb_cmd, repo, 120)
+            # Sol A01/A11 (2026-10-09): the seed script is repository code —
+            # sandbox + the target project's database, like run_migration.
+            import shlex as _shlex_seed
+
+            return await asyncio.to_thread(
+                _run_repo_db_command,
+                f"python3 {_shlex_seed.quote(seeddb_script)}",
+                repo,
+                120,
+            )
 
         if tool_name == "yaml_validate":
             # tool_enhance.md productionization pass, tool #120

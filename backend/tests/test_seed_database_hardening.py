@@ -197,7 +197,7 @@ async def test_seed_database_accepts_a_real_custom_relative_script(
     with (
         patch.object(agent, "_confirm", new=AsyncMock(return_value=True)),
         patch(
-            "app.agents.chat_agent._run_subprocess", return_value="seeded"
+            "app.agents.chat_agent._run_repo_db_command", return_value="seeded"
         ) as mock_run,
     ):
         result = await agent._execute_tool(
@@ -205,6 +205,8 @@ async def test_seed_database_accepts_a_real_custom_relative_script(
         )
 
     mock_run.assert_called_once()
+    # 2026-10-09: runs in the sandbox helper, never a host shell
+    assert mock_run.call_args.args[0] == "python3 scripts/seed_test_data.py"
     assert result == "seeded"
 
 

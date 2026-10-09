@@ -481,3 +481,8 @@ Every item gets a full local CI before each push. Close heavy apps first, becaus
   - Done: the Docker check of the workspace mount, during today's sandbox work (real container: a folder in the workspace and a worktree, files visible both ways).
   - Done: the owner reports the Windows laptop run worked (launcher, cloning, folder browser).
 - **W8 (live GitHub checks) postponed by the owner (2026-10-09):** to run once a GitHub token is saved in Settings.
+- **2026-10-09: Batch 1 rest, part 1: the chat's `run_migration` and `seed_database` are sandboxed. DONE.**
+  - They ran repository code (alembic's env.py, the seed script) in a raw host shell with the platform's environment, including its `DATABASE_URL`.
+  - They now go through `_run_repo_db_command`: the toolchain sandbox, `DATABASE_URL` set to the target project's database (`MIGRATION_DATABASE_URL`), and the owner-configured migration network. They refuse when no target database is set.
+  - The other five chat tools that use the host shell were reviewed and left on the host: git worktree management and the Docker control tools manage containers, not project code. They are approval-gated, and the platform-container guard added today applies.
+  - Tests: 3 new in `tests/test_a01_chat_db_tools_sandboxed.py`, failing on the old code. 11 existing hardening tests were updated from "calls the host shell" to "calls the sandbox helper, with the exact command". 440 related tests pass.
