@@ -396,7 +396,18 @@ def _agent_call_kwargs(
     if "task_id" in params or takes_any:
         kwargs["task_id"] = task_id
     desc_param = next(
-        (n for n in ("description", "task_description", "doc_request") if n in params),
+        (
+            n
+            for n in (
+                "description",
+                "task_description",
+                "doc_request",
+                "focus",
+                "error_description",
+                "refactor_instructions",
+            )
+            if n in params
+        ),
         None,
     )
     if desc_param is None:
@@ -406,6 +417,51 @@ def _agent_call_kwargs(
     if "repo_path" in params or takes_any:
         kwargs["repo_path"] = repo_path
     return kwargs
+
+
+def _normalize_agent_result(result: Any) -> Any:
+    """Sol A16 (2026-10-09): every runner's return value as an AgentResult.
+    Research and DevOps return (report, error, tokens_in, tokens_out)
+    tuples, but everything after a run (memory, task status, artifact)
+    reads .summary/.status/.findings — so a successful research or devops
+    run crashed right after it finished and left no result behind."""
+    import dataclasses
+
+    from app.agents.agent_result import AgentResult
+
+    if isinstance(result, AgentResult):
+        return result
+    if isinstance(result, tuple) and len(result) == 4:
+        report, error, tokens_in, tokens_out = result
+        if report is None:
+            return AgentResult(
+                summary=str(error or "The agent produced no result."),
+                status="blocked",
+                tokens_in=int(tokens_in or 0),
+                tokens_out=int(tokens_out or 0),
+            )
+        summary = (
+            getattr(report, "summary", None)
+            or getattr(report, "recommended_approach", None)
+            or str(report)
+        )
+        findings = list(getattr(report, "findings", None) or [])
+        findings += list(getattr(report, "risks", None) or [])
+        findings += list(getattr(report, "checks", None) or [])
+        raw = (
+            dataclasses.asdict(report)
+            if dataclasses.is_dataclass(report) and not isinstance(report, type)
+            else {}
+        )
+        return AgentResult(
+            summary=str(summary),
+            findings=findings,
+            status="blocked" if error else "completed",
+            tokens_in=int(tokens_in or 0),
+            tokens_out=int(tokens_out or 0),
+            raw={**raw, **({"error": error} if error else {})},
+        )
+    return AgentResult(summary=str(result), status="completed")
 
 
 def _standalone_run_error(agent_name: str) -> str | None:
@@ -486,7 +542,7 @@ async def _run_specialized_agent_bg(
             call_kwargs = _agent_call_kwargs(fn, task_id, description, effective_repo)
             if resume_trace_id:
                 call_kwargs["resume_trace_id"] = resume_trace_id
-            result = await asyncio.to_thread(fn, **call_kwargs)
+            result = _normalize_agent_result(await asyncio.to_thread(fn, **call_kwargs))
             fleet_manager.complete(agent_name)
 
             # Phase 1.1 (MASTER_AGENT_v2.md) — write to shared memory. Before this,
@@ -769,11 +825,15 @@ async def run_specialized_agent_sync(
         effective_repo = get_active_repo_path()
 
     try:
-        result = await asyncio.to_thread(
-            fn,
-            task_id=body.task_id,
-            description=body.description,
-            repo_path=effective_repo,
+        # Sol A15: the same argument adapter as the background path (each
+        # runner's real parameter names), and A16: one result shape
+        result = _normalize_agent_result(
+            await asyncio.to_thread(
+                fn,
+                **_agent_call_kwargs(
+                    fn, body.task_id, body.description, effective_repo
+                ),
+            )
         )
     except Exception as exc:
         logger.exception(

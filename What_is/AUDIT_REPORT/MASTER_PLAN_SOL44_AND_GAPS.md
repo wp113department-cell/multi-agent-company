@@ -599,3 +599,10 @@ Every item gets a full local CI before each push. Close heavy apps first, becaus
   - **In-process LessonStore:** each lesson records its project folder (`repo_key`, persisted via migration 069). Retrieval, dedup and compaction stay within one project.
   - **The old Cluster O design changed:** "unscoped = shared fallback" / "learning signals always global". 6 tests that encoded it were updated to the new rule (global must be explicit), and the Fleet dashboard and versioned-sync tests now assert the explicit flag.
   - Tests: 3 in `tests/test_a08_memory_scope.py`, all failing on the old code: project A's fact is not shown to project B through the database, versioned lessons or LessonStore. 398 memory/lesson/fleet tests pass.
+- **2026-10-09: Batch 7, A15 + A16 agent entry points and result shape. DONE.**
+  - **A15:** `/run-sync` called every runner as `fn(task_id=, description=, repo_path=)`, but many runners name their instructions `task_description`, `doc_request`, `focus`, `error_description` or `refactor_instructions`, or take no `task_id`. Example: research failed with "unexpected keyword argument 'description'" (500) while the background path worked.
+    - `/run-sync` now uses the same adapter as `/run`, and the adapter knows all those parameter names.
+    - Every standalone agent in the registry (≥40) is checked against its real signature.
+  - **A16:** research and DevOps return `(report, error, tokens_in, tokens_out)` tuples, while everything after a run reads `.summary/.status/.findings`, so a successful run crashed on completion.
+    - `_normalize_agent_result` turns any runner's return value into an `AgentResult` on both paths: research becomes recommended approach + findings/risks, DevOps becomes summary + checks, and an error with no report becomes blocked.
+  - Tests: 66 in `tests/test_a15_a16_agent_entry_points.py`. The research run-sync and tuple tests fail on the old code. 912 specialized-agent tests pass; one audit hash-chain concurrency test flaked once under CI load and passes 3/3 on rerun.
