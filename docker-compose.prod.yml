@@ -98,6 +98,38 @@ services:
       db:
         condition: service_healthy
 
+  # Sol A31: the only service with the Docker socket; enable with
+  #   docker compose -f docker-compose.prod.yml --profile sandbox up -d
+  # It allows only locked-down sandbox containers (approved images,
+  # non-root, never privileged, no host network, folders only from the
+  # worktree/repo volumes it mounts read-only here) and blocks everything
+  # else. Build the sandbox image on the host first:
+  #   docker build -t gridiron-bash-toolchain:latest -f backend/docker/bash-sandbox/Dockerfile backend
+  runner:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    logging: *default-logging
+    command: python -m app.runner
+    profiles:
+      - sandbox
+    group_add:
+      - "${DOCKER_SOCKET_GID:-0}"
+    environment:
+      RUNNER_IMAGES: gridiron-bash-toolchain:latest,alpine:latest
+      RUNNER_NETWORKS: none,bridge,default
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - worktrees:/data/worktrees:ro
+      - repos:/data/repos:ro
+    networks:
+      - sandbox-control
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 2375), 3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
   backend:
     build:
       context: ./backend
@@ -131,19 +163,22 @@ services:
       WORKTREES_DIR: /data/worktrees
       REPOS_DIR: /data/repos
       BG_PROCESS_REGISTRY_PATH: /data/bg-processes.json
-      # See this file's header comment — sandboxed bash tools need a Docker
-      # daemon reachable from inside this container, which this manifest
-      # deliberately does not wire (docker.sock access is host-root
-      # equivalent). Leaving this at the app's own secure-by-default `true`
-      # means those 3 generic bash tools fail closed (raise
-      # SandboxUnavailableError) rather than silently running unsandboxed —
-      # set to "false" only as an explicit, operator-acknowledged opt-out.
+      # Code sandbox (Sol A31, 2026-10-09): this container never gets the
+      # Docker socket (host-root equivalent). Sandboxed tools reach Docker
+      # only through the `runner` service (profile "sandbox"), which allows
+      # nothing but locked-down sandbox containers. Without that profile
+      # Docker is unreachable and those tools fail closed — they never run
+      # code in here. BASH_SANDBOX_ENABLED=false is an explicit opt-out.
       BASH_SANDBOX_ENABLED: ${BASH_SANDBOX_ENABLED:-true}
+      DOCKER_HOST: tcp://runner:2375
       ALLOWED_WORKSPACE_PARENT: '${ALLOWED_WORKSPACE_PARENT:?ALLOWED_WORKSPACE_PARENT is required in production — a real, restrictive parent directory for the Repo Console''s path-traversal guard}'
     volumes:
       - worktrees:/data/worktrees
       - repos:/data/repos
       - bgprocesses:/data
+    networks:
+      - default
+      - sandbox-control
     depends_on:
       db:
         condition: service_healthy
@@ -223,6 +258,12 @@ services:
       resources:
         limits:
           memory: 1g
+
+networks:
+  default:
+  # backend <-> runner only; no route out
+  sandbox-control:
+    internal: true
 
 volumes:
   pgdata:

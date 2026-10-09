@@ -64,6 +64,19 @@ async def _code_sandbox_available() -> bool:
     return True
 
 
+@router.get("/capabilities")
+async def sandbox_capabilities(
+    refresh: bool = False,
+    _actor: str = Depends(require_authenticated),
+) -> dict[str, Any]:
+    """Sol A31: what the code sandbox can actually do (cached 10 minutes)."""
+    import asyncio
+
+    from app.services.capabilities import check
+
+    return await asyncio.to_thread(check, refresh)
+
+
 @router.get("")
 async def get_settings_view(
     db: AsyncSession = Depends(get_db),

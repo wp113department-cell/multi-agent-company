@@ -823,6 +823,21 @@ export async function createChatSession(
   return handleResponse(res);
 }
 
+/** Sol A31: what the code sandbox can actually do. */
+export interface SandboxCapabilities {
+  sandbox: boolean;
+  programs: Record<string, boolean>;
+  browsers: boolean;
+  labels: Record<string, string>;
+  note?: string;
+}
+
+export async function fetchSandboxCapabilities(refresh = false): Promise<SandboxCapabilities> {
+  return handleResponse<SandboxCapabilities>(
+    await apiFetch(`/api/settings/capabilities${refresh ? "?refresh=true" : ""}`),
+  );
+}
+
 /** C3: a note the user asked the team to remember for a project. */
 export interface ProjectNote {
   id: string;

@@ -5,6 +5,7 @@ import { useState } from "react";
 import { fetchAppSettings, saveApiKey, saveGithubToken, type AppSettings } from "../../lib/api";
 import { authHeaders } from "../../lib/auth";
 import { Icon } from "../../components/Icon";
+import { SandboxCapabilitiesCard } from "../../components/SandboxCapabilitiesCard";
 
 // ---------------------------------------------------------------------------
 // API helpers
@@ -235,6 +236,8 @@ export default function SettingsPage() {
             onSave={(key) => saveAnthropicMutation.mutateAsync(key).then(() => {})}
             isSaving={saveAnthropicMutation.isPending}
           />
+
+          <SandboxCapabilitiesCard />
 
           <details className="group rounded-xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
             <summary className="flex cursor-pointer items-center justify-between px-6 py-4 text-sm font-semibold text-slate-800 dark:text-slate-200">

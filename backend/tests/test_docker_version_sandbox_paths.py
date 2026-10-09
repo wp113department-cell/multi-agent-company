@@ -280,15 +280,24 @@ def test_docker_restart_tool_refuses_the_platform_database(
     assert ran == []
 
 
-def test_compose_gives_the_backend_the_engine_and_shared_worktrees() -> None:
+def test_compose_gives_only_the_runner_the_docker_socket() -> None:
+    """Sol A31: the backend reaches Docker only through the runner; the
+    runner alone holds the socket, on an internal network."""
     import yaml
 
     root = Path(__file__).resolve().parents[2]
     compose = yaml.safe_load((root / "docker-compose.yml").read_text())
     backend = compose["services"]["backend"]
-    assert "/var/run/docker.sock:/var/run/docker.sock" in backend["volumes"]
+    runner = compose["services"]["runner"]
+    assert not any("docker.sock" in str(v) for v in backend["volumes"])
+    assert "group_add" not in backend
+    assert backend["environment"]["DOCKER_HOST"] == "tcp://runner:2375"
     assert "worktrees:/tmp/gridiron-worktrees" in backend["volumes"]
-    assert backend["depends_on"]["sandbox-image"]["condition"] == (
+    assert "/var/run/docker.sock:/var/run/docker.sock" in runner["volumes"]
+    assert "ports" not in runner
+    assert runner["networks"] == ["sandbox-control"]
+    assert compose["networks"]["sandbox-control"]["internal"] is True
+    assert runner["depends_on"]["sandbox-image"]["condition"] == (
         "service_completed_successfully"
     )
     assert (
@@ -296,7 +305,13 @@ def test_compose_gives_the_backend_the_engine_and_shared_worktrees() -> None:
         == "gridiron-bash-toolchain:latest"
     )
     prod = yaml.safe_load((root / "docker-compose.prod.yml").read_text())
-    for service in prod["services"].values():
-        assert not any("docker.sock" in str(v) for v in service.get("volumes") or [])
+    for name, service in prod["services"].items():
+        has_sock = any("docker.sock" in str(v) for v in service.get("volumes") or [])
+        assert has_sock == (name == "runner"), name
+    assert prod["services"]["runner"]["profiles"] == ["sandbox"]  # opt-in
+    assert prod["services"]["backend"]["environment"]["DOCKER_HOST"] == (
+        "tcp://runner:2375"
+    )
+    assert prod["networks"]["sandbox-control"]["internal"] is True
     dockerfile = (root / "backend" / "Dockerfile").read_text()
     assert "/usr/local/bin/docker" in dockerfile

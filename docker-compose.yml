@@ -52,19 +52,16 @@ services:
       db:
         condition: service_healthy
 
-  # Code sandbox (2026-10-09): the backend runs code, tests, the bash tools
-  # and the terminal ONLY inside throwaway sandbox containers, which it
-  # starts on this computer's own Docker engine through the mounted Docker
-  # socket below (Docker CLI in backend/Dockerfile). The sandboxes get no
-  # network, no secrets and only the one folder they work on; the backend
-  # translates its folder paths to the engine's paths
-  # (app/policy/docker_host.py). Agents may not exec into or restart the
-  # platform's own containers.
-  # Tradeoff: access to the Docker socket is equivalent to admin rights on
-  # this computer, so this file is for a single-user desktop install.
-  # docker-compose.prod.yml does NOT mount the socket. To run without it,
-  # remove the socket line; sandboxed tools then report "unavailable" and
-  # never fall back to running code inside the backend.
+  # Code sandbox (2026-10-09; Sol A31): the backend runs code, tests, the
+  # bash tools and the terminal ONLY inside throwaway sandbox containers. It
+  # does NOT hold the Docker socket (that is admin rights on this computer):
+  # the `runner` service below does, and the backend's docker commands reach
+  # it over a private network (DOCKER_HOST). The runner lets through only
+  # what sandboxes need — approved images, non-root, never privileged, no
+  # host network, folders only from the workspace or a task's own worktree
+  # — and blocks everything else (exec into other containers, restart,
+  # build, compose...). See backend/app/runner/proxy.py. Folder paths are
+  # translated to the engine's names in app/policy/docker_host.py.
   # DOCKER_SOCKET_GID: group that owns the socket (0 on Docker Desktop for
   # Windows/macOS/Linux; on a plain Linux engine: `stat -c %g
   # /var/run/docker.sock`).
@@ -77,6 +74,34 @@ services:
     image: gridiron-bash-toolchain:latest
     command: ["true"]
     restart: "no"
+
+  # The only service with the Docker socket (Sol A31). Mounts the same
+  # folders as the backend (read-only) so it knows which folders sandboxes
+  # may use; reachable only from the backend, on an internal network.
+  runner:
+    build:
+      context: ./backend
+    command: python -m app.runner
+    restart: unless-stopped
+    group_add:
+      - "${DOCKER_SOCKET_GID:-0}"
+    environment:
+      RUNNER_IMAGES: gridiron-bash-toolchain:latest,alpine:latest
+      RUNNER_NETWORKS: none,bridge,default
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${WORKSPACE_DIR:-./workspace}:/workspace:ro
+      - worktrees:/tmp/gridiron-worktrees:ro
+    networks:
+      - sandbox-control
+    depends_on:
+      sandbox-image:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 2375), 3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
   backend:
     build:
@@ -110,20 +135,22 @@ services:
       DEFAULT_ADMIN_PASSWORD: ${DEFAULT_ADMIN_PASSWORD:-gridiron123}
       CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:-}
       BASH_SANDBOX_ENABLED: ${BASH_SANDBOX_ENABLED:-true}
+      # docker commands go to the runner, never to the Docker socket
+      DOCKER_HOST: tcp://runner:2375
       # Repositories live in a folder of the user's computer, mounted at
       # /workspace (the Windows launcher uses Documents\multi-agent-workspace).
       ALLOWED_WORKSPACE_PARENT: /workspace
       REPOS_DIR: /workspace/repos
       WORKSPACE_HOST_LABEL: ${WORKSPACE_HOST_LABEL:-./workspace}
-    group_add:
-      - "${DOCKER_SOCKET_GID:-0}"
     volumes:
       - ${WORKSPACE_DIR:-./workspace}:/workspace
       - worktrees:/tmp/gridiron-worktrees
-      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - default
+      - sandbox-control
     depends_on:
-      sandbox-image:
-        condition: service_completed_successfully
+      runner:
+        condition: service_healthy
       db:
         condition: service_healthy
       migrate:
@@ -207,6 +234,12 @@ services:
         condition: service_healthy
     profiles:
       - backup
+
+networks:
+  default:
+  # backend <-> runner only; no route out
+  sandbox-control:
+    internal: true
 
 volumes:
   pgdata:

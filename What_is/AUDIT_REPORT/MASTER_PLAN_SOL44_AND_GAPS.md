@@ -486,3 +486,29 @@ Every item gets a full local CI before each push. Close heavy apps first, becaus
   - They now go through `_run_repo_db_command`: the toolchain sandbox, `DATABASE_URL` set to the target project's database (`MIGRATION_DATABASE_URL`), and the owner-configured migration network. They refuse when no target database is set.
   - The other five chat tools that use the host shell were reviewed and left on the host: git worktree management and the Docker control tools manage containers, not project code. They are approval-gated, and the platform-container guard added today applies.
   - Tests: 3 new in `tests/test_a01_chat_db_tools_sandboxed.py`, failing on the old code. 11 existing hardening tests were updated from "calls the host shell" to "calls the sandbox helper, with the exact command". 440 related tests pass.
+- **2026-10-09: A31 sandbox runner + capability health checks. DONE** (owner chose "separate runner service").
+  - **Runner** (`backend/app/runner/proxy.py`, the `runner` compose service): the only container with the Docker socket. The backend has no socket any more (`DOCKER_HOST=tcp://runner:2375`, internal `sandbox-control` network, no published port).
+  - It speaks the Docker Engine API but allows only:
+    - containers from approved images (`gridiron-bash-toolchain`, `alpine`);
+    - non-root, never privileged, no added capabilities, devices or host namespaces, no seccomp/apparmor opt-out, approved networks only;
+    - folders only from the workspace bind or a task's own sub-folder of the worktrees volume (learned by inspecting its own mounts; `Binds` and anonymous volumes are refused);
+    - start, wait, attach, resize, logs, kill, stop and remove only for containers it created (label `gridiron.runner=1`);
+    - ping, version, info, container list and image inspect; pulls of approved images only;
+    - inspect of other containers, with `Config.Env` stripped.
+  - Everything else is 403 with a plain message: exec, restart, build, compose, volumes, networks, archive, swarm. One request per connection; the attach upgrade is relayed both ways for terminals.
+  - Production: the runner is opt-in (`--profile sandbox`). Without it the sandbox fails closed, as before.
+  - **Capability health checks** (`app/services/capabilities.py`, `GET /api/settings/capabilities`, the Settings "Code sandbox" card): the toolchain image is started once (cached for 10 minutes, locked down) and reports which programs it has.
+    - Today: Python, Node, npm, pnpm, git and make are present.
+    - The GitHub CLI and test browsers are not, and are shown as "not available".
+  - Verified on the real Docker stack without AI:
+    - the backend has no socket;
+    - pytest jobs run from the workspace and from worktrees through the runner, with files visible;
+    - an interactive stdin/stdout run works (the terminal path);
+    - exec into the database, restarting it, privileged runs and mounting `/` are blocked;
+    - the database's environment is hidden;
+    - `codeSandboxAvailable` is true.
+  - Tests:
+    - 46 in `tests/test_a31_sandbox_runner.py`: rules, plus real docker CLI → runner → engine end-to-end;
+    - 6 in `tests/test_a31_capabilities.py`;
+    - the compose test was rewritten (only the runner has the socket);
+    - 346 compose-related and 225 settings/sandbox tests pass.
