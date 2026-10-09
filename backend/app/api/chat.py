@@ -39,7 +39,9 @@ router = APIRouter(prefix="/api/chat", tags=["chat"])
 
 
 class CreateSessionRequest(BaseModel):
-    repo_path: str
+    # Sol A03: a project (preferred — the server resolves its folder) or the
+    # path of a registered project/repository folder; nothing else.
+    repo_path: str | None = None
     # C2: the project the chat belongs to (shown in the list of past chats)
     project_id: int | None = None
 
@@ -203,6 +205,62 @@ def _without_image_data(content: Any) -> Any:
     ]
 
 
+async def _authorized_chat_folder(db: AsyncSession, body: CreateSessionRequest) -> str:
+    """Sol A03 (2026-10-09): the folder a chat (and its terminal, which
+    mounts it into the sandbox) works in is resolved on the server: from
+    the chosen project, or — for a path — only when it is a registered
+    project/repository folder (or inside one). Nonexistent folders and
+    folders reached through a symlink are refused. It used to be any path
+    the caller sent."""
+    import os
+
+    from sqlalchemy import select
+
+    from app.db.models import Project, Repo
+    from app.services.workspace_service import is_within
+
+    if body.project_id is not None:
+        project = await db.get(Project, body.project_id)
+        if project is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+        repo = await db.get(Repo, project.repo_id) if project.repo_id else None
+        folder = (repo.local_path if repo and repo.status == "ready" else None) or (
+            project.local_path if repo is None else None
+        )
+        if not folder:
+            raise HTTPException(
+                status_code=400,
+                detail="This project's files are not ready yet (still downloading?).",
+            )
+    elif body.repo_path:
+        folder = body.repo_path
+        roots = [
+            str(r) for r in (await db.execute(select(Repo.local_path))).scalars() if r
+        ] + [
+            str(p)
+            for p in (await db.execute(select(Project.local_path))).scalars()
+            if p
+        ]
+        if not any(is_within(folder, root) for root in roots):
+            raise HTTPException(
+                status_code=403,
+                detail="Choose one of your projects: chats can only work in a "
+                "registered project folder.",
+            )
+    else:
+        raise HTTPException(status_code=400, detail="Choose a project for the chat.")
+    absolute = os.path.abspath(folder)
+    if os.path.realpath(absolute) != absolute:
+        raise HTTPException(
+            status_code=403, detail="The project folder may not be a symbolic link."
+        )
+    if not os.path.isdir(absolute):
+        raise HTTPException(
+            status_code=400, detail="The project folder does not exist."
+        )
+    return absolute
+
+
 async def _touch_chat_record(db: AsyncSession, session_id: str, message: str) -> None:
     """C2: a new message moves the chat to the top of the list; the first
     one names it. Non-fatal: the list must never block a chat turn."""
@@ -258,6 +316,7 @@ async def create_chat_session(
     _actor: str = Depends(require_approver),
 ) -> CreateSessionResponse:
     """Create a new chat session for a repository."""
+    folder = await _authorized_chat_folder(db, body)
     # Stage 4 Cluster O Phase 1b (2026-08-05) — resolved once here, at
     # session creation, per CLUSTER_O_DESIGN.md §2 Q2 ("resolved once at
     # the boundary, carried for the unit of work's lifetime"). Non-fatal:
@@ -265,12 +324,12 @@ async def create_chat_session(
     from app.db.repository import resolve_repo_id_from_path
 
     try:
-        repo_id = await resolve_repo_id_from_path(db, body.repo_path)
+        repo_id = await resolve_repo_id_from_path(db, folder)
     except Exception:
         logger.debug("chat session repo_id resolution skipped", exc_info=True)
         repo_id = None
 
-    session = create_session(repo_path=body.repo_path, repo_id=repo_id)
+    session = create_session(repo_path=folder, repo_id=repo_id)
     # C2: the chat appears in the list of past chats
     from app.db.models import ChatSessionRecord
 
@@ -278,7 +337,7 @@ async def create_chat_session(
         ChatSessionRecord(
             id=session.session_id,
             project_id=body.project_id,
-            repo_path=body.repo_path,
+            repo_path=folder,
             title="New chat",
             created_by=_actor,
         )

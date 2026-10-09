@@ -519,3 +519,12 @@ Every item gets a full local CI before each push. Close heavy apps first, becaus
   - On the old code, 12 of the 15 attacks succeeded (secrets read, `.env` overwritten, a git hook written). Now all are blocked, and ordinary files and aliases to ordinary files still work.
   - Remaining note: the window between the check and the open (a symlink swapped in between) is very small and needs a concurrent attacker in the same worktree; not addressed further.
   - Tests: 15 new in `tests/test_a04_protected_paths_through_aliases.py`. The 741 existing guard and symlink tests pass. The 2 others need the local DB, which was stopped for CI; the full CI covers them.
+- **2026-10-09: Batch 2, A03 "chat and terminal folder authorization". DONE.**
+  - `POST /api/chat/sessions` accepted any folder path the caller sent, and the chat's terminal mounts that folder into the sandbox.
+  - The folder is now resolved on the server (`_authorized_chat_folder`):
+    - from `project_id` (the project's ready repository folder or local folder), ignoring any path sent with it;
+    - or, for a plain path, only when it is a registered project/repository folder or inside one (whole-component comparison, so `shop-evil` is not inside `shop`);
+    - folders reached through a symlink are refused (403), and nonexistent folders, no project and unknown projects get 400/400/404.
+  - The chat page no longer offers "Or a folder path (advanced)"; chats start from a project.
+  - Ownership of projects between users is left to A07 (Batch 6).
+  - Tests: 9 new in `tests/test_a03_chat_folder_authorization.py`, 8 failing on the old code. The C1/C2 chat tests now register their temporary folder as a project, as real use does. 139 chat/auth tests pass.

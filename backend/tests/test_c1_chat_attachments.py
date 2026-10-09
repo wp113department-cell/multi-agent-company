@@ -96,6 +96,48 @@ def test_stored_history_keeps_a_note_not_the_picture() -> None:
 # -- wiring: POST /api/chat/sessions/{id}/messages ----------------------------
 
 
+def _db(fn):  # type: ignore[no-untyped-def]
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.config import get_settings
+
+    async def _run():  # type: ignore[no-untyped-def]
+        engine = create_async_engine(get_settings().database_url, pool_pre_ping=True)
+        try:
+            async with async_sessionmaker(engine, expire_on_commit=False)() as s:
+                return await fn(s)
+        finally:
+            await engine.dispose()
+
+    return asyncio.run(_run())
+
+
+def _register_folder(path: str) -> int:
+    """Sol A03: chats only open in a registered project folder."""
+    from app.db.models import Project
+
+    async def make(s):  # type: ignore[no-untyped-def]
+        p = Project(name="chat test", local_path=path, source="local_existing")
+        s.add(p)
+        await s.commit()
+        await s.refresh(p)
+        return p.id
+
+    return int(_db(make))
+
+
+def _unregister(project_id: int) -> None:
+    from sqlalchemy import delete
+
+    from app.db.models import Project
+
+    async def drop(s):  # type: ignore[no-untyped-def]
+        await s.execute(delete(Project).where(Project.id == project_id))
+        await s.commit()
+
+    _db(drop)
+
+
 class _FakeAgent:
     def __init__(self, session: Any) -> None:
         self.session = session
@@ -116,6 +158,8 @@ def test_sending_with_attachments_reaches_the_agent(
     tmp_path: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from app.agents import chat_agent
+
+    project_id = _register_folder(str(tmp_path))
 
     agents: list[_FakeAgent] = []
 
@@ -151,6 +195,7 @@ def test_sending_with_attachments_reaches_the_agent(
             history = client.get(f"/api/chat/sessions/{sid}/history").json()["history"]
         finally:
             client.delete(f"/api/chat/history/{sid}")
+    _unregister(project_id)
     message, images = agents[0].calls[0]
     assert message.startswith("Why does this fail?") and "Traceback: boom" in message
     assert images[0]["source"]["data"] == PNG
@@ -158,6 +203,7 @@ def test_sending_with_attachments_reaches_the_agent(
 
 
 def test_an_empty_message_without_files_is_refused(tmp_path: Any) -> None:
+    project_id = _register_folder(str(tmp_path))
     with TestClient(app) as client:
         sid = client.post(
             "/api/chat/sessions", json={"repo_path": str(tmp_path)}
@@ -169,6 +215,7 @@ def test_an_empty_message_without_files_is_refused(tmp_path: Any) -> None:
             assert r.status_code == 400
         finally:
             client.delete(f"/api/chat/history/{sid}")
+    _unregister(project_id)
 
 
 def test_the_stored_message_has_no_picture_data(tmp_path: Any) -> None:

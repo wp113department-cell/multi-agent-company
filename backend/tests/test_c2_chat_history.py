@@ -34,10 +34,38 @@ def _db(fn):  # type: ignore[no-untyped-def]
     return asyncio.run(_run())
 
 
+def _register_folder(path: str) -> int:
+    """Sol A03: chats only open in a registered project folder."""
+    from app.db.models import Project
+
+    async def make(s):  # type: ignore[no-untyped-def]
+        p = Project(name="chat test", local_path=path, source="local_existing")
+        s.add(p)
+        await s.commit()
+        await s.refresh(p)
+        return p.id
+
+    return int(_db(make))
+
+
+def _unregister(project_id: int) -> None:
+    from sqlalchemy import delete
+
+    from app.db.models import Project
+
+    async def drop(s):  # type: ignore[no-untyped-def]
+        await s.execute(delete(Project).where(Project.id == project_id))
+        await s.commit()
+
+    _db(drop)
+
+
 @pytest.fixture
 def chats(tmp_path: Any):  # type: ignore[no-untyped-def]
     created: list[str] = []
+    project_id = _register_folder(str(tmp_path))
     yield created, str(tmp_path)
+    _unregister(project_id)
 
     async def clean(s):  # type: ignore[no-untyped-def]
         from sqlalchemy import delete, text
