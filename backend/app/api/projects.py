@@ -39,6 +39,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.db import get_db
 from app.db.models import DevTask, Epic, Goal, Project, Repo
+from app.api.budget_gate import require_daily_budget
 from app.middleware.rbac import require_approver, require_authenticated
 from app.services import git_service, workspace_service
 
@@ -557,6 +558,138 @@ async def update_project(
     return _project_dict(p, repo)
 
 
+# ---------------------------------------------------------------------------
+# W1 (2026-10-09): understand a project. The free scan (no AI, only reads
+# files) is always available; the AI summary only when the user asks.
+# ---------------------------------------------------------------------------
+
+
+def _ai_overview_key(project_id: int) -> str:
+    return f"project-ai-overview:{project_id}"
+
+
+async def _project_folder(db: AsyncSession, p: Project) -> str | None:
+    repo = await db.get(Repo, p.repo_id) if p.repo_id else None
+    if repo is not None:
+        return repo.local_path if repo.status == "ready" else None
+    return p.local_path
+
+
+@router.get("/{project_id}/overview")
+async def project_overview(
+    project_id: int,
+    db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
+) -> dict[str, Any]:
+    import asyncio
+    import json
+
+    from app.db.repository import get_setting
+    from app.repo_tools.project_scan import scan_project
+
+    p = await db.get(Project, project_id)
+    if p is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    folder = await _project_folder(db, p)
+    scan = (
+        await asyncio.to_thread(scan_project, folder)
+        if folder
+        else {"ok": False, "error": "The project's files are not ready yet."}
+    )
+    stored = await get_setting(db, _ai_overview_key(project_id))
+    ai = json.loads(stored) if stored else None
+    return {"scan": scan, "ai": ai}
+
+
+@router.post("/{project_id}/overview/ai", dependencies=[Depends(require_daily_budget)])
+async def project_overview_ai(
+    project_id: int,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_approver),
+) -> dict[str, Any]:
+    """Only on the user's click: a read-only agent reads the project and
+    writes a plain summary (purpose, structure, how to run/test, risks)."""
+    import json
+
+    from app.db.repository import get_setting, set_setting
+
+    p = await db.get(Project, project_id)
+    if p is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    folder = await _project_folder(db, p)
+    if not folder:
+        raise HTTPException(
+            status_code=400, detail="This project's files are not ready yet."
+        )
+    stored = await get_setting(db, _ai_overview_key(project_id))
+    if stored and json.loads(stored).get("status") == "running":
+        return dict(json.loads(stored))
+    state = {
+        "status": "running",
+        "summary": None,
+        "startedAt": datetime.now(timezone.utc).isoformat(),
+    }
+    await set_setting(db, _ai_overview_key(project_id), json.dumps(state))
+    await db.commit()
+    background_tasks.add_task(_run_ai_overview, project_id, folder)
+    return state
+
+
+_AI_OVERVIEW_TOOLS = [
+    "get_file_tree",
+    "list_files",
+    "read_file",
+    "read_files",
+    "search_code",
+    "find_todos",
+    "git_log",
+]
+_AI_OVERVIEW_REQUEST = (
+    "Understand this project for the team that will work on it. In plain "
+    "words: what it does; how it is organised (main folders and files); how "
+    "to run it and how to run its tests (only commands you found in its "
+    "files); and problems or risks you noticed (missing tests, TODOs, "
+    "outdated or unclear parts). Keep it short and concrete."
+)
+
+
+async def _run_ai_overview(project_id: int, folder: str) -> None:
+    import asyncio
+    import json
+
+    from app.api.team import _run_agent
+    from app.db.repository import set_setting
+    from app.db.session import get_async_session
+
+    result = {"status": "failed", "summary": None}
+    try:
+        state = await asyncio.to_thread(
+            _run_agent,
+            project_id,
+            "project overview",
+            "Read-only project analyst.",
+            _AI_OVERVIEW_TOOLS,
+            folder,
+            _AI_OVERVIEW_REQUEST,
+        )
+        raw = state.get("result") or {}
+        if state.get("submitted") and raw.get("summary"):
+            result = {"status": "completed", "summary": str(raw["summary"])[:8000]}
+        else:
+            result = {
+                "status": "failed",
+                "summary": "The AI stopped before finishing. Try again.",
+            }
+    except Exception as exc:
+        logger.exception("AI overview for project %s failed", project_id)
+        result = {"status": "failed", "summary": f"Failed: {type(exc).__name__}"}
+    result["finishedAt"] = datetime.now(timezone.utc).isoformat()
+    async with get_async_session() as db:
+        await set_setting(db, _ai_overview_key(project_id), json.dumps(result))
+        await db.commit()
+
+
 @router.post("/{project_id}/open")
 async def open_project(
     project_id: int,
@@ -645,5 +778,15 @@ async def delete_project(
     if p is None:
         raise HTTPException(status_code=404, detail="Project not found")
     await db.delete(p)
+    # W1: its stored AI overview goes with it
+    from sqlalchemy import delete as sql_delete
+
+    from app.db.models import SystemSetting
+
+    await db.execute(
+        sql_delete(SystemSetting).where(
+            SystemSetting.key == _ai_overview_key(project_id)
+        )
+    )
     await db.commit()
     return {"deleted": True, "id": project_id}

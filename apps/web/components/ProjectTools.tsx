@@ -7,12 +7,17 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { updateProject } from "../lib/api";
+import {
+  getProjectOverview,
+  requestAiOverview,
+  updateProject,
+  type ProjectOverview,
+} from "../lib/api";
 import { authHeaders } from "../lib/auth";
 import { useEscapeKey } from "./FolderPicker";
 import { Icon } from "./Icon";
 
-type Tab = "changes" | "history" | "branches" | "save";
+type Tab = "overview" | "changes" | "history" | "branches" | "save";
 
 interface GitCommit {
   sha: string;
@@ -55,7 +60,7 @@ export function ProjectTools({
   onClose: () => void;
 }) {
   useEscapeKey(onClose);
-  const [tab, setTab] = useState<Tab>("changes");
+  const [tab, setTab] = useState<Tab>(projectId !== undefined ? "overview" : "changes");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [status, setStatus] = useState("");
@@ -65,6 +70,7 @@ export function ProjectTools({
   const [newBranch, setNewBranch] = useState("");
   const [commitMsg, setCommitMsg] = useState("");
   const [deliverTo, setDeliverTo] = useState(targetBranch ?? "");
+  const [overview, setOverview] = useState<ProjectOverview | null>(null);
 
   const run = useCallback(async (fn: () => Promise<void>, success?: string) => {
     setBusy(true);
@@ -106,11 +112,29 @@ export function ProjectTools({
     [path, run],
   );
 
+  const loadOverview = useCallback(
+    () =>
+      projectId === undefined
+        ? Promise.resolve()
+        : run(async () => setOverview(await getProjectOverview(projectId))),
+    [projectId, run],
+  );
+  // while the AI summary is being written, check back every few seconds
+  const aiRunning = overview?.ai?.status === "running";
   useEffect(() => {
+    if (tab !== "overview" || !aiRunning || projectId === undefined) return;
+    const t = setInterval(() => {
+      void getProjectOverview(projectId).then(setOverview).catch(() => undefined);
+    }, 4000);
+    return () => clearInterval(t);
+  }, [tab, aiRunning, projectId]);
+
+  useEffect(() => {
+    if (tab === "overview") void loadOverview();
     if (tab === "changes" || tab === "save") void loadChanges();
     if (tab === "history") void loadHistory();
     if (tab === "branches") void loadBranches();
-  }, [tab, loadChanges, loadHistory, loadBranches]);
+  }, [tab, loadOverview, loadChanges, loadHistory, loadBranches]);
 
   const changedFiles = status ? status.split("\n").filter(Boolean) : [];
 
@@ -137,6 +161,7 @@ export function ProjectTools({
         <div className="flex gap-1 overflow-x-auto border-b border-slate-100 px-6 pt-3 dark:border-slate-800" role="tablist">
           {(
             [
+              ...(projectId !== undefined ? ([["overview", "Overview"]] as const) : []),
               ["changes", "Changes"],
               ["history", "History"],
               ["branches", "Branches"],
@@ -168,6 +193,81 @@ export function ProjectTools({
             >
               {msg.text}
             </p>
+          )}
+
+          {tab === "overview" && overview && (
+            <div className="space-y-4 text-sm text-slate-700 dark:text-slate-200">
+              {!overview.scan.ok ? (
+                <p className="text-slate-500">{overview.scan.error}</p>
+              ) : (
+                <dl className="grid gap-x-4 gap-y-2 sm:grid-cols-[9rem_1fr]">
+                  {(
+                    [
+                      ["Languages", overview.scan.languages],
+                      ["Frameworks & tools", overview.scan.frameworks],
+                      ["How to run", overview.scan.runCommands],
+                      ["How to test", overview.scan.testCommands],
+                    ] as const
+                  ).map(([label, items]) => (
+                    <div key={label} className="contents">
+                      <dt className="font-medium text-slate-500">{label}</dt>
+                      <dd className={label.startsWith("How") ? "font-mono text-xs" : ""}>
+                        {items && items.length ? items.join(label.startsWith("How") ? "  ·  " : ", ") : "—"}
+                      </dd>
+                    </div>
+                  ))}
+                  <dt className="font-medium text-slate-500">Size</dt>
+                  <dd>
+                    {overview.scan.fileCount} files ·{" "}
+                    {((overview.scan.sizeBytes ?? 0) / 1024 / 1024).toFixed(1)} MB
+                  </dd>
+                  {overview.scan.topLevel && overview.scan.topLevel.length > 0 && (
+                    <>
+                      <dt className="font-medium text-slate-500">Top level</dt>
+                      <dd className="font-mono text-xs">{overview.scan.topLevel.join("  ")}</dd>
+                    </>
+                  )}
+                </dl>
+              )}
+              {overview.scan.warnings && overview.scan.warnings.length > 0 && (
+                <ul className="space-y-1 rounded-lg bg-amber-50 p-3 text-xs text-amber-900 dark:bg-amber-900/20 dark:text-amber-200">
+                  {overview.scan.warnings.map((w) => (
+                    <li key={w}>{w}</li>
+                  ))}
+                </ul>
+              )}
+              <div className="border-t border-slate-100 pt-4 dark:border-slate-800">
+                <p className="font-medium">AI summary</p>
+                {overview.ai?.summary && (
+                  <p className="mt-2 whitespace-pre-wrap text-sm">{overview.ai.summary}</p>
+                )}
+                {overview.ai?.status === "running" ? (
+                  <p className="mt-2 text-xs text-slate-500">The AI is reading the project…</p>
+                ) : (
+                  <>
+                    <p className="mt-1 text-xs text-slate-500">
+                      The free scan above is used by the team automatically. For a deeper
+                      summary (what the code does, risks), the AI can read the project. This
+                      uses your Anthropic credit (a few cents).
+                    </p>
+                    <button
+                      type="button"
+                      disabled={busy || projectId === undefined}
+                      onClick={() =>
+                        void run(async () => {
+                          if (projectId === undefined) return;
+                          await requestAiOverview(projectId);
+                          setOverview(await getProjectOverview(projectId));
+                        })
+                      }
+                      className="mt-3 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 disabled:opacity-50 dark:border-slate-600 dark:text-slate-200"
+                    >
+                      {overview.ai?.summary ? "Update with AI" : "Understand with AI"}
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
           )}
 
           {tab === "changes" && !busy && (

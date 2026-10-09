@@ -920,6 +920,36 @@ export async function getProject(id: number): Promise<ProjectDetail> {
   return handleResponse<ProjectDetail>(res);
 }
 
+/** W1: the free scan of a project (no AI) plus the optional AI summary. */
+export interface ProjectOverview {
+  scan: {
+    ok: boolean;
+    error?: string;
+    title?: string;
+    languages?: string[];
+    frameworks?: string[];
+    runCommands?: string[];
+    testCommands?: string[];
+    topLevel?: string[];
+    fileCount?: number;
+    sizeBytes?: number;
+    hasTests?: boolean;
+    warnings?: string[];
+  };
+  ai: { status: "running" | "completed" | "failed"; summary: string | null } | null;
+}
+
+export async function getProjectOverview(projectId: number): Promise<ProjectOverview> {
+  return handleResponse<ProjectOverview>(await apiFetch(`/api/projects/${projectId}/overview`));
+}
+
+/** Uses the paid AI (a read-only agent); only on the user's click. */
+export async function requestAiOverview(projectId: number): Promise<void> {
+  await handleResponse(
+    await apiFetch(`/api/projects/${projectId}/overview/ai`, { method: "POST" }),
+  );
+}
+
 /** Change a project's name, description or delivery branch (W6: "" =
  * automatic, the repository's default branch). */
 export async function updateProject(

@@ -428,3 +428,12 @@ Every item gets a full local CI before each push. Close heavy apps first, becaus
   - Both Start buttons (the Tasks list and the task page) use it.
   - Tasks without a project behave exactly as before.
   - Tests: 8 new in `tests/test_w4_unsaved_changes.py` (the job launcher is replaced, so no AI runs). The 2 key tests fail on the old code. The 353 existing tests that start tasks pass.
+- **2026-10-09: W1 "understand the project first". DONE** (owner chose "free scan, AI optional").
+  - **Free scan** (`app/repo_tools/project_scan.py`): it only reads files and never runs project code. It is cached for 5 minutes and caps the walk at 20k files. It finds:
+    - languages and frameworks/tools (package.json, Python requirements and pyproject, go.mod, Cargo, Maven/Gradle, Makefile, Docker);
+    - the run and test commands, matching pnpm/yarn/npm to the lockfile;
+    - the top-level structure and the README title;
+    - plain warnings: no README, no tests, `.env` without an example, an empty folder means a new project.
+  - Its text goes into every agent's repo context (`base_graph` memory hook), so the planner knows the stack and the test command automatically.
+  - **AI summary only on click:** "Understand with AI" in Start → project → Tools → Overview (a new first tab) runs the existing read-only agent runtime with read-only tools only. It is budget-gated, stored per project, and deleted with the project.
+  - Tests: 9 new in `tests/test_w1_project_overview.py`. The 3 wiring tests fail on the old code. The 238 existing project, context and memory-hook tests pass.
