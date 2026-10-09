@@ -571,3 +571,8 @@ Every item gets a full local CI before each push. Close heavy apps first, becaus
   - A refresh with an old token is refused.
   - Tests: 4 in `tests/test_a12_token_revocation.py` (3 fail on the old code). One direct call in `test_audit05_security_fixes.py` now passes the response object. 357 auth tests pass.
   - Not done (noted): shorter access-token lifetimes with refresh rotation. Token versions already make revocation immediate.
+- **2026-10-09: Batch 6, A07 ownership (chats) + the sharing model. DONE.**
+  - **Sharing model, defined:** everyone signed in to one installation is one trusted team. Projects, tasks, approvals and roadmap are shared. A chat belongs to the person who started it.
+  - Chat messages, stream, confirm, stop, history and close now check the chat's owner (`_check_chat_owner`). Another user gets 404, so the chat's existence isn't revealed. List, rename and delete were already owner-scoped (C2). Chats from before C2 have no recorded owner and stay shared.
+  - Tests: `tests/test_a07_two_user_access.py`, a two-user matrix over real sign-ins. User B, an approver, gets 404 on all 8 chat operations on A's chat and doesn't see it listed. A keeps access, and B still sees the shared project. On the old code B read A's history (200).
+  - Per-customer tenancy (tenants/memberships) is out of scope for a single-team install and is noted for a hosted multi-customer version.

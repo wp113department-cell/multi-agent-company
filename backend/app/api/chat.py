@@ -261,6 +261,22 @@ async def _authorized_chat_folder(db: AsyncSession, body: CreateSessionRequest) 
     return absolute
 
 
+async def _check_chat_owner(session_id: str, actor: str) -> None:
+    """Sol A07 (2026-10-09): the sharing model is one trusted team per
+    installation — projects and tasks are shared — but a chat belongs to
+    the person who started it. Its messages, live stream, confirmations,
+    stop and history used to be reachable by any signed-in user who had the
+    id. Another user's chat answers 404 (its existence is not revealed);
+    chats from before C2 have no recorded owner and stay shared."""
+    from app.db.models import ChatSessionRecord
+    from app.db.session import get_session_factory
+
+    async with get_session_factory()() as db:
+        rec = await db.get(ChatSessionRecord, session_id)
+    if rec is not None and rec.created_by not in (None, actor):
+        raise HTTPException(status_code=404, detail="Chat not found")
+
+
 async def _touch_chat_record(db: AsyncSession, session_id: str, message: str) -> None:
     """C2: a new message moves the chat to the top of the list; the first
     one names it. Non-fatal: the list must never block a chat turn."""
@@ -370,6 +386,7 @@ async def send_message(
       - done                     : {"type": "done"}
       - error                    : {"type": "error", "message": "..."}
     """
+    await _check_chat_owner(session_id, _actor)  # Sol A07
     from app.agents.chat_agent import get_or_create_chat_agent  # avoid circular import
     from app.db.session import get_session_factory
 
@@ -424,6 +441,7 @@ async def stream_chat_session(
     events through to a real 'done'/'error' terminal event, mirroring
     GET /api/tasks/{id}/stream's reconnect model.
     """
+    await _check_chat_owner(session_id, _actor)  # Sol A07
     session = _require_session(session_id)
     if not session.active:
         raise HTTPException(
@@ -540,6 +558,7 @@ async def confirm_action(
     whatever further events the resumed turn produces, all the way to a
     real 'done'.
     """
+    await _check_chat_owner(session_id, _actor)  # Sol A07
     from app.agents.chat_agent import get_or_create_chat_agent
     from app.db.session import get_session_factory
 
@@ -578,6 +597,7 @@ async def stop_chat_turn(
 
     A no-op (not an error) if there's no turn in progress — matches
     confirm_action's own tolerance for a stale/no-op call."""
+    await _check_chat_owner(session_id, _actor)  # Sol A07
     from app.agents.chat_agent import get_or_create_chat_agent
 
     session = await _require_session_restoring(session_id)
@@ -596,6 +616,7 @@ async def get_history(
 
     Falls back to DB if the session was dropped from memory (e.g. server restart).
     """
+    await _check_chat_owner(session_id, _actor)  # Sol A07
     session = get_session(session_id)
     if session is not None:
         source_history = session.history
@@ -627,6 +648,7 @@ async def close_session(
     session_id: str, _actor: str = Depends(require_approver)
 ) -> dict[str, str]:
     """Close and clean up a chat session."""
+    await _check_chat_owner(session_id, _actor)  # Sol A07
     from app.agents.chat_agent import delete_chat_agent
 
     _require_session(session_id)

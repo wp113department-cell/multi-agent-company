@@ -163,6 +163,12 @@ def test_a_closed_chat_can_be_reopened(chats) -> None:  # type: ignore[no-untype
         sid = _new_chat(client, created, path)
         client.delete(f"/api/chat/sessions/{sid}")
     assert get_session(sid) is None
+    import app.db.session as sess
+
+    # the shared engine is bound to the TestClient's event loop; this call
+    # runs on a new loop (production has one loop and never does this)
+    sess._engine = None
+    sess._session_factory = None
     restored = asyncio.run(_require_session_restoring(sid))
     assert restored.session_id == sid and restored.repo_path == path
     delete_session(sid)
