@@ -138,7 +138,25 @@ def check_path_in_worktree(file_path: str, worktree_path: str) -> PolicyResult:
             allowed=False,
             reason=f"Policy denied: path {file_path!r} escapes worktree boundary {worktree_path!r}",
         )
-    return check_path(file_path)
+    original = check_path(file_path)
+    if not original.allowed:
+        return original
+    # Sol A04 (2026-10-09): the protected-file rules must also hold for the
+    # file the path really reaches. Containment above used the resolved
+    # path, but the rules were only checked against the original spelling,
+    # so `notes.txt -> .env` or a folder `cfg -> .git` walked straight past
+    # them. Check the canonical path (relative to the worktree) as well.
+    canonical_rel = os.path.relpath(abs_file, abs_worktree)
+    canonical = _matches_path_rule(canonical_rel) if canonical_rel != "." else None
+    if canonical:
+        return PolicyResult(
+            allowed=False,
+            reason=(
+                f"Policy denied path {file_path!r}: it leads to "
+                f"{canonical_rel!r}, which {canonical}"
+            ),
+        )
+    return original
 
 
 # ---------------------------------------------------------------------------

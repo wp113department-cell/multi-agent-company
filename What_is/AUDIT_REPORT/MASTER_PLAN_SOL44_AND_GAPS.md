@@ -512,3 +512,10 @@ Every item gets a full local CI before each push. Close heavy apps first, becaus
     - 6 in `tests/test_a31_capabilities.py`;
     - the compose test was rewritten (only the runner has the socket);
     - 346 compose-related and 225 settings/sandbox tests pass.
+- **2026-10-09: Batch 2, A04 "protected files through aliases". DONE.**
+  - `check_path_in_worktree` (the guard 89 tool files use) resolved symlinks for containment but checked the .env/.git/key rules only on the path as spelled, so a link `notes.txt → .env` or a folder link `cfg → .git` reached protected files.
+  - The rules now also apply to the canonical path relative to the worktree ("it leads to '.env', which matches .env pattern").
+  - Attack matrix with the real tool handlers: read_file, read_files, write_file, edit_file, delete_file and move_file, through file aliases, a nested alias and a parent-folder alias to `.env`, `.git/config`, `.git/hooks` and `server.key`.
+  - On the old code, 12 of the 15 attacks succeeded (secrets read, `.env` overwritten, a git hook written). Now all are blocked, and ordinary files and aliases to ordinary files still work.
+  - Remaining note: the window between the check and the open (a symlink swapped in between) is very small and needs a concurrent attacker in the same worktree; not addressed further.
+  - Tests: 15 new in `tests/test_a04_protected_paths_through_aliases.py`. The 741 existing guard and symlink tests pass. The 2 others need the local DB, which was stopped for CI; the full CI covers them.
