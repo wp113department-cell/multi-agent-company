@@ -195,7 +195,7 @@ Each batch groups items that touch the same code, so nothing is fixed twice.
 | 10 | G4 | 9 score modules correct | P1 | ✅ done, local (not pushed) | architecture score test + A25 |
 | 10 | A25 | No-data ≠ perfect score | P1 | ✅ done, local (not pushed) | test_a25_insufficient_data |
 | 10 | G6 | Prompt version auto-rollback | P2 | ✅ done, local (not pushed) | test_g6_prompt_rollback |
-| 10 | A26 | Baselines and held-out task suite | P1/P2 | 🟡 partial | 11 live evals + judge (2026-10-05) |
+| 10 | A26 | Baselines and held-out task suite | P1/P2 | 🟡 code done; live held-out run needs D3 | test_a26_eval_baselines |
 | 11 | A29 | Frontend → backend in compose | P1 | ⬜ | |
 | 11 | A30 | Volume ownership | P1 | ⬜ | |
 | 11 | A40 | Readiness endpoint | P1 | ⬜ | |
@@ -700,4 +700,9 @@ Every item gets a full local CI before each push. Close heavy apps first, becaus
 - **2026-10-12: Batch 10, G6 prompt auto-rollback. DONE (local).**
   - The rollback loop judged a deployed prompt on the agent's recent-runs window, which can include runs from before the deploy, so a prompt could be rolled back for results it never produced. Now only runs started after the prompt's `deployed_at` count, at least `BENCHMARK_MIN_SAMPLES` of them, compared with the stored baseline. Every automatic rollback writes an audit-log entry (`prompt_auto_rollback`).
   - Tests: 4 in `tests/test_g6_prompt_rollback.py`; the two older rollback tests give their fake prompt a deploy time.
+- **2026-10-12: Batch 10, A26 eval honesty and versioned baselines. Code DONE (local); live part waits for D3.**
+  - **Real bug:** when the LLM judge failed (network, quota, malformed reply) a task stayed passed on its schema checks alone, so unproven quality was reported as proven. Now it is **unassessed** (never passed); the summary shows passed / unassessed separately and averages graded tasks only.
+  - Versioned baselines: `eval_runner.py --save-baseline` stores per-task score, pass and assessed with the git commit under `tests/evals/baselines/`; `--compare-baseline` reports tasks that passed before and fail now, or whose score dropped, and exits 1. Unassessed runs are never compared.
+  - Not done (needs the owner's D3 decision on paid evaluation): authoring and running a held-out real-repo task suite with real agents.
+  - Tests: 3 in `tests/test_a26_eval_baselines.py`; the old judge-failure test now expects "unassessed".
 

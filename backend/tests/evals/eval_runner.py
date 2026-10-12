@@ -82,6 +82,9 @@ class EvalResult:
     status: str = "completed"
     judge_checks: list[dict[str, Any]] = field(default_factory=list)
     judge_error: str = ""
+    # Sol A26: False when the quality checks were meant to be graded but the
+    # judge could not grade them — such a task is "unassessed", never passed.
+    assessed: bool = True
 
 
 def _score_result(task: dict[str, Any], result: Any) -> EvalResult:
@@ -264,6 +267,9 @@ def apply_judge(task: dict[str, Any], result: Any, scored: "EvalResult") -> None
         verdicts = judge_quality_checks(task, output)
     except Exception as exc:
         scored.judge_error = f"{type(exc).__name__}: {exc}"[:300]
+        # Sol A26: the schema checks alone are not proof of quality
+        scored.assessed = False
+        scored.passed = False
         return
     for check, ok, why in verdicts:
         scored.checks_total += 1
@@ -358,17 +364,22 @@ def run_evals(
 def print_summary(results: list[EvalResult]) -> None:
     total = len(results)
     passed = sum(1 for r in results if r.passed)
-    avg_score = sum(r.score for r in results) / max(total, 1)
+    unassessed = sum(1 for r in results if not r.assessed)
+    graded = [r for r in results if r.assessed]
+    avg_score = sum(r.score for r in graded) / max(len(graded), 1)
     total_tokens = sum(r.tokens_in + r.tokens_out for r in results)
     total_elapsed = sum(r.elapsed_seconds for r in results)
 
     print("\n" + "=" * 60)
-    print(f"EVAL SUMMARY: {passed}/{total} passed  avg_score={avg_score:.2f}")
+    print(
+        f"EVAL SUMMARY: {passed}/{total} passed, {unassessed} unassessed  "
+        f"avg_score={avg_score:.2f} (graded tasks only)"
+    )
     print(f"  Total tokens: {total_tokens:,}  Total time: {total_elapsed:.1f}s")
     print("=" * 60)
 
     for r in results:
-        icon = "✅" if r.passed else "❌"
+        icon = "✅" if r.passed else ("❔" if not r.assessed else "❌")
         print(
             f"  {icon} {r.eval_id:<15} {r.agent:<25} "
             f"score={r.score:.2f} ({r.checks_passed}/{r.checks_total})"
@@ -378,6 +389,87 @@ def print_summary(results: list[EvalResult]) -> None:
                 print(f"       ✗ {f}")
 
     print("=" * 60)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Sol A26 (2026-10-12): versioned baselines. Each stored baseline records the
+# git commit, time and per-task score/pass/assessed, so a later run is
+# compared with what this codebase really achieved before — not with a
+# deliberately regressed fixture.
+# ──────────────────────────────────────────────────────────────────────────────
+
+BASELINE_DIR = Path(__file__).parent / "baselines"
+
+
+def _commit() -> str:
+    import subprocess
+
+    try:
+        return (
+            subprocess.run(
+                ["git", "rev-parse", "--short", "HEAD"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                cwd=Path(__file__).parent,
+            ).stdout.strip()
+            or "unknown"
+        )
+    except Exception:
+        return "unknown"
+
+
+def save_baseline(results: list[EvalResult], directory: Path | None = None) -> Path:
+    import time as _time
+
+    target = directory or BASELINE_DIR
+    target.mkdir(parents=True, exist_ok=True)
+    stamp = _time.strftime("%Y%m%dT%H%M%SZ", _time.gmtime())
+    path = target / f"baseline_{stamp}_{_commit()}.json"
+    path.write_text(
+        json.dumps(
+            {
+                "commit": _commit(),
+                "created": stamp,
+                "tasks": {
+                    r.eval_id: {
+                        "score": r.score,
+                        "passed": r.passed,
+                        "assessed": r.assessed,
+                    }
+                    for r in results
+                },
+            },
+            indent=2,
+        )
+    )
+    return path
+
+
+def latest_baseline(directory: Path | None = None) -> dict[str, Any] | None:
+    files = sorted((directory or BASELINE_DIR).glob("baseline_*.json"))
+    if not files:
+        return None
+    data: dict[str, Any] = json.loads(files[-1].read_text())
+    return data
+
+
+def compare_with_baseline(
+    results: list[EvalResult], baseline: dict[str, Any], tolerance: float = 0.1
+) -> list[str]:
+    """Tasks that passed before and fail now, or whose graded score dropped by
+    more than `tolerance`. Unassessed runs on either side are not compared."""
+    out: list[str] = []
+    before = baseline.get("tasks", {})
+    for r in results:
+        old = before.get(r.eval_id)
+        if not old or not old.get("assessed", True) or not r.assessed:
+            continue
+        if old.get("passed") and not r.passed:
+            out.append(f"{r.eval_id}: passed in {baseline.get('commit')}, fails now")
+        elif r.score < float(old.get("score", 0)) - tolerance:
+            out.append(f"{r.eval_id}: score {old.get('score'):.2f} -> {r.score:.2f}")
+    return out
 
 
 def main() -> None:
@@ -390,6 +482,16 @@ def main() -> None:
     )
     parser.add_argument(
         "--json-out", metavar="FILE", help="Write results as JSON to file"
+    )
+    parser.add_argument(
+        "--save-baseline",
+        action="store_true",
+        help="Store these results as a new versioned baseline (tests/evals/baselines/)",
+    )
+    parser.add_argument(
+        "--compare-baseline",
+        action="store_true",
+        help="Compare with the latest stored baseline; exit 1 on a regression",
     )
     parser.add_argument(
         "--judge",
@@ -411,8 +513,20 @@ def main() -> None:
             json.dump([dataclasses.asdict(r) for r in results], f, indent=2)
         print(f"\nResults written to {args.json_out}")
 
+    regressions: list[str] = []
+    if args.compare_baseline:
+        baseline = latest_baseline()
+        if baseline is None:
+            print("\nNo stored baseline yet — nothing to compare against.")
+        else:
+            regressions = compare_with_baseline(results, baseline)
+            for line in regressions:
+                print(f"  REGRESSION {line}")
+    if args.save_baseline:
+        print(f"\nBaseline stored: {save_baseline(results)}")
+
     failed = [r for r in results if not r.passed]
-    sys.exit(1 if failed else 0)
+    sys.exit(1 if failed or regressions else 0)
 
 
 if __name__ == "__main__":

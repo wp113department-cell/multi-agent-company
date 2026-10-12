@@ -233,11 +233,14 @@ class TestLLMJudge:
         ):
             apply_judge(self._TASK, self._result(), scored)
         assert "429" in scored.judge_error
+        # UPDATED (Sol A26, 2026-10-12): the schema checks still count, but a
+        # task whose quality checks were never graded is unassessed, not passed
         assert (scored.checks_passed, scored.checks_total, scored.passed) == (
             3,
             3,
-            True,
+            False,
         )
+        assert scored.assessed is False
 
     def test_wrong_verdict_count_is_a_judge_error(self) -> None:
         from unittest.mock import patch
