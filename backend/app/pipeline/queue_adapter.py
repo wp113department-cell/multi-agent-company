@@ -175,7 +175,57 @@ def _run_coroutine_job(
     test_enqueue_delegates_to_rq_adapter_and_returns_job_id (that test only
     passes kwargs, never positional args), which is why this survived
     undetected."""
-    return asyncio.run(job_fn(*args, **kwargs))
+    return asyncio.run(_run_with_durable_savers(job_fn, args, kwargs))
+
+
+def durability_problem() -> str | None:
+    """Sol A18: None when task progress is saved durably, else why not."""
+    from app.agents.base_graph import agent_checkpointer_problem
+    from app.pipeline.graph import checkpointer_problem
+
+    problems = [p for p in (checkpointer_problem(), agent_checkpointer_problem()) if p]
+    return "; ".join(problems) or None
+
+
+async def _run_with_durable_savers(
+    job_fn: JobFn, args: tuple[Any, ...], kwargs: dict[str, Any]
+) -> Any:
+    """Sol A17 (2026-10-12): the durable LangGraph savers were opened only in
+    the API's lifespan, so a job run by an RQ worker process checkpointed in
+    memory — a worker restart lost its progress. Each job now opens them in
+    its own event loop and closes them (and the loop-bound DB engine) after.
+    """
+    from app.agents.base_graph import close_agent_checkpointer, init_agent_checkpointer
+    from app.config import get_settings
+    from app.pipeline.graph import close_checkpointer, init_checkpointer
+
+    settings = get_settings()
+    await init_checkpointer(settings.database_url)
+    await init_agent_checkpointer(settings.database_url)
+    try:
+        problem = durability_problem()
+        if problem and settings.require_durable_checkpoints:
+            raise RuntimeError(f"task progress cannot be saved: {problem}")
+        return await job_fn(*args, **kwargs)
+    finally:
+        await close_agent_checkpointer()
+        await close_checkpointer()
+        await _dispose_engine()
+
+
+async def _dispose_engine() -> None:
+    """The cached async engine is bound to this job's event loop; the next
+    job runs in a new loop and must get a fresh one."""
+    from app.db import session as db_session
+
+    engine = db_session._engine
+    db_session._engine = None
+    db_session._session_factory = None
+    if engine is not None:
+        try:
+            await engine.dispose()
+        except Exception:
+            logger.debug("engine dispose after job failed", exc_info=True)
 
 
 class RQAdapterBridge(QueueAdapter):
@@ -355,7 +405,18 @@ async def dispatch_job(
     """
     from app.config import get_settings
 
-    if get_settings().queue_backend.lower() == "rq":
+    settings = get_settings()
+    if settings.queue_backend.lower() != "rq" and settings.require_durable_checkpoints:
+        # Sol A18: this process runs the job, so its savers must be durable
+        problem = durability_problem()
+        if problem:
+            from fastapi import HTTPException
+
+            raise HTTPException(
+                status_code=503,
+                detail=f"Work cannot start: its progress could not be saved ({problem}).",
+            )
+    if settings.queue_backend.lower() == "rq":
         await queue().enqueue(job_fn, *args, priority=priority, **kwargs)
     else:
         wrapped = _with_wall_clock_timeout(

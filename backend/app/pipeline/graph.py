@@ -23,6 +23,13 @@ _compiled_graph: Any = None
 _pg_cm: Any = (
     None  # holds the AsyncPostgresSaver context manager open for the app lifetime
 )
+# Sol A18: why the saver is not durable (None = durable). Never silent.
+_saver_problem: str | None = "not initialised"
+
+
+def checkpointer_problem() -> str | None:
+    """None when pipeline progress is saved durably, else the reason."""
+    return _saver_problem
 
 
 async def init_checkpointer(database_url: str) -> None:
@@ -33,7 +40,7 @@ async def init_checkpointer(database_url: str) -> None:
     database_url: the asyncpg DSN from config (postgresql+asyncpg://...).
     Automatically converted to psycopg3 format (postgresql://...).
     """
-    global _checkpointer, _compiled_graph, _pg_cm
+    global _checkpointer, _compiled_graph, _pg_cm, _saver_problem
     try:
         from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
@@ -46,18 +53,26 @@ async def init_checkpointer(database_url: str) -> None:
         _pg_cm = cm
         _checkpointer = saver
         _compiled_graph = None  # force rebuild with new checkpointer
+        _saver_problem = None
         logger.info(
             "LangGraph PostgreSQL checkpointer initialized — pipeline state is now persistent"
         )
     except Exception as exc:
-        logger.warning(
-            "PostgreSQL checkpointer init failed, falling back to MemorySaver: %s", exc
+        _saver_problem = f"database saver unavailable ({type(exc).__name__})"
+        logger.error(
+            "PostgreSQL checkpointer init failed — pipeline progress is kept in "
+            "memory only and is lost on restart: %s",
+            exc,
         )
 
 
 async def close_checkpointer() -> None:
     """Close the PostgreSQL checkpointer connection. Called at FastAPI shutdown."""
-    global _pg_cm
+    global _pg_cm, _saver_problem, _checkpointer, _compiled_graph
+    _saver_problem = "closed"
+    # like close_agent_checkpointer(): never keep using a closed saver
+    _checkpointer = MemorySaver()
+    _compiled_graph = None
     if _pg_cm is not None:
         try:
             await _pg_cm.__aexit__(None, None, None)

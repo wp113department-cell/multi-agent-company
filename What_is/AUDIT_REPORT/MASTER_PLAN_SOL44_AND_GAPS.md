@@ -187,10 +187,10 @@ Each batch groups items that touch the same code, so nothing is fixed twice.
 | 8 | A23 | Atomic idempotency | P1 | ✅ done, local (not pushed) | test_a23_atomic_idempotency |
 | 8 | A24 | Atomic spend reservation | P1 | ✅ done, local (not pushed) | test_a24_spend_reservation |
 | 8 | G8 | Multi-process concurrency | P2 | ✅ done, local (not pushed) | test_g8_multi_process (+ Redis in CI) |
-| 9 | A17 | Durable savers in RQ | P1 | ⬜ | |
-| 9 | A18 | No silent MemorySaver | P1 | ⬜ | |
-| 9 | A39 | Production backups and restore | P1 | 🟡 partial | dev backup service (2026-10-02) |
-| 9 | G7 | Downgrades, S3, storage lifecycle | P2 | ⬜ | |
+| 9 | A17 | Durable savers in RQ | P1 | ✅ done, local (not pushed) | test_a17_a18_durable_progress (cross-process resume) |
+| 9 | A18 | No silent MemorySaver | P1 | ✅ done, local (not pushed) | test_a17_a18_durable_progress |
+| 9 | A39 | Production backups and restore | P1 | ✅ done, local (not pushed) | test_a39_backup_restore_drill |
+| 9 | G7 | Downgrades, S3, storage lifecycle | P2 | ✅ done, local (not pushed) | test_g7_migration_roundtrip, test_g7_s3_artifacts |
 | 10 | G3 | 21 background loops | P1 | ⬜ | |
 | 10 | G4 | 9 score modules correct | P1 | ⬜ | |
 | 10 | A25 | No-data ≠ perfect score | P1 | ⬜ | |
@@ -678,4 +678,18 @@ Every item gets a full local CI before each push. Close heavy apps first, becaus
   - `tests/test_g8_multi_process.py` starts two real API server processes on one database: the same requests sent to both at once still create one task per key. Four worker processes share one spend cap through Redis (it caught that the child processes had the shared ledger switched off by the test config — production has it on). With Redis unreachable, each process keeps its own count, or calls are refused when required.
   - GitHub CI's backend job now has a Redis service, as production and local runs do.
   - Not covered here: parallel approvals and RQ workers (approvals are guarded by their own state check; the RQ path is Batch 9, A17).
+- **2026-10-12: Batch 9, A17 durable savers in worker jobs. DONE (local).**
+  - The LangGraph savers were opened only in the API's lifespan, so a job run by an RQ worker checkpointed in memory and a worker restart lost it. Each worker job now opens the pipeline and agent savers in its own event loop and closes them (and the loop-bound DB engine) afterwards.
+  - Proof: `tests/test_a17_a18_durable_progress.py` runs a job in one worker process that pauses after its first step, the process exits, and a brand-new process resumes it from the saved step (fails on the old code: MemorySaver).
+- **2026-10-12: Batch 9, A18 no silent MemorySaver. DONE (local).**
+  - A saver that fails to start is now logged as an error with its reason; `/health` reports `progressSaved: durable | memory only: …`. `REQUIRE_DURABLE_CHECKPOINTS=true` (set in `docker-compose.prod.yml`) refuses to start work (503) and makes `/health` degraded while progress cannot be saved; a worker refuses such a job. Off by default for development and the no-database test job.
+  - Tests: 4 more in the same file; all 5 fail on the old code.
+- **2026-10-12: Batch 9, A39 production backups and restore drill. DONE (local).**
+  - `docker-compose.prod.yml` now runs the `backup` service by default (`GRIDIRON_BACKUP_DIR` required, on another disk or an off-host share). Each backup writes the dump, a manifest (schema revision, row count of every table, encryption-key fingerprint — never the key), an archive of the project folders and `last_backup.json`; the service turns unhealthy on a failed or stale backup and `/health` reports the last backup without failing the probe.
+  - `restore_db.sh` verifies the restore against the manifest (revision, every table's rows, encryption key) and fails with `MISMATCH` lines; `docs/disaster_recovery.md` records what is backed up, RPO (the interval, 24 h default) and RTO.
+  - Drill: `tests/test_a39_backup_restore_drill.py` backs up a throwaway Postgres in Docker with the real scripts, restores into a fresh database, and checks that a tampered manifest, a wrong key and a failed backup are all caught.
+- **2026-10-12: Batch 9, G7 downgrades and S3. DONE (local). Batch 9 complete.**
+  - Every migration rolls back to an empty database and forward again to an identical schema (`tests/test_g7_migration_roundtrip.py`, real Alembic chain on a scratch database).
+  - **Real gap:** the S3 artifact store could only talk to AWS (no endpoint setting), so S3-compatible stores (MinIO, R2, B2) could not be used. `S3_ENDPOINT_URL` added; `tests/test_g7_s3_artifacts.py` runs the full trip (save through the app's store, `s3://` row in the database, read back by id with checksum, list, delete) against a real S3-compatible server in Docker (SeaweedFS — MinIO no longer publishes public images).
+  - Storage growth and retention were already covered by audit 13's retention tests.
 

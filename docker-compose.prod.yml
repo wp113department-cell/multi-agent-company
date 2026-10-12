@@ -144,6 +144,9 @@ services:
       DB_POOL_SIZE: ${DB_POOL_SIZE:-20}
       DB_POOL_MAX_OVERFLOW: ${DB_POOL_MAX_OVERFLOW:-10}
       REDIS_URL: redis://redis:6379/0
+      REQUIRE_DURABLE_CHECKPOINTS: "true"  # Sol A18: never run work whose progress cannot be saved
+      BACKUP_STATUS_FILE: /backups/last_backup.json  # Sol A39: /health reports a failed or stale backup
+      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
       QUEUE_BACKEND: ${QUEUE_BACKEND:-rq}
       ANTHROPIC_API_KEY: '${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY is required}'
       CORS_ORIGINS: '${CORS_ORIGINS:?CORS_ORIGINS is required in production — comma-separated list of your real frontend origin(s)}'
@@ -176,6 +179,7 @@ services:
       - worktrees:/data/worktrees
       - repos:/data/repos
       - bgprocesses:/data
+      - ${GRIDIRON_BACKUP_DIR:?GRIDIRON_BACKUP_DIR is required in production}:/backups:ro
     networks:
       - default
       - sandbox-control
@@ -208,6 +212,7 @@ services:
       DB_POOL_SIZE: ${DB_POOL_SIZE:-20}
       DB_POOL_MAX_OVERFLOW: ${DB_POOL_MAX_OVERFLOW:-10}
       REDIS_URL: redis://redis:6379/0
+      REQUIRE_DURABLE_CHECKPOINTS: "true"  # Sol A18: never run work whose progress cannot be saved
       ANTHROPIC_API_KEY: '${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY is required}'
       JWT_SECRET_KEY: '${JWT_SECRET_KEY:?JWT_SECRET_KEY is required in production}'
       JWT_AUTH_ENABLED: "true"
@@ -232,6 +237,53 @@ services:
       resources:
         limits:
           memory: 2g
+
+  # Sol A39 (2026-10-12): scheduled, verified backups are part of production,
+  # not an opt-in. Each run writes a pg_dump, a manifest (schema revision,
+  # row count of every table, encryption-key fingerprint — never the key),
+  # an archive of the project folders, and last_backup.json. The healthcheck
+  # (and the backend's /health) turn unhealthy when the last backup failed
+  # or is older than two intervals. GRIDIRON_BACKUP_DIR must be on another
+  # disk (or a mounted off-host share): a backup on the database's own disk
+  # does not survive losing that disk. RPO = BACKUP_INTERVAL_SECONDS (24 h
+  # by default); restore with scripts/restore_db.sh (see disaster_recovery.md).
+  backup:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    logging: *default-logging
+    entrypoint: ["bash", "-c"]
+    command:
+      - |
+        while true; do
+          /scripts/backup_db.sh || echo "BACKUP FAILED at $$(date -u +%FT%TZ)" >&2
+          sleep "$${BACKUP_INTERVAL_SECONDS}"
+        done
+    environment:
+      DATABASE_URL: 'postgresql://${POSTGRES_USER:-gridiron}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required in production}@db:5432/${POSTGRES_DB:-gridiron}'
+      BACKUP_DIR: /backups
+      BACKUP_RETENTION_COUNT: ${BACKUP_RETENTION_COUNT:-14}
+      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
+      REPOS_DIR: /data/repos
+      CREDENTIAL_ENCRYPTION_KEY: '${CREDENTIAL_ENCRYPTION_KEY:?CREDENTIAL_ENCRYPTION_KEY is required in production}'
+    volumes:
+      - ./scripts:/scripts:ro
+      - ${GRIDIRON_BACKUP_DIR:?GRIDIRON_BACKUP_DIR is required in production — a folder on another disk or an off-host share}:/backups
+      - repos:/data/repos:ro
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - grep -q '"ok": true' /backups/last_backup.json && test -n "$$(find /backups/last_backup.json -mmin -$$((BACKUP_INTERVAL_SECONDS / 30)))"
+      interval: 5m
+      timeout: 10s
+      retries: 1
+      start_period: 30m
+    depends_on:
+      db:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 512m
 
   # Frontend — enabled via: docker compose -f docker-compose.prod.yml --profile frontend up.
   # Caveat carried over unresolved from docker-compose.yml (out of scope for

@@ -373,6 +373,18 @@ class Settings(BaseSettings):
     # defaulting False so no existing caller/test/cost-budget assumption
     # changes without an operator explicitly choosing the extra 2 LLM
     # calls per subtask this adds.
+    backup_status_file: str = Field(
+        default="",
+        description="Sol A39: path of the backup service's last_backup.json; /health then reports the last backup (ok / failed / stale / none yet). Empty = not reported.",
+    )
+    backup_interval_seconds: int = Field(
+        default=86400,
+        description="Sol A39: how often backups run; a backup older than twice this is reported stale.",
+    )
+    require_durable_checkpoints: bool = Field(
+        default=False,
+        description="Sol A18: refuse to start or resume task work (503) while pipeline/agent progress can only be kept in memory (the PostgreSQL saver failed to start), and report /health as degraded. Off by default for development and the no-database test job; set true in production.",
+    )
     spend_guard_require_redis: bool = Field(
         default=False,
         description="Sol A24: with the daily cap on, refuse LLM calls while Redis (the shared spend ledger) is unreachable, instead of falling back to a per-process ledger (where several worker processes could each spend up to the cap).",
@@ -962,6 +974,10 @@ class Settings(BaseSettings):
     )
     s3_region: str = Field(
         default="us-east-1", description="AWS region for the S3 bucket."
+    )
+    s3_endpoint_url: str = Field(
+        default="",
+        description="G7: S3-compatible endpoint (MinIO, Cloudflare R2, Backblaze B2, …), e.g. http://minio:9000. Empty = AWS S3.",
     )
     s3_key_prefix: str = Field(
         default="gridiron/artifacts/",

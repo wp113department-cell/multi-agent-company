@@ -10,11 +10,30 @@ document and the two scripts it references (`scripts/backup_db.sh`,
 - **Postgres data**: `dev_tasks`, `agent_runs`, `memory_embeddings`, chat
   history, LangGraph checkpoints, audit log, everything else in the
   database. Covered by `backup_db.sh`/`restore_db.sh` below.
-- **Git worktrees / cloned repos** (`WORKTREES_DIR`, `REPOS_DIR`): NOT
-  backed up by these scripts — see "Workspace durability" below. This is
-  a real, separate gap: a DB-only restore without also fixing workspace
-  durability can resume a graph pointing at a working tree that no
-  longer exists.
+- **Cloned project folders** (`REPOS_DIR`): archived next to each dump as
+  `repos_<timestamp>.tar.gz` when `REPOS_DIR` is set (Sol A39, 2026-10-12).
+  Task worktrees (`WORKTREES_DIR`) are throwaway and are not backed up — a
+  task in flight at the time of the loss is re-run, not resumed.
+- **What each backup contains** (Sol A39): `gridiron_<ts>.dump`, a
+  `gridiron_<ts>.manifest` (schema revision, exact row count of every table,
+  and a fingerprint of `CREDENTIAL_ENCRYPTION_KEY` — never the key), the
+  project-folder archive, and `last_backup.json` (ok/failed + time).
+- **Restore verification** (Sol A39): `restore_db.sh` compares the restored
+  database with the manifest — same revision, same row count in every table
+  — and checks that the `CREDENTIAL_ENCRYPTION_KEY` you restore with is the
+  one saved credentials were encrypted with. Any difference fails the
+  restore with a `MISMATCH` line. Drilled end to end in throwaway
+  containers by `backend/tests/test_a39_backup_restore_drill.py`.
+- **Recovery targets:** RPO = `BACKUP_INTERVAL_SECONDS` (24 h by default;
+  lower it for less data loss). RTO = the time to restore the dump plus the
+  folder archive — about a minute for a database of this project's size in
+  the drill; measure yours with the drill on a copy of real data.
+- **Production:** `docker-compose.prod.yml` runs the `backup` service by
+  default (not a profile). `GRIDIRON_BACKUP_DIR` is required and must be on
+  another disk or an off-host share. The service turns unhealthy when the
+  last backup failed or is older than two intervals, and the backend's
+  `/health` reports the last backup (`"backup": "ok (…)"`, `"failed at …"`,
+  `"stale …"`) without failing the probe.
 
 ## Backup
 
@@ -216,8 +235,8 @@ matches are fake test fixtures and doc placeholders).
 
 ## What backup_db.sh/restore_db.sh deliberately do NOT do
 
-- No automatic scheduling (see "Scheduling" above — this is an
-  environment-specific operator decision, not something to hardcode here).
+- Scheduling is done by the compose `backup` service (production: always
+  on; development: `--profile backup`), not by the scripts themselves.
 - No off-host upload (S3/GCS/etc.) — `BACKUP_DIR` is a local path; wire
   offsite replication at the infrastructure layer (e.g. a sync job on
   `BACKUP_DIR`, or point it directly at a mounted network volume).

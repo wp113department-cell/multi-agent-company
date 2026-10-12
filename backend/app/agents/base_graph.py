@@ -64,6 +64,12 @@ logger = logging.getLogger(__name__)
 # depend on the higher-level pipeline orchestrator module.
 _agent_checkpointer: Any = MemorySaver()
 _agent_pg_cm: Any = None  # holds the AsyncPostgresSaver context manager open
+_agent_saver_problem: str | None = "not initialised"  # Sol A18
+
+
+def agent_checkpointer_problem() -> str | None:
+    """None when agent-run progress is saved durably, else the reason."""
+    return _agent_saver_problem
 
 
 async def init_agent_checkpointer(database_url: str) -> None:
@@ -74,7 +80,7 @@ async def init_agent_checkpointer(database_url: str) -> None:
     converted to psycopg3 format (postgresql://...), same as
     pipeline/graph.py's init_checkpointer().
     """
-    global _agent_checkpointer, _agent_pg_cm
+    global _agent_checkpointer, _agent_pg_cm, _agent_saver_problem
     try:
         from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
@@ -84,14 +90,16 @@ async def init_agent_checkpointer(database_url: str) -> None:
         await saver.setup()  # creates langgraph checkpoint tables if missing
         _agent_pg_cm = cm
         _agent_checkpointer = saver
+        _agent_saver_problem = None
         logger.info(
             "Agent graph PostgreSQL checkpointer initialized — worker agent "
             "runs are now durably checkpointed"
         )
     except Exception as exc:
-        logger.warning(
-            "Agent graph PostgreSQL checkpointer init failed, falling back "
-            "to MemorySaver: %s",
+        _agent_saver_problem = f"database saver unavailable ({type(exc).__name__})"
+        logger.error(
+            "Agent graph PostgreSQL checkpointer init failed — agent runs are "
+            "checkpointed in memory only and lost on restart: %s",
             exc,
         )
 
@@ -110,7 +118,8 @@ async def close_agent_checkpointer() -> None:
     module's post-close state genuinely safe to keep using, not just
     safe-in-practice-because-nothing-does-that-yet.
     """
-    global _agent_pg_cm, _agent_checkpointer
+    global _agent_pg_cm, _agent_checkpointer, _agent_saver_problem
+    _agent_saver_problem = "closed"
     if _agent_pg_cm is not None:
         try:
             await _agent_pg_cm.__aexit__(None, None, None)

@@ -36,6 +36,9 @@ def _get_s3() -> Any:
 
         settings = get_settings()
         kwargs: dict[str, Any] = {"region_name": settings.s3_region}
+        if settings.s3_endpoint_url:
+            # G7: any S3-compatible store (MinIO, R2, B2), not only AWS
+            kwargs["endpoint_url"] = settings.s3_endpoint_url
         if settings.aws_access_key_id:
             kwargs["aws_access_key_id"] = settings.aws_access_key_id
             kwargs["aws_secret_access_key"] = settings.aws_secret_access_key

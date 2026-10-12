@@ -2117,6 +2117,17 @@ async def health(response: Response) -> dict[str, object]:
             logger.warning("S3 health check failed: %s", exc)
             checks["s3"] = "error"
 
+    # Sol A18: say whether task progress survives a restart, never silently
+    from app.pipeline.queue_adapter import durability_problem
+
+    durability = durability_problem()
+    if durability and settings.require_durable_checkpoints:
+        checks["checkpoints"] = "error"
+
+    # Sol A39: report the last backup (never fails the probe: a backup
+    # problem must not take the app down; the backup container alerts)
+    backup_state = _backup_state(settings) if settings.backup_status_file else None
+
     # Day 19 — Cloud Deployment prep. Agent count, so a deployment's own
     # health check can confirm the fleet actually loaded (not just that the
     # process is up), matching the plan's success criterion.
@@ -2139,4 +2150,34 @@ async def health(response: Response) -> dict[str, object]:
         "checks": checks,
         "db": checks.get("db", "unknown"),
         "agents": agent_count,
+        "progressSaved": (
+            "durable" if durability is None else f"memory only: {durability}"
+        ),
+        **({"backup": backup_state} if backup_state is not None else {}),
     }
+
+
+def _backup_state(settings: Any) -> str:
+    """ok / failed / stale / none yet, from the backup service's status file."""
+    import json as _json
+    from datetime import datetime, timezone
+
+    try:
+        with open(settings.backup_status_file, encoding="utf-8") as fh:
+            status = _json.load(fh)
+    except FileNotFoundError:
+        return "none yet"
+    except (OSError, ValueError):
+        return "unreadable"
+    if not status.get("ok"):
+        return f"failed at {status.get('at', '?')}"
+    try:
+        at = datetime.strptime(str(status["at"]), "%Y-%m-%dT%H:%M:%SZ").replace(
+            tzinfo=timezone.utc
+        )
+    except (KeyError, ValueError):
+        return "unreadable"
+    age = (datetime.now(timezone.utc) - at).total_seconds()
+    if age > 2 * settings.backup_interval_seconds:
+        return f"stale (last ok {status['at']})"
+    return f"ok ({status['at']})"
