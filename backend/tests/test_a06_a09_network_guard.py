@@ -212,7 +212,10 @@ def browser() -> Iterator[Any]:
 
     sid = f"a06-{threading.get_ident()}"
     try:
-        bd.browser_open("about:blank", session_id=sid)
+        # Really start the browser: browser_open("about:blank") is refused by
+        # the URL policy before any browser starts, so it proved nothing and
+        # these tests failed instead of skipping where no browser is installed.
+        bd._run(bd._get_page, sid)
     except Exception as exc:  # no browser installed
         pytest.skip(f"browser unavailable: {exc}")
     yield bd, sid

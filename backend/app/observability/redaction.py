@@ -157,7 +157,12 @@ def redact(obj: Any, _depth: int = 0) -> Any:
 
 def sentry_before_send(event: Any, hint: Any) -> Any:
     """Sentry hook: every string in the event (exception messages, frame
-    variables, request data and headers, breadcrumbs, extra) is redacted."""
+    variables, request data and headers, breadcrumbs, extra) is redacted.
+
+    The process command line (Sentry's ``extra["sys.argv"]``) is dropped:
+    a password passed as an argument has no recognisable shape to redact."""
+    if isinstance(event, dict) and isinstance(event.get("extra"), dict):
+        event["extra"].pop("sys.argv", None)
     return redact(event)
 
 

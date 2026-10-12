@@ -272,8 +272,8 @@ def test_a_sandbox_run_works_through_the_runner(runner_host: str) -> None:
         "-c",
         "echo hello-from-sandbox",
     )
-    assert r.returncode == 0, r.stderr
-    assert r.stdout.strip() == "hello-from-sandbox"
+    assert r.returncode == 0, (r.stdout, r.stderr)
+    assert r.stdout.strip() == "hello-from-sandbox", (r.stdout, r.stderr)
 
 
 def test_a_sandbox_can_be_killed_by_name(runner_host: str) -> None:

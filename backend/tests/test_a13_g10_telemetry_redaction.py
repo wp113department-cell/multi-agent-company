@@ -68,41 +68,63 @@ def test_text_and_structures_are_redacted() -> None:
     assert data["password"] == "hunter2-long-enough"  # the original is untouched
 
 
-def test_a_real_sentry_event_is_redacted(monkeypatch: pytest.MonkeyPatch) -> None:
-    sentry_sdk = pytest.importorskip("sentry_sdk")
-    from sentry_sdk.transport import Transport
+_SENTRY_CHILD = """
+import io, json, os
+import sentry_sdk
+from sentry_sdk.transport import Transport
+from app.config import get_settings
+from app.main import _init_sentry
 
-    from app.config import get_settings
-    from app.main import _init_sentry
+API_KEY, JWT_SECRET, DB_PASSWORD, GH_TOKEN = os.environ["A13_CANARIES"].split(",")
+sent = []
 
-    sent: list[str] = []
+class Capture(Transport):
+    def capture_envelope(self, envelope):
+        buf = io.BytesIO()
+        envelope.serialize_into(buf)
+        sent.append(buf.getvalue().decode(errors="replace"))
 
-    class Capture(Transport):
-        def capture_envelope(self, envelope: Any) -> None:
-            buf = io.BytesIO()
-            envelope.serialize_into(buf)
-            sent.append(buf.getvalue().decode(errors="replace"))
-
-    settings = get_settings()
-    monkeypatch.setattr(settings, "sentry_dsn", "https://public@o0.ingest.sentry.io/0")
-    real_init = sentry_sdk.init
-    monkeypatch.setattr(
-        sentry_sdk, "init", lambda *a, **k: real_init(*a, transport=Capture, **k)
+settings = get_settings()
+settings.sentry_dsn = "https://public@o0.ingest.sentry.io/0"
+real_init = sentry_sdk.init
+sentry_sdk.init = lambda *a, **k: real_init(*a, transport=Capture, **k)
+_init_sentry(settings)
+sentry_sdk.add_breadcrumb(message=f"called the API with {API_KEY}")
+sentry_sdk.set_context("request", {"headers": {"Cookie": f"s={JWT_SECRET}"}})
+try:
+    local_secret = GH_TOKEN
+    raise RuntimeError(
+        f"connect failed: postgresql://gridiron:{DB_PASSWORD}@db/x key={API_KEY}"
     )
-    try:
-        _init_sentry(settings)
-        sentry_sdk.add_breadcrumb(message=f"called the API with {API_KEY}")
-        sentry_sdk.set_context("request", {"headers": {"Cookie": f"s={JWT_SECRET}"}})
-        try:
-            local_secret = GH_TOKEN  # noqa: F841 — captured as a frame variable
-            raise RuntimeError(
-                f"connect failed: postgresql://gridiron:{DB_PASSWORD}@db/x key={API_KEY}"
-            )
-        except RuntimeError as exc:
-            sentry_sdk.capture_exception(exc)
-        sentry_sdk.flush(timeout=5)
-    finally:
-        real_init()  # back to no Sentry for the rest of the suite
+except RuntimeError as exc:
+    sentry_sdk.capture_exception(exc)
+sentry_sdk.flush(timeout=5)
+print(json.dumps(sent))
+"""
+
+
+def test_a_real_sentry_event_is_redacted() -> None:
+    """Runs in a child process: sentry_sdk.init() installs its threading
+    integration process-wide and it cannot be undone, so initialising it in
+    the test process crashed a later test (segfault on GitHub, 2026-10-09)."""
+    pytest.importorskip("sentry_sdk")
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    r = subprocess.run(
+        # The canaries also go on the command line: Sentry attaches it to every
+        # event, and a password there has no shape the redactor can spot.
+        [sys.executable, "-c", _SENTRY_CHILD, *CANARIES],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        cwd=Path(__file__).resolve().parents[1],
+        env={**os.environ, "A13_CANARIES": ",".join(CANARIES)},
+    )
+    assert r.returncode == 0, r.stderr[-2000:]
+    sent = json.loads(r.stdout.strip().splitlines()[-1])
     assert sent, "Sentry sent nothing"
     payload = "\n".join(sent)
     assert "connect failed" in payload
