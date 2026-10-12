@@ -29,6 +29,13 @@ RUN git config --system --add safe.directory '*'
 COPY requirements.txt requirements-dev.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Sol A30 (2026-10-12): the production manifest mounts fresh named volumes
+# at /data, /data/worktrees and /data/repos. Docker gives an empty named
+# volume the owner of the folder it is mounted on, so these must exist here
+# owned by appuser — otherwise they start root-owned and the non-root app
+# cannot clone, create worktrees or write its process registry.
+RUN mkdir -p /data/worktrees /data/repos && chown -R appuser:appuser /data
+
 COPY --chown=appuser:appuser . .
 
 USER appuser

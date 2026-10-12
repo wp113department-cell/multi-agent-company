@@ -2247,6 +2247,81 @@ async def health(response: Response) -> dict[str, object]:
     }
 
 
+@app.get("/ready")
+@limiter.exempt  # type: ignore[untyped-decorator]
+async def ready(response: Response) -> dict[str, object]:
+    """Sol A40 (2026-10-12): readiness — can this instance actually do work?
+
+    /health is liveness (process up, database answers). It could be green
+    with no agents loaded, no queue worker, no code sandbox or storage the
+    app cannot write. This checks each of those; any failure answers 503
+    with the reason, so a load balancer or operator sees what is missing.
+    """
+    import asyncio
+    import os
+    import tempfile
+
+    settings = get_settings()
+    checks: dict[str, str] = {}
+
+    try:
+        from app.fleet.capability_registry import get_capability_registry
+
+        agents = len(get_capability_registry().all())
+        checks["agents"] = "ok" if agents > 0 else "error: no agents loaded"
+    except Exception as exc:
+        checks["agents"] = f"error: {type(exc).__name__}"
+
+    if settings.queue_backend.lower() == "rq":
+        try:
+            import redis
+            from rq import Worker
+
+            def _workers() -> int:
+                conn = redis.Redis.from_url(settings.redis_url, socket_timeout=2)
+                return len(Worker.all(connection=conn))
+
+            n = await asyncio.to_thread(_workers)
+            checks["worker"] = "ok" if n > 0 else "error: no queue worker is running"
+        except Exception as exc:
+            checks["worker"] = f"error: {type(exc).__name__}"
+
+    from app.pipeline.queue_adapter import durability_problem
+
+    problem = durability_problem()
+    if problem and settings.require_durable_checkpoints:
+        checks["progress"] = f"error: {problem}"
+    else:
+        checks["progress"] = "ok" if not problem else f"memory only ({problem})"
+
+    for label, folder in (
+        ("worktrees", settings.worktrees_dir),
+        ("repos", settings.repos_dir),
+    ):
+        try:
+            os.makedirs(folder, exist_ok=True)
+            with tempfile.NamedTemporaryFile(dir=folder):
+                pass
+            checks[label] = "ok"
+        except OSError as exc:
+            checks[label] = f"error: cannot write {folder} ({exc.strerror})"
+
+    if settings.bash_sandbox_enabled:
+        from app.services.capabilities import check as sandbox_check
+
+        result = await asyncio.to_thread(sandbox_check)
+        checks["sandbox"] = (
+            "ok"
+            if result.get("sandbox")
+            else f"error: {result.get('note', 'unavailable')}"
+        )
+
+    is_ready = all(not v.startswith("error") for v in checks.values())
+    if not is_ready:
+        response.status_code = 503
+    return {"status": "ready" if is_ready else "not ready", "checks": checks}
+
+
 def _backup_state(settings: Any) -> str:
     """ok / failed / stale / none yet, from the backup service's status file."""
     import json as _json

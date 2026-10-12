@@ -196,10 +196,10 @@ Each batch groups items that touch the same code, so nothing is fixed twice.
 | 10 | A25 | No-data ≠ perfect score | P1 | ✅ done, local (not pushed) | test_a25_insufficient_data |
 | 10 | G6 | Prompt version auto-rollback | P2 | ✅ done, local (not pushed) | test_g6_prompt_rollback |
 | 10 | A26 | Baselines and held-out task suite | P1/P2 | 🟡 code done; live held-out run needs D3 | test_a26_eval_baselines |
-| 11 | A29 | Frontend → backend in compose | P1 | ⬜ | |
-| 11 | A30 | Volume ownership | P1 | ⬜ | |
-| 11 | A40 | Readiness endpoint | P1 | ⬜ | |
-| 11 | A42 | run.sh dev-only, visible errors | P2 | ⬜ | |
+| 11 | A29 | Frontend → backend in compose | P1 | ✅ done (earlier) | 1100c832 — frontend image proxies to backend:8000; owner's Windows compose run worked |
+| 11 | A30 | Volume ownership | P1 | ✅ done, local (not pushed) | backend/Dockerfile creates /data owned by appuser; fresh-volume proof pending (Docker build) |
+| 11 | A40 | Readiness endpoint | P1 | ✅ done, local (not pushed) | test_a40_readiness |
+| 11 | A42 | run.sh dev-only, visible errors | P2 | ✅ done, local (not pushed) | run.sh dev-only, 127.0.0.1, named DB volume, migrations fail loudly |
 | 11 | A44 | Non-root frontend, CSP | P3 | ⬜ | |
 | 12 | A32 | Task pagination | P1/P2 | ⬜ | |
 | 12 | A33 | No duplicate task on upload failure | P1/P2 | ⬜ | |
@@ -705,4 +705,10 @@ Every item gets a full local CI before each push. Close heavy apps first, becaus
   - Versioned baselines: `eval_runner.py --save-baseline` stores per-task score, pass and assessed with the git commit under `tests/evals/baselines/`; `--compare-baseline` reports tasks that passed before and fail now, or whose score dropped, and exits 1. Unassessed runs are never compared.
   - Not done (needs the owner's D3 decision on paid evaluation): authoring and running a held-out real-repo task suite with real agents.
   - Tests: 3 in `tests/test_a26_eval_baselines.py`; the old judge-failure test now expects "unassessed".
+- **2026-10-12: Batch 11 (part): A29, A30, A40, A42.** Remaining in Batch 11: A44 (non-root frontend, nonce CSP).
+  - **A29** was already fixed in `1100c832` (the frontend image proxies `/api` to `backend:8000`); the owner's Windows compose run confirmed it.
+  - **A30:** the backend image now creates `/data`, `/data/worktrees` and `/data/repos` owned by the non-root user, so fresh named volumes start writable. Still to do: prove it with a fresh-volume container run (clone, worktree, registry write).
+  - **A40:** new `GET /ready` (readiness) checks loaded agents, a running queue worker (RQ), durable progress (when required), writable worktree/repo storage and the code sandbox; any failure answers 503 naming it. `/health` stays the liveness probe. 6 tests in `tests/test_a40_readiness.py`.
+  - **A42:** `run.sh` is marked development-only and refuses `DEPLOYMENT_ENV=production`; database, backend and frontend listen on 127.0.0.1 only; the database keeps its data in the `gridiron-pgdata` volume; a failed migration stops start-up instead of being hidden.
+- **Next session (2026-10-13):** check the local CI run on `4c2b2163`, run CI on the latest commit, push and confirm GitHub green; A30 fresh-volume proof; A44; Batches 12–14.
 

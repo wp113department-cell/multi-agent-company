@@ -2,8 +2,14 @@
 # Gridiron Developer Department — one-command startup
 # Usage: ./run.sh
 # Starts: PostgreSQL (Docker), FastAPI backend on :8000, Next.js frontend on :3000
+#
+# DEVELOPMENT ONLY (Sol A42, 2026-10-12). Everything listens on this
+# computer only (127.0.0.1), the database keeps its data in a named Docker
+# volume, and a failed migration stops the start-up. For a server use
+# docker-compose.prod.yml (see docs/DEPLOYMENT.md), never this script.
 
 set -e
+set -o pipefail
 
 REPO="$(cd "$(dirname "$0")" && pwd)"
 BACKEND="$REPO/backend"
@@ -16,6 +22,11 @@ warn()  { echo -e "${YELLOW}[gridiron]${NC} $*"; }
 error() { echo -e "${RED}[gridiron]${NC} $*" >&2; }
 
 # ── Pre-flight checks ──────────────────────────────────────────────────────────
+if [ "${DEPLOYMENT_ENV:-}" = "production" ]; then
+  error "run.sh is for development only. Use docker-compose.prod.yml in production."
+  exit 1
+fi
+
 if [ ! -f "$BACKEND/.env" ]; then
   warn "No backend/.env found. Copying from .env.example …"
   cp "$BACKEND/.env.example" "$BACKEND/.env"
@@ -40,7 +51,8 @@ if ! docker ps --format '{{.Names}}' | grep -q "^gridiron-postgres$"; then
     -e POSTGRES_USER=gridiron \
     -e POSTGRES_PASSWORD=gridiron_dev_only \
     -e POSTGRES_DB=gridiron_dev \
-    -p 5432:5432 \
+    -p 127.0.0.1:5432:5432 \
+    -v gridiron-pgdata:/var/lib/postgresql/data \
     pgvector/pgvector:pg16
   info "Waiting for Postgres to be ready …"
   sleep 5
@@ -50,13 +62,16 @@ info "PostgreSQL: running on localhost:5432"
 # ── 2. Alembic migrations ──────────────────────────────────────────────────────
 info "Running database migrations …"
 cd "$BACKEND"
-.venv/bin/alembic upgrade head 2>&1 | grep -E "Running upgrade|already at|INFO" || true
+if ! .venv/bin/alembic upgrade head; then
+  error "Database migration failed — fix the error above before starting."
+  exit 1
+fi
 cd "$REPO"
 
 # ── 3. FastAPI backend ─────────────────────────────────────────────────────────
 info "Starting FastAPI backend on http://localhost:8000 …"
 cd "$BACKEND"
-.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload &
+.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload &
 BACKEND_PID=$!
 cd "$REPO"
 sleep 2
@@ -80,7 +95,7 @@ if [ ! -d "$FRONTEND/node_modules" ]; then
   pnpm install --frozen-lockfile
 fi
 # Force port 3000 — unset PORT so backend's PORT=8000 doesn't leak in
-PORT=3000 pnpm --filter @gridiron/web run dev &
+PORT=3000 pnpm --filter @gridiron/web run dev --hostname 127.0.0.1 &
 FRONTEND_PID=$!
 cd "$REPO"
 
