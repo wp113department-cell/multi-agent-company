@@ -11,7 +11,6 @@ append-only, as documented).
 from __future__ import annotations
 
 import asyncio
-import json
 from typing import Any
 
 import pytest
@@ -43,7 +42,7 @@ def _db(fn):  # type: ignore[no-untyped-def]
 def person(tmp_path: Any) -> Any:
     from app.auth.jwt import hash_password
     from app.db.models import ChatSessionRecord, DevTask, Project, User
-    from app.db.repository import create_task, set_setting
+    from app.db.repository import create_task
 
     async def make(s):  # type: ignore[no-untyped-def]
         await s.merge(
@@ -81,11 +80,6 @@ def person(tmp_path: Any) -> Any:
             ),
             {"r": str(tmp_path)},
         )
-        await set_setting(
-            s,
-            f"project-notes:{p.id}",
-            json.dumps([{"id": "n1", "text": "we use pnpm", "createdBy": USER}]),
-        )
         await s.commit()
         return p.id, task_ids
 
@@ -98,10 +92,6 @@ def person(tmp_path: Any) -> Any:
             delete(ChatSessionRecord).where(ChatSessionRecord.id == "a14-chat")
         )
         await s.execute(delete(DevTask).where(DevTask.id.in_(task_ids)))
-        await s.execute(
-            text("DELETE FROM system_settings WHERE key = :k"),
-            {"k": f"project-notes:{pid}"},
-        )
         await s.execute(delete(Project).where(Project.id == pid))
         await s.execute(delete(User).where(User.username == USER))
         await s.commit()
@@ -126,7 +116,6 @@ def test_the_export_covers_everything_with_paging(
     assert full["chats"]["items"][0]["messages"][0]["content"] == "my private question"
     assert full["teamWork"]["tasks"]["total"] == 3
     assert full["teamWork"]["projects"]["total"] == 1
-    assert full["projectNotes"][0]["text"] == "we use pnpm"
     assert len(page["teamWork"]["tasks"]["items"]) == 1  # 3 tasks, page 2 of size 2
     assert page["teamWork"]["tasks"]["total"] == 3
 
@@ -146,7 +135,6 @@ def test_erasure_deletes_personal_content_and_pseudonymizes_team_work(
     assert out["removed"]["chats"] == 1
     assert out["pseudonymized"]["counts"]["tasks"] == 3
     assert out["pseudonymized"]["counts"]["projects"] == 1
-    assert out["pseudonymized"]["counts"]["projectNotes"] == 1
 
     async def check(s):  # type: ignore[no-untyped-def]
         q = lambda sql, **p: s.execute(text(sql), p)  # noqa: E731

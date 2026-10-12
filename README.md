@@ -278,7 +278,7 @@ graph-enforced verification contract — and has a corresponding system prompt i
 | `frontend_dev` | Implements TypeScript/Next.js UI changes in an isolated worktree |
 | `qa` | Runs pytest, mypy, and ruff in a worktree — test commands only, no writes |
 | `reviewer` | Reads diffs and codebase context to produce structured code-review findings |
-| `chat_agent` | Interactive streaming chat agent — full agentic loop over the repo |
+| `chat_agent` | Interactive chat: answers questions about a project with read-only tools; "Make this a task" turns a change request into a task |
 | `research` | Reads repo files and searches the web to gather technical context |
 | `docs` | Writes changelog and README updates to a worktree after epic implementation |
 

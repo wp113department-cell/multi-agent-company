@@ -830,6 +830,13 @@ export interface SandboxCapabilities {
   browsers: boolean;
   labels: Record<string, string>;
   note?: string;
+  /** Sol A28: the connections tools depend on, checked for real. */
+  connections?: {
+    key: string;
+    label: string;
+    status: "ready" | "not_installed" | "not_connected" | "not_authorized" | "not_configured";
+    detail: string;
+  }[];
 }
 
 export async function fetchSandboxCapabilities(refresh = false): Promise<SandboxCapabilities> {
@@ -838,37 +845,20 @@ export async function fetchSandboxCapabilities(refresh = false): Promise<Sandbox
   );
 }
 
-/** C3: a note the user asked the team to remember for a project. */
-export interface ProjectNote {
-  id: string;
-  text: string;
-  createdBy: string | null;
-  createdAt: string;
-}
-
-export async function listProjectNotes(projectId: number): Promise<ProjectNote[]> {
-  const data = await handleResponse<{ notes: ProjectNote[] }>(
-    await apiFetch(`/api/projects/${projectId}/notes`),
-  );
-  return data.notes;
-}
-
-export async function addProjectNote(projectId: number, text: string): Promise<ProjectNote[]> {
-  const data = await handleResponse<{ notes: ProjectNote[] }>(
-    await apiFetch(`/api/projects/${projectId}/notes`, {
+/** C6: turn a chat conversation into a task in the chat's project. */
+export async function makeTaskFromChat(
+  sessionId: string,
+): Promise<{ taskId: number; title: string; projectId: number }> {
+  return handleResponse(
+    await apiFetch(`/api/chat/sessions/${sessionId}/make-task`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text }),
+      headers: {
+        "Content-Type": "application/json",
+        "Idempotency-Key": `chat-task-${sessionId}-${Date.now()}`,
+      },
+      body: JSON.stringify({}),
     }),
   );
-  return data.notes;
-}
-
-export async function deleteProjectNote(projectId: number, noteId: string): Promise<ProjectNote[]> {
-  const data = await handleResponse<{ notes: ProjectNote[] }>(
-    await apiFetch(`/api/projects/${projectId}/notes/${noteId}`, { method: "DELETE" }),
-  );
-  return data.notes;
 }
 
 /** C2: a past chat in the list. */

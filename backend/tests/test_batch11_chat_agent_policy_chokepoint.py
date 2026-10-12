@@ -91,22 +91,22 @@ async def test_safe_call_still_reaches_execute_tool() -> None:
     """The chokepoint must not become a blanket deny — a legitimate call
     still reaches the real handler."""
     agent = _make_agent()
+    # UPDATED (C6, 2026-10-12): the chat only reads, so the legitimate call
+    # is a read; write tools are refused (tests/test_c6_chat_questions_only.py).
     with patch.object(
-        agent, "_execute_tool", new=AsyncMock(return_value="Written: src/main.py")
+        agent, "_execute_tool", new=AsyncMock(return_value="x = 1")
     ) as mock_execute:
         await agent._execute_tool_node(
             {
                 "pending_tool_uses": [
                     {
                         "id": "toolu_3",
-                        "name": "write_file",
-                        "input": {"path": "src/main.py", "content": "x = 1"},
+                        "name": "read_file",
+                        "input": {"path": "src/main.py"},
                     }
                 ],
                 "verification": {"read": True},
             }
         )
-    mock_execute.assert_called_once_with(
-        "write_file", {"path": "src/main.py", "content": "x = 1"}
-    )
-    assert "Written: src/main.py" in _tool_result_output(agent)
+    mock_execute.assert_called_once_with("read_file", {"path": "src/main.py"})
+    assert "x = 1" in _tool_result_output(agent)

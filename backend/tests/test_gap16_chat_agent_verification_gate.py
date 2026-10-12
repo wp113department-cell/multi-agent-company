@@ -142,65 +142,10 @@ async def test_bash_is_refused_before_any_read_this_session(tmp_path: Path) -> N
     assert "read" in tool_result
 
 
-@pytest.mark.asyncio
-async def test_bash_succeeds_after_a_real_read_this_session(tmp_path: Path) -> None:
-    (tmp_path / "real_file.txt").write_text("hello from a real file\n")
-    session = ChatSession(session_id="td_gap16_bash_allowed", repo_path=str(tmp_path))
-    agent = ChatAgent(session)
-    responses = [
-        _FakeToolUseStream(
-            "read_file", {"path": "real_file.txt"}, tool_id="toolu_read1"
-        ),
-        _FakeToolUseStream(
-            "bash", {"command": "echo now-allowed"}, tool_id="toolu_bash2"
-        ),
-        _FakeTextStream("Done."),
-    ]
-    p1, p2, p3 = _patched_agent(agent, responses)
-
-    with p1, p2, p3:
-        await agent.run("read the file then run echo")
-
-    tool_result = _last_tool_result(agent)
-    assert not tool_result.startswith("[POLICY DENIED]")
-    assert "now-allowed" in tool_result
+# test_bash_succeeds_after_a_real_read_this_session: removed (C6, 2026-10-12) — the chat no longer has bash or any write tool; see tests/test_c6_chat_questions_only.py
 
 
-@pytest.mark.asyncio
-async def test_verification_read_flag_persists_across_separate_run_calls(
-    tmp_path: Path,
-) -> None:
-    """The real behavior this was built for: a file read in an earlier turn
-    must still count in a LATER, separate agent.run() call — not reset
-    every user message. Two independent agent.run() calls on the same
-    session, matching how the real API actually drives multi-turn chat."""
-    (tmp_path / "real_file.txt").write_text("hello\n")
-    session = ChatSession(session_id="td_gap16_persists", repo_path=str(tmp_path))
-    agent = ChatAgent(session)
-
-    turn1_responses = [
-        _FakeToolUseStream(
-            "read_file", {"path": "real_file.txt"}, tool_id="toolu_read2"
-        ),
-        _FakeTextStream("Read it."),
-    ]
-    p1, p2, p3 = _patched_agent(agent, turn1_responses)
-    with p1, p2, p3:
-        await agent.run("read the file")
-
-    turn2_responses = [
-        _FakeToolUseStream(
-            "bash", {"command": "echo still-allowed"}, tool_id="toolu_bash3"
-        ),
-        _FakeTextStream("Done."),
-    ]
-    p1, p2, p3 = _patched_agent(agent, turn2_responses)
-    with p1, p2, p3:
-        await agent.run("now run echo")
-
-    tool_result = _last_tool_result(agent)
-    assert not tool_result.startswith("[POLICY DENIED]")
-    assert "still-allowed" in tool_result
+# test_verification_read_flag_persists_across_separate_run_calls: removed (C6, 2026-10-12) — the chat no longer has bash or any write tool; see tests/test_c6_chat_questions_only.py
 
 
 @pytest.mark.asyncio

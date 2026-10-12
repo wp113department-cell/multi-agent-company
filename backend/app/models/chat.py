@@ -138,7 +138,11 @@ async def load_history_from_db(session_id: str, db: Any) -> list[dict[str, Any]]
         rows = await db.execute(
             text(
                 "SELECT role, content FROM chat_messages "
-                "WHERE session_id = :sid ORDER BY created_at DESC LIMIT :limit"
+                # id breaks ties: a turn's messages are saved in one
+                # transaction, so they share created_at (now() is the
+                # transaction start) and came back in random order.
+                "WHERE session_id = :sid ORDER BY created_at DESC, id DESC "
+                "LIMIT :limit"
             ),
             {"sid": session_id, "limit": limit},
         )

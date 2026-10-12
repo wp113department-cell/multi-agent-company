@@ -20,7 +20,7 @@ data model, not a placeholder:
     (personal content: DELETED on erasure), and the shared team records that
     name them — tasks, epics (created/cost-approved), projects, custom
     agents and their runs, approval and improvement decisions, prompt
-    approvals, project notes (team work: KEPT on erasure, with the name
+    approvals (team work: KEPT on erasure, with the name
     replaced by "erased-user"). Before this the export returned only the
     identity and audit rows while tasks/epics kept the name forever.
 
@@ -115,29 +115,6 @@ async def _rows(
     return {"total": total, "offset": offset, "items": items}
 
 
-async def _project_notes_by(db: AsyncSession, username: str) -> list[dict[str, Any]]:
-    import json
-
-    from app.db.models import SystemSetting
-    from app.db.repository import get_setting
-
-    keys = (
-        await db.execute(
-            select(SystemSetting.key).where(SystemSetting.key.like("project-notes:%"))
-        )
-    ).scalars()
-    out: list[dict[str, Any]] = []
-    for key in list(keys):
-        try:
-            notes = json.loads(await get_setting(db, key) or "[]")
-        except ValueError:
-            continue
-        for note in notes:
-            if note.get("createdBy") == username:
-                out.append({"project": key.split(":", 1)[1], **note})
-    return out
-
-
 async def _export_for_username(
     username: str, db: AsyncSession, offset: int = 0, limit: int = 500
 ) -> dict[str, Any]:
@@ -190,7 +167,6 @@ async def _export_for_username(
         "userRole": user_role,
         "chats": chats,
         "teamWork": team_work,
-        "projectNotes": await _project_notes_by(db, username),
         "paging": {
             "offset": offset,
             "limit": limit,
@@ -245,38 +221,6 @@ async def export_user_data(
     return await _export_for_username(
         username, db, max(0, offset), max(1, min(limit, 5000))
     )
-
-
-async def _pseudonymize_notes(db: AsyncSession, username: str) -> int:
-    import json
-
-    from app.db.models import SystemSetting
-    from app.db.repository import get_setting, set_setting
-
-    keys = list(
-        (
-            await db.execute(
-                select(SystemSetting.key).where(
-                    SystemSetting.key.like("project-notes:%")
-                )
-            )
-        ).scalars()
-    )
-    changed = 0
-    for key in keys:
-        try:
-            notes = json.loads(await get_setting(db, key) or "[]")
-        except ValueError:
-            continue
-        hit = False
-        for note in notes:
-            if note.get("createdBy") == username:
-                note["createdBy"] = ERASED
-                changed += 1
-                hit = True
-        if hit:
-            await set_setting(db, key, json.dumps(notes))
-    return changed
 
 
 @router.delete("/user/{username}")
@@ -340,7 +284,6 @@ async def delete_user_data(
             {"e": ERASED, "u": username},
         )
         pseudonymized[label] = int(getattr(result, "rowcount", 0) or 0)
-    pseudonymized["projectNotes"] = await _pseudonymize_notes(db, username)
 
     await db.commit()
 

@@ -39,7 +39,7 @@ const STEPS: Step[] = [
     target: "/chat",
     icon: "message",
     title: "Chat",
-    text: "Talk with the team about a project: ask questions, have it look into or change code. Your past chats are listed on the left, so you can come back to any of them.",
+    text: "Ask questions about a project: how something works, where it lives, why it fails. The chat only reads and answers; press “Make this a task” to have a change built and tested. Your past chats are listed on the left.",
   },
   {
     target: "/agents",

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   confirmChatAction,
   createChatSession,
@@ -10,15 +11,14 @@ import {
   getCurrentProjectId,
   listChats,
   listProjects,
+  makeTaskFromChat,
   renameChat,
   stopChatTurn,
 } from "@/lib/api";
 import type { ChatSummary, Project } from "@/lib/api";
 import { authHeaders } from "@/lib/auth";
-import { TerminalTabs } from "@/components/TerminalTabs";
 import { Icon } from "../../components/Icon";
 import { activityFor } from "../../lib/chatActivity";
-import { ProjectMemory } from "../../components/ProjectMemory";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -78,25 +78,6 @@ type ChatMessage = TextMessage | ToolCallMessage | ConfirmMessage;
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/** C1: a picked file as the chat API expects it (base64 content). */
-function encodeAttachment(
-  file: File,
-): Promise<{ name: string; media_type: string; data: string }> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const url = String(reader.result ?? "");
-      resolve({
-        name: file.name,
-        media_type: file.type || "text/plain",
-        data: url.slice(url.indexOf(",") + 1),
-      });
-    };
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
-  });
-}
 
 function uid() {
   return Math.random().toString(36).slice(2);
@@ -260,6 +241,7 @@ function ConfirmBlock({
 // ---------------------------------------------------------------------------
 
 export default function ChatPage() {
+  const router = useRouter();
   const [repos, setRepos] = useState<Project[]>([]);
   const [selectedRepo, setSelectedRepo] = useState<string>("");
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -267,22 +249,13 @@ export default function ChatPage() {
   const [input, setInput] = useState("");
   // C5: what the agent is doing right now (the live status line)
   const [activity, setActivity] = useState<string | null>(null);
-  // C1: files attached to the next message
-  const [attachments, setAttachments] = useState<File[]>([]);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  // C6: "Make this a task" in progress
+  const [makingTask, setMakingTask] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [reconnecting, setReconnecting] = useState(false);
   const [reconnectAttempt, setReconnectAttempt] = useState(0);
-
-  // Q12/#3 — real interactive PTY terminal tab. terminalEverOpened stays
-  // true once set so the WebSocket/Docker container the panel owns
-  // survives switching back to the Chat tab (display:none, not unmount) —
-  // but it starts false so a chat session that never opens a terminal
-  // never spins up a container at all.
-  const [activeView, setActiveView] = useState<"chat" | "terminal">("chat");
-  const [terminalEverOpened, setTerminalEverOpened] = useState(false);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -345,12 +318,25 @@ export default function ChatPage() {
       refreshChats();
       setMessages([]);
       setError(null);
-      setActiveView("chat");
-      setTerminalEverOpened(false);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     }
   }, [repoPath, selectedProject?.id, refreshChats]);
+
+  // C6: the chat only answers; a change is made by a task built from it.
+  const makeTask = useCallback(async () => {
+    if (!sessionId) return;
+    setMakingTask(true);
+    setError(null);
+    try {
+      const { taskId } = await makeTaskFromChat(sessionId);
+      router.push(`/tasks/${taskId}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not create the task.");
+    } finally {
+      setMakingTask(false);
+    }
+  }, [sessionId, router]);
 
   const endSession = useCallback(async () => {
     if (!sessionId) return;
@@ -364,8 +350,6 @@ export default function ChatPage() {
     setMessages([]);
     setStreaming(false);
     setReconnecting(false);
-    setActiveView("chat");
-    setTerminalEverOpened(false);
     refreshChats();
   }, [sessionId, refreshChats]);
 
@@ -388,8 +372,6 @@ export default function ChatPage() {
         setSessionId(chat.id);
         setError(null);
         setReconnecting(false);
-        setActiveView("chat");
-        setTerminalEverOpened(false);
       } catch (e: unknown) {
         setError(e instanceof Error ? e.message : String(e));
       }
@@ -637,21 +619,10 @@ export default function ChatPage() {
 
   // ---- Send message ----
   const sendMessage = useCallback(async () => {
-    if ((!input.trim() && attachments.length === 0) || !sessionId || streaming) return;
+    if (!input.trim() || !sessionId || streaming) return;
 
-    let encoded: { name: string; media_type: string; data: string }[] = [];
-    try {
-      encoded = await Promise.all(attachments.map(encodeAttachment));
-    } catch {
-      setError("A file could not be read. Remove it and try again.");
-      return;
-    }
-    const names = attachments.map((f) => f.name);
-    const userText =
-      input.trim() + (names.length ? `${input.trim() ? "\n\n" : ""}Attached: ${names.join(", ")}` : "");
-    const typedText = input.trim();
+    const userText = input.trim();
     setInput("");
-    setAttachments([]);
     setError(null);
     setStreaming(true);
     setActivity("Thinking…");
@@ -676,7 +647,7 @@ export default function ChatPage() {
       const res = await fetch(`/api/chat/sessions/${sessionId}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders() },
-        body: JSON.stringify({ message: typedText, attachments: encoded }),
+        body: JSON.stringify({ message: userText }),
         signal: abortCtrl.signal,
       });
 
@@ -745,7 +716,7 @@ export default function ChatPage() {
       abortRef.current = null;
       setTimeout(() => inputRef.current?.focus(), 100);
     }
-  }, [input, attachments, sessionId, streaming, handleSseEvent, reconnect, refreshChats]);
+  }, [input, sessionId, streaming, handleSseEvent, reconnect, refreshChats]);
 
   // Keyboard: Ctrl+Enter or Enter to send
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -850,7 +821,6 @@ export default function ChatPage() {
             </li>
           ))}
         </ul>
-        {selectedProject && <ProjectMemory projectId={selectedProject.id} />}
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
@@ -859,7 +829,7 @@ export default function ChatPage() {
         <div>
           <h1 className="text-lg">Chat Agent</h1>
           <p className="text-sm text-slate-500">
-            Conversational AI coding assistant — reads, writes, debugs, commits
+            Ask anything about the project. To change code, make it a task.
           </p>
         </div>
         {sessionId && (
@@ -871,6 +841,15 @@ export default function ChatPage() {
                 : `Connected · ${repoPath.split("/").slice(-2).join("/")}`}
             </span>
             <button
+              type="button"
+              onClick={() => void makeTask()}
+              disabled={streaming || makingTask || !messages.some((m) => m.role === "user")}
+              title="Create a task in this project from this conversation"
+              className="rounded-lg bg-orange-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-orange-700 disabled:opacity-40"
+            >
+              {makingTask ? "Creating task…" : "Make this a task"}
+            </button>
+            <button
               onClick={() => void endSession()}
               className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-400"
             >
@@ -880,42 +859,13 @@ export default function ChatPage() {
         )}
       </div>
 
-      {/* Q12/#3 — Chat / Terminal tabs */}
-      {sessionId && (
-        <div className="mb-3 flex gap-1 border-b border-slate-200 dark:border-slate-700">
-          <button
-            onClick={() => setActiveView("chat")}
-            className={`px-3 py-1.5 text-sm font-medium border-b-2 -mb-px ${
-              activeView === "chat"
-                ? "border-blue-600 text-blue-600"
-                : "border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
-            }`}
-          >
-            Chat
-          </button>
-          <button
-            onClick={() => {
-              setTerminalEverOpened(true);
-              setActiveView("terminal");
-            }}
-            className={`px-3 py-1.5 text-sm font-medium border-b-2 -mb-px ${
-              activeView === "terminal"
-                ? "border-blue-600 text-blue-600"
-                : "border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
-            }`}
-          >
-            Terminal
-          </button>
-        </div>
-      )}
-
       {/* Session start panel */}
       {!sessionId && (
         <div className="flex flex-1 items-center justify-center">
           <div className="w-full max-w-md space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800">
             <h2 className="font-semibold text-slate-800 dark:text-slate-200">Start a Chat Session</h2>
             <p className="text-sm text-slate-500">
-              Choose the project to talk about. The team can read, change and run its code, and asks you before anything risky.
+              Choose the project to ask about. The chat reads its code and answers; it never changes anything.
             </p>
 
             {repos.length > 0 && (
@@ -961,15 +911,8 @@ export default function ChatPage() {
         </div>
       )}
 
-      {/* Q12/#3 — Terminal tab. Kept mounted (display:none/block, not
-          unmounted) once opened so switching back to Chat doesn't kill the
-          live WebSocket/Docker session. */}
-      {sessionId && terminalEverOpened && (
-        <TerminalTabs chatSessionId={sessionId} visible={activeView === "terminal"} />
-      )}
-
       {/* Chat area */}
-      {sessionId && activeView === "chat" && (
+      {sessionId && (
         <div className="flex flex-1 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
           {/* Messages */}
           <div className="flex-1 overflow-y-auto p-4 space-y-3">
@@ -979,13 +922,13 @@ export default function ChatPage() {
                   <p className="mb-3 flex justify-center text-orange-500"><Icon name="bot" size={40} /></p>
                   <p className="font-medium">Agent ready</p>
                   <p className="text-sm mt-1">
-                    Ask me to read files, fix bugs, write code, run tests, commit changes...
+                    Ask how something works, where it lives, or why it fails.
                   </p>
                   <div className="mt-4 flex flex-wrap gap-2 justify-center">
                     {[
                       "Show me the project structure",
                       "Find all TODO comments",
-                      "Run the test suite",
+                      "Explain how login works",
                       "What are the recent git commits?",
                     ].map((hint) => (
                       <button
@@ -1076,57 +1019,13 @@ export default function ChatPage() {
                 {activity}
               </p>
             )}
-            {attachments.length > 0 && (
-              <ul className="mb-2 flex flex-wrap gap-2" aria-label="Attached files">
-                {attachments.map((f, i) => (
-                  <li
-                    key={`${f.name}-${i}`}
-                    className="flex items-center gap-1 rounded-full bg-slate-100 py-1 pl-3 pr-1 text-xs text-slate-700 dark:bg-slate-800 dark:text-slate-200"
-                  >
-                    <Icon name="paperclip" size={12} />
-                    <span className="max-w-[12rem] truncate">{f.name}</span>
-                    <button
-                      type="button"
-                      aria-label={`Remove ${f.name}`}
-                      onClick={() => setAttachments((prev) => prev.filter((_, j) => j !== i))}
-                      className="rounded-full p-0.5 text-slate-400 hover:text-red-600"
-                    >
-                      <Icon name="x" size={12} />
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
             <div className="flex items-end gap-2">
-              <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                accept="image/png,image/jpeg,image/gif,image/webp,application/pdf,.txt,.md,.log,.json,.csv,.yml,.yaml,.py,.js,.jsx,.ts,.tsx,.html,.css,.sql,.sh,.java,.go,.rs,.rb,.php,.c,.cpp,.h,.cs,.kt,.swift,.xml,.toml,.ini,.env.example"
-                className="hidden"
-                aria-label="Attach files"
-                onChange={(e) => {
-                  const picked = Array.from(e.target.files ?? []);
-                  setAttachments((prev) => [...prev, ...picked].slice(0, 5));
-                  e.target.value = "";
-                }}
-              />
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={streaming || attachments.length >= 5}
-                title="Attach images, PDFs or text/code files (up to 5)"
-                aria-label="Attach files (images, PDFs, text or code)"
-                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 text-slate-500 hover:text-orange-600 disabled:opacity-40 dark:border-slate-600"
-              >
-                <Icon name="paperclip" size={18} />
-              </button>
               <textarea
                 ref={inputRef}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="Ask anything about the codebase… (Enter to send, Shift+Enter for newline)"
+                placeholder="Ask anything about the project… (Enter to send, Shift+Enter for newline)"
                 rows={2}
                 disabled={streaming}
                 className="flex-1 resize-none rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-60 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
@@ -1152,7 +1051,7 @@ export default function ChatPage() {
               ) : (
                 <button
                   onClick={() => void sendMessage()}
-                  disabled={!input.trim() && attachments.length === 0}
+                  disabled={!input.trim()}
                   className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 shrink-0"
                 >
                   <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1162,7 +1061,7 @@ export default function ChatPage() {
               )}
             </div>
             <p className="mt-1.5 text-[11px] text-slate-400">
-              36 tools available · reads files · edits code · runs tests · manages git · asks before destructive ops
+              Reads the project and answers · never changes anything · use “Make this a task” for changes
             </p>
           </div>
         </div>

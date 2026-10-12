@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app.api.budget_gate import require_daily_budget
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -50,17 +50,8 @@ class CreateSessionResponse(BaseModel):
     session_id: str
 
 
-class ChatAttachment(BaseModel):
-    """C1: a file the user attached to a chat message (base64 content)."""
-
-    name: str = Field(..., min_length=1, max_length=200)
-    media_type: str = Field(..., max_length=100)
-    data: str
-
-
 class SendMessageRequest(BaseModel):
     message: str
-    attachments: list[ChatAttachment] = Field(default_factory=list, max_length=5)
 
 
 class ConfirmActionRequest(BaseModel):
@@ -122,77 +113,9 @@ async def _require_session_restoring(session_id: str) -> ChatSession:
     raise HTTPException(status_code=404, detail=f"Session {session_id!r} not found")
 
 
-# ---------------------------------------------------------------------------
-# C1 (2026-10-09): attachments — images go to the model as pictures; PDFs and
-# text/code files become text in the message. Limits keep cost and memory sane.
-# ---------------------------------------------------------------------------
-
-_IMAGE_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
-_MAX_IMAGE_BYTES = 5 * 1024 * 1024
-_MAX_PDF_BYTES = 20 * 1024 * 1024
-_MAX_TEXT_BYTES = 300 * 1024
-_MAX_TEXT_CHARS = 60_000
-
-
-def _prepare_attachments(
-    attachments: list[ChatAttachment],
-) -> tuple[str, list[dict[str, Any]]]:
-    import base64
-    import binascii
-
-    extra: list[str] = []
-    images: list[dict[str, Any]] = []
-    for att in attachments:
-        try:
-            raw = base64.b64decode(att.data, validate=True)
-        except (binascii.Error, ValueError):
-            raise HTTPException(
-                status_code=400, detail=f"{att.name!r} could not be read."
-            ) from None
-        media = att.media_type.lower()
-        if media in _IMAGE_TYPES:
-            if len(raw) > _MAX_IMAGE_BYTES:
-                raise HTTPException(
-                    status_code=400, detail=f"Image {att.name!r} is larger than 5 MB."
-                )
-            images.append(
-                {
-                    "type": "image",
-                    "source": {"type": "base64", "media_type": media, "data": att.data},
-                    # stripped before the block reaches the model or the DB
-                    "_name": att.name,
-                }
-            )
-        elif media == "application/pdf" or att.name.lower().endswith(".pdf"):
-            if len(raw) > _MAX_PDF_BYTES:
-                raise HTTPException(
-                    status_code=400, detail=f"PDF {att.name!r} is larger than 20 MB."
-                )
-            from app.api.tasks import _extract_pdf_text
-
-            text = _extract_pdf_text(raw, att.name)[:_MAX_TEXT_CHARS]
-            extra.append(f"\n\n--- Attached PDF: {att.name} ---\n{text}")
-        else:
-            if len(raw) > _MAX_TEXT_BYTES:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"{att.name!r} is larger than 300 KB; attach a smaller part.",
-                )
-            if b"\x00" in raw:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"{att.name!r} is not a text file (images, PDFs and "
-                    "text/code files can be attached).",
-                )
-            text = raw.decode("utf-8", errors="replace")[:_MAX_TEXT_CHARS]
-            extra.append(f"\n\n--- Attached file: {att.name} ---\n{text}")
-    for img in images:
-        img.pop("_name", None)
-    return "".join(extra), images
-
-
 def _without_image_data(content: Any) -> Any:
-    """Stored history keeps a note instead of the picture itself."""
+    """Stored history keeps a note instead of a picture (chats from before
+    attachments were removed in C6 can still hold image blocks)."""
     if not isinstance(content, list):
         return content
     return [
@@ -397,14 +320,11 @@ async def send_message(
             detail="Session already has an active message being processed",
         )
 
-    extra_text, images = _prepare_attachments(body.attachments)
-    if not body.message.strip() and not body.attachments:
-        raise HTTPException(status_code=400, detail="Type a message or attach a file.")
-    message = body.message + extra_text
+    if not body.message.strip():
+        raise HTTPException(status_code=400, detail="Type a question.")
+    message = body.message
     session.active = True
-    await _touch_chat_record(
-        db, session_id, body.message or ", ".join(a.name for a in body.attachments)
-    )
+    await _touch_chat_record(db, session_id, body.message)
 
     # Launch agent in background — it pushes events to the queue. Reused
     # (not freshly constructed) so the same ChatAgent instance — and thus
@@ -413,7 +333,7 @@ async def send_message(
     # resume() it later (MASTER_AGENT_v2.md Phase 5.2).
     agent = get_or_create_chat_agent(session)
     factory = get_session_factory()
-    asyncio.create_task(_run_agent(agent, message, session, factory, images))
+    asyncio.create_task(_run_agent(agent, message, session, factory))
 
     return StreamingResponse(
         _event_stream(session),
@@ -491,15 +411,11 @@ async def _run_agent(
     message: str,
     session: ChatSession,
     db_factory: Any,
-    images: list[dict[str, Any]] | None = None,
 ) -> None:
     """Background task: run the agent, then persist user message + assistant reply to DB."""
     history_len_before = len(session.history)
     try:
-        if images:
-            await agent.run(message, images=images)
-        else:
-            await agent.run(message)
+        await agent.run(message)
     except Exception as e:
         logger.exception("Unhandled error in chat agent")
         await session.push({"type": "error", "message": f"Internal error: {e}"})
@@ -624,8 +540,12 @@ async def get_history(
         # Session lost from memory — read from DB directly
         source_history = await load_history_from_db(session_id, db)
 
-    # Filter to only text content for the UI
-    ui_history: list[dict[str, object]] = []
+    return {"history": _text_history(source_history), "session_id": session_id}
+
+
+def _text_history(source_history: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Only the text of each turn (tool calls and results left out)."""
+    ui_history: list[dict[str, Any]] = []
     for msg in source_history:
         role = msg.get("role", "")
         content = msg.get("content", "")
@@ -640,7 +560,7 @@ async def get_history(
             combined = "\n".join(text_parts)
             if combined.strip():
                 ui_history.append({"role": role, "content": combined})
-    return {"history": ui_history, "session_id": session_id}
+    return ui_history
 
 
 @router.delete("/sessions/{session_id}")
@@ -757,3 +677,113 @@ async def delete_chat_forever(
     delete_session(session_id)
     delete_chat_agent(session_id)
     return {"status": "deleted"}
+
+
+# ---------------------------------------------------------------------------
+# C6 (owner decision, 2026-10-12): the chat only answers questions; a change
+# is made by a task. "Make this a task" turns the conversation into one.
+# ---------------------------------------------------------------------------
+
+_TASK_CONTEXT_CHARS = 6000
+
+
+class MakeTaskRequest(BaseModel):
+    # what to build or change; defaults to the user's last message
+    request: str | None = None
+
+
+def _task_from_conversation(
+    turns: list[dict[str, Any]], request: str | None
+) -> tuple[str, str]:
+    """(title, description) for a task made from a chat conversation."""
+    user_turns = [
+        str(t["content"]).strip()
+        for t in turns
+        if t.get("role") == "user" and str(t.get("content", "")).strip()
+    ]
+    ask = (request or "").strip() or (user_turns[-1] if user_turns else "")
+    if not ask:
+        raise HTTPException(status_code=400, detail="Ask something in the chat first.")
+    first_line = ask.splitlines()[0].strip()
+    title = first_line if len(first_line) <= 80 else first_line[:77].rstrip() + "..."
+    lines: list[str] = []
+    used = 0
+    for t in reversed(turns):  # most recent first, within the budget
+        who = "User" if t.get("role") == "user" else "Chat"
+        entry = f"**{who}:** {str(t.get('content', '')).strip()}"
+        if used + len(entry) > _TASK_CONTEXT_CHARS:
+            break
+        lines.insert(0, entry)
+        used += len(entry)
+    description = ask
+    if lines:
+        description += (
+            "\n\n---\nFrom the chat conversation this task was made from:\n\n"
+            + "\n\n".join(lines)
+        )
+    return title, description
+
+
+@router.post("/sessions/{session_id}/make-task", status_code=201)
+async def make_task(
+    request: Request,
+    session_id: str,
+    body: MakeTaskRequest,
+    db: AsyncSession = Depends(get_db),
+    actor: str = Depends(require_approver),
+) -> dict[str, Any]:
+    """Create a task in the chat's project from the conversation."""
+    from sqlalchemy import select
+
+    from app.db.models import ChatSessionRecord, Project
+    from app.db.repository import create_task
+    from app.middleware.idempotency import get_cached_response, store_response
+
+    await _check_chat_owner(session_id, actor)  # Sol A07
+    cached = await get_cached_response(db, request, "chat_make_task")
+    if cached is not None:
+        return cached
+
+    rec = await db.get(ChatSessionRecord, session_id)
+    session = get_session(session_id)
+    if session is not None:
+        turns = _text_history(session.history)
+    else:
+        turns = _text_history(await load_history_from_db(session_id, db))
+    if rec is None and session is None and not turns:
+        raise HTTPException(status_code=404, detail="Chat not found")
+
+    project = await db.get(Project, rec.project_id) if rec and rec.project_id else None
+    if project is None:  # chats from before C2 recorded only their folder
+        folder = (rec.repo_path if rec else None) or (
+            session.repo_path if session else None
+        )
+        if folder:
+            project = (
+                (await db.execute(select(Project).where(Project.local_path == folder)))
+                .scalars()
+                .first()
+            )
+    if project is None:
+        raise HTTPException(
+            status_code=400,
+            detail="This chat is not linked to a project; create the task on the Tasks page.",
+        )
+
+    title, description = _task_from_conversation(turns, body.request)
+    task = await create_task(
+        db,
+        title,
+        description,
+        repo_id=project.repo_id,
+        project=project.name,
+        created_by=actor,
+        project_id=project.id,
+    )
+    result: dict[str, Any] = {
+        "taskId": task.id,
+        "title": title,
+        "projectId": project.id,
+    }
+    await store_response(db, request, "chat_make_task", result)
+    return result

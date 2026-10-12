@@ -516,19 +516,54 @@ def _read_stream_nonblocking(stream: Any, max_bytes: int = 8192) -> str | None:
 # read/write verification semantics the other 67 agents declare, for parity.
 # ---------------------------------------------------------------------------
 
+# C6 (owner decision, 2026-10-12): the chat answers questions about a project
+# and never changes anything — building and fixing is done by tasks ("Make
+# this a task"). Only low-risk tools whose manifest permissions are read-only
+# are offered, minus the few that still write or reach outside the project.
+# CHAT_TOOLS (app/agents/tools.py) keeps the full catalogue for its other
+# consumers; this subset is what the chat model sees and may run.
+_CHAT_READ_PERMISSIONS = frozenset({"read_repo", "read_memory"})
+_CHAT_NOT_READ_ONLY = frozenset(
+    {
+        "git_branch",  # also creates branches
+        "export_markdown",  # writes an HTML file
+        "read_logs",  # host and journal logs, outside the project
+        "list_env_vars",  # the server's own environment, outside the project
+    }
+)
+_CHAT_UI_TOOLS = frozenset({"submit_result", "ask_human_to_choose"})
+
+
+def _is_chat_read_tool(name: str) -> bool:
+    if name in _CHAT_UI_TOOLS:
+        return True
+    from app.fleet.tool_manifest import TOOL_MANIFEST
+
+    entry = TOOL_MANIFEST.get(name)
+    return (
+        entry is not None
+        and name not in _CHAT_NOT_READ_ONLY
+        and entry.risk_level == "low"
+        and bool(entry.permissions)
+        and set(entry.permissions) <= _CHAT_READ_PERMISSIONS
+    )
+
+
+CHAT_AGENT_TOOLS: list[dict[str, Any]] = [
+    t for t in CHAT_TOOLS if _is_chat_read_tool(t["name"])
+]
+CHAT_AGENT_TOOL_NAMES = frozenset(t["name"] for t in CHAT_AGENT_TOOLS)
+
+
 AGENT_CONTRACT: dict[str, Any] = {
     "name": "chat_agent",
-    "description": "Interactive streaming chat agent — full agentic loop over the repo (read/search/edit/git/test/db/docker) with human confirmation gating dangerous actions.",
-    "allowed_tools": [t["name"] for t in CHAT_TOOLS],
+    "description": "Interactive streaming chat agent — answers questions about one project with read-only tools; changes are made by tasks.",
+    "allowed_tools": sorted(CHAT_AGENT_TOOL_NAMES),
     "input_types": ["chat_session", "user_message"],
     "output_types": ["streamed_events", "AgentResult"],
-    "side_effects": [
-        "reads/writes repo files",
-        "runs bash",
-        "runs git (incl. push, with confirmation)",
-    ],
-    "permissions": ["read_repo", "write_repo", "execute_bash", "git_write"],
-    "risk_level": "high",
+    "side_effects": ["reads repo files"],
+    "permissions": ["read_repo"],
+    "risk_level": "low",
     "expected_verification": {
         "read": "read_file or search_code must run before write/bash tools"
     },
@@ -1279,34 +1314,6 @@ class ChatAgent:
             )
         except Exception:
             logger.debug("ChatAgent memory read skipped (non-fatal)", exc_info=True)
-            return ""
-
-    async def _project_notes_context(self) -> str:
-        """C3: the project's notes (what the user asked the team to
-        remember), given in full with every message. Non-fatal."""
-        try:
-            from sqlalchemy.ext.asyncio import async_sessionmaker
-
-            from app.db.session import new_isolated_async_engine
-            from app.services.project_notes import (
-                format_notes,
-                get_notes,
-                project_id_for_chat,
-            )
-
-            engine = new_isolated_async_engine()
-            try:
-                async with async_sessionmaker(engine, expire_on_commit=False)() as db:
-                    project_id = await project_id_for_chat(
-                        db, self.session.session_id, self.session.repo_path
-                    )
-                    if project_id is None:
-                        return ""
-                    return format_notes(await get_notes(db, project_id))
-            finally:
-                await engine.dispose()
-        except Exception:
-            logger.debug("project notes skipped (non-fatal)", exc_info=True)
             return ""
 
     async def _memory_write_outcome(
@@ -4531,7 +4538,7 @@ class ChatAgent:
 
         # Cast our dict-based messages/tools to what the SDK expects
         sdk_messages = cast(list[MessageParam], self.session.history)
-        sdk_tools = cast(list[ToolParam], CHAT_TOOLS)
+        sdk_tools = cast(list[ToolParam], CHAT_AGENT_TOOLS)
 
         # Gap-closure Day 22 (Stage 1.3, answers.md) — circuit breaker around
         # the Anthropic streaming call. Uses allow()/record_success()/
@@ -4721,6 +4728,12 @@ class ChatAgent:
         # structural chokepoint, checked first so a policy denial always
         # wins over a verification-gate denial.
         policy_denial = _policy_check(tu["name"], tu["input"])
+        if tu["name"] not in CHAT_AGENT_TOOL_NAMES:
+            # C6: never offered to the model; refused if it asks anyway.
+            policy_denial = (
+                f"{tu['name']} is not available in chat: the chat only reads "
+                "and answers. Changes are made by a task (Make this a task)."
+            )
         if policy_denial:
             result = f"[POLICY DENIED] {policy_denial}"
             logger.warning("Policy denied %s: %s", tu["name"], policy_denial)
@@ -4895,9 +4908,7 @@ class ChatAgent:
         # effect for every session created afterward.
         return graph.compile(checkpointer=_chat_checkpointer)
 
-    async def run(
-        self, user_message: str, images: list[dict[str, Any]] | None = None
-    ) -> None:
+    async def run(self, user_message: str) -> None:
         """
         Process user_message through the full agentic loop.
         Events are pushed to session.push() for SSE delivery.
@@ -5003,20 +5014,8 @@ class ChatAgent:
         except Exception:
             logger.debug("active_branch lookup skipped (non-fatal)", exc_info=True)
 
-        if images:
-            # C1: pictures the user attached, sent to the model as images
-            self.session.history.append(
-                {
-                    "role": "user",
-                    "content": [{"type": "text", "text": user_message}, *images],
-                }
-            )
-        else:
-            self.session.history.append({"role": "user", "content": user_message})
+        self.session.history.append({"role": "user", "content": user_message})
         memory_block = await self._memory_read_context(user_message)
-        notes_block = await self._project_notes_context()
-        if notes_block:
-            memory_block = f"{notes_block}\n\n{memory_block}".strip()
         system_prompt = (
             (f"{self._system}\n\n{memory_block}" if memory_block else self._system)
             + frustration_directive
