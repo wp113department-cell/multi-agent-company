@@ -55,6 +55,8 @@ def test_concurrent_subtasks_get_their_own_sessions(
                             "type": "backend",
                             "title": f"s{i}",
                             "description": "x",
+                            # Sol A20: only steps editing different files run together
+                            "files_to_edit": [f"s{i}.py"],
                         }
                         for i in (1, 2, 3)
                     ],

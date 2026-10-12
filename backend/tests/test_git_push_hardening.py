@@ -412,5 +412,11 @@ def test_npm_install_pip_install_npm_run_are_advertised_to_the_chat_llm() -> Non
     missing dispatch really was a live, reachable bug — not dead code."""
     from app.agents.chat_agent import AGENT_CONTRACT
 
+    # UPDATED (C6, 2026-10-12): the chat only reads and answers, so these
+    # are no longer offered to it; they stay in the CHAT_TOOLS catalogue.
+    from app.agents.tools import CHAT_TOOLS
+
+    catalogue = {t["name"] for t in CHAT_TOOLS}
     for name in ("npm_install", "npm_run", "pip_install"):
-        assert name in AGENT_CONTRACT["allowed_tools"]
+        assert name not in AGENT_CONTRACT["allowed_tools"]
+        assert name in catalogue

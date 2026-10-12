@@ -617,54 +617,9 @@ class TestRememberConfirmationChoice:
         session = ChatSession(session_id="batch07_remember_default", repo_path="/tmp")
         assert session.remembered_confirmations == set()
 
-    @pytest.mark.asyncio
-    async def test_remembered_choice_skips_future_pause_for_same_tool(self) -> None:
-        session = ChatSession(session_id="batch07_remember_1", repo_path="/tmp/repo")
-        agent = ChatAgent(session)
-        git_call_count = {"n": 0}
-        responses = [
-            _FakeToolUseStream("git_push", {"branch": "main"}, tool_id="toolu_r1"),
-            _FakeTextStream("Pushed."),
-            _FakeToolUseStream("git_push", {"branch": "main"}, tool_id="toolu_r2"),
-            _FakeTextStream("Pushed again."),
-        ]
-        p1, p2, p3, p4 = _patched_agent_with_git(agent, responses, git_call_count)
+    # test_remembered_choice_skips_future_pause_for_same_tool: removed (C6, 2026-10-12) — the chat only reads and answers; it no longer pushes, opens PRs or changes files, so there is nothing to confirm. See tests/test_c6_chat_questions_only.py
 
-        with p1, p2, p3, p4:
-            await agent.run("push")
-            resumed = await agent.resume("toolu_r1", True, remember=True)
-            assert resumed is True
-            assert git_call_count["n"] == 1
-            assert "git_push" in session.remembered_confirmations
-
-            # Second turn, same tool: must complete in run() alone, no
-            # resume() needed — the whole point of "remember".
-            await agent.run("push again")
-            assert git_call_count["n"] == 2
-
-    @pytest.mark.asyncio
-    async def test_remember_does_not_leak_across_different_tools(
-        self, tmp_path: Path
-    ) -> None:
-        (tmp_path / "foo.txt").write_text("bye")
-        session = ChatSession(session_id="batch07_remember_2", repo_path=str(tmp_path))
-        agent = ChatAgent(session)
-        session.remembered_confirmations.add("git_push")
-
-        responses = [
-            _FakeToolUseStream("delete_file", {"path": "foo.txt"}, tool_id="toolu_r3"),
-            _FakeTextStream("Deleted."),
-        ]
-        p1, p2, p3 = _patched_agent(agent, responses)
-
-        with p1, p2, p3:
-            await agent.run("delete foo.txt")
-
-            config = {"configurable": {"thread_id": session.session_id}}
-            snapshot = await agent._graph.aget_state(config)
-            # Still paused — remembering git_push must not auto-approve
-            # an unrelated tool (delete_file).
-            assert any(task.interrupts for task in snapshot.tasks)
+    # test_remember_does_not_leak_across_different_tools: removed (C6, 2026-10-12) — the chat only reads and answers; it no longer pushes, opens PRs or changes files, so there is nothing to confirm. See tests/test_c6_chat_questions_only.py
 
     def test_confirm_action_request_remember_defaults_false(self) -> None:
         from app.api.chat import ConfirmActionRequest

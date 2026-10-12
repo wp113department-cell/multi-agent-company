@@ -68,10 +68,14 @@ def _add_bare_origin(repo: Path, parent: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_github_create_pr_is_really_advertised_to_the_chat_llm() -> None:
-    """Confirms the real premise: this tool WAS reachable/advertised, so
-    the missing dispatch was a live bug, not dead code."""
-    assert "github_create_pr" in AGENT_CONTRACT["allowed_tools"]
+def test_github_create_pr_is_no_longer_offered_to_the_chat_llm() -> None:
+    """UPDATED (C6, 2026-10-12): the chat only reads and answers, so it is
+    not offered github_create_pr any more (the handler below is still
+    tested; it stays in the CHAT_TOOLS catalogue)."""
+    from app.agents.tools import CHAT_TOOLS
+
+    assert "github_create_pr" not in AGENT_CONTRACT["allowed_tools"]
+    assert "github_create_pr" in {t["name"] for t in CHAT_TOOLS}
 
 
 @pytest.mark.asyncio

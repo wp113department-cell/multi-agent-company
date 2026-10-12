@@ -113,62 +113,9 @@ def _patched_agent(agent: ChatAgent, responses: list, git_call_count: dict):
     )
 
 
-@pytest.mark.asyncio
-async def test_confirmed_git_push_runs_exactly_once_across_pause_and_resume() -> None:
-    session = ChatSession(session_id="td_graph_push_approve", repo_path="/tmp/repo")
-    agent = ChatAgent(session)
-    git_call_count = {"n": 0}
-    responses = [
-        _FakeToolUseStream("git_push", {"branch": "main"}, tool_id="toolu_push1"),
-        _FakeTextStream("Pushed successfully."),
-    ]
-    p1, p2, p3, p4 = _patched_agent(agent, responses, git_call_count)
+# test_confirmed_git_push_runs_exactly_once_across_pause_and_resume: removed (C6, 2026-10-12) — the chat only reads and answers; it no longer pushes, opens PRs or changes files, so there is nothing to confirm. See tests/test_c6_chat_questions_only.py
 
-    with p1, p2, p3, p4:
-        await agent.run("please push my changes")
-
-        # Paused at the confirmation — the real side effect must NOT have
-        # run yet. This is the failure mode the superseded whole-loop-node
-        # design would have gotten wrong on the *resumed* pass (git called
-        # twice); here we confirm it hasn't even run once too early.
-        assert git_call_count["n"] == 0
-
-        config = {"configurable": {"thread_id": session.session_id}}
-        snapshot = await agent._graph.aget_state(config)
-        action_id = None
-        for task in snapshot.tasks:
-            for i in task.interrupts:
-                action_id = i.value["action_id"]
-        assert action_id == "toolu_push1"
-
-        resumed = await agent.resume(action_id, True)
-        assert resumed is True
-
-    assert git_call_count["n"] == 1
-
-
-@pytest.mark.asyncio
-async def test_denied_git_push_never_runs() -> None:
-    session = ChatSession(session_id="td_graph_push_deny", repo_path="/tmp/repo")
-    agent = ChatAgent(session)
-    git_call_count = {"n": 0}
-    responses = [
-        _FakeToolUseStream("git_push", {"branch": "main"}, tool_id="toolu_push2"),
-        _FakeTextStream("Understood, not pushing."),
-    ]
-    p1, p2, p3, p4 = _patched_agent(agent, responses, git_call_count)
-
-    with p1, p2, p3, p4:
-        await agent.run("push please")
-        config = {"configurable": {"thread_id": session.session_id}}
-        snapshot = await agent._graph.aget_state(config)
-        action_id = next(
-            i.value["action_id"] for task in snapshot.tasks for i in task.interrupts
-        )
-        resumed = await agent.resume(action_id, False)
-        assert resumed is True
-
-    assert git_call_count["n"] == 0
+# test_denied_git_push_never_runs: removed (C6, 2026-10-12) — the chat only reads and answers; it no longer pushes, opens PRs or changes files, so there is nothing to confirm. See tests/test_c6_chat_questions_only.py
 
 
 def _patched_agent_for_create_pr(
@@ -209,73 +156,9 @@ def _patched_agent_for_create_pr(
     )
 
 
-@pytest.mark.asyncio
-async def test_confirmed_create_pr_runs_exactly_once_across_pause_and_resume() -> None:
-    """tool_enhance.md productionization pass, tool #2 — create_pr is a
-    real, publicly-visible external write (permissions: write_remote) that
-    had NO confirmation gate at all before this pass, unlike git_push right
-    above it in the same dispatch. Same proof shape as
-    test_confirmed_git_push_runs_exactly_once_across_pause_and_resume:
-    the real side effect (here, the `gh pr create` subprocess call) must
-    not run before approval, and must run exactly once after it — not
-    zero, not twice."""
-    session = ChatSession(session_id="td_graph_pr_approve", repo_path="/tmp/repo")
-    agent = ChatAgent(session)
-    gh_call_count = {"n": 0}
-    responses = [
-        _FakeToolUseStream(
-            "create_pr",
-            {"title": "Add feature X", "body": "Implements X.", "base": "main"},
-            tool_id="toolu_pr1",
-        ),
-        _FakeTextStream("PR created."),
-    ]
-    p1, p2, p3, p4 = _patched_agent_for_create_pr(agent, responses, gh_call_count)
+# test_confirmed_create_pr_runs_exactly_once_across_pause_and_resume: removed (C6, 2026-10-12) — the chat only reads and answers; it no longer pushes, opens PRs or changes files, so there is nothing to confirm. See tests/test_c6_chat_questions_only.py
 
-    with p1, p2, p3, p4:
-        await agent.run("please open a PR")
-
-        assert gh_call_count["n"] == 0
-
-        config = {"configurable": {"thread_id": session.session_id}}
-        snapshot = await agent._graph.aget_state(config)
-        action_id = next(
-            i.value["action_id"] for task in snapshot.tasks for i in task.interrupts
-        )
-        assert action_id == "toolu_pr1"
-
-        resumed = await agent.resume(action_id, True)
-        assert resumed is True
-
-    assert gh_call_count["n"] == 1
-
-
-@pytest.mark.asyncio
-async def test_denied_create_pr_never_runs() -> None:
-    session = ChatSession(session_id="td_graph_pr_deny", repo_path="/tmp/repo")
-    agent = ChatAgent(session)
-    gh_call_count = {"n": 0}
-    responses = [
-        _FakeToolUseStream(
-            "create_pr",
-            {"title": "Add feature X", "body": "Implements X.", "base": "main"},
-            tool_id="toolu_pr2",
-        ),
-        _FakeTextStream("Understood, not opening a PR."),
-    ]
-    p1, p2, p3, p4 = _patched_agent_for_create_pr(agent, responses, gh_call_count)
-
-    with p1, p2, p3, p4:
-        await agent.run("open a pr")
-        config = {"configurable": {"thread_id": session.session_id}}
-        snapshot = await agent._graph.aget_state(config)
-        action_id = next(
-            i.value["action_id"] for task in snapshot.tasks for i in task.interrupts
-        )
-        resumed = await agent.resume(action_id, False)
-        assert resumed is True
-
-    assert gh_call_count["n"] == 0
+# test_denied_create_pr_never_runs: removed (C6, 2026-10-12) — the chat only reads and answers; it no longer pushes, opens PRs or changes files, so there is nothing to confirm. See tests/test_c6_chat_questions_only.py
 
 
 @pytest.mark.asyncio
@@ -367,74 +250,6 @@ async def _cleanup_pending_approval(thread_id: str) -> None:
         await engine.dispose()
 
 
-@pytest.mark.asyncio
-async def test_confirmation_writes_a_real_pending_approval_row_and_decides_it() -> None:
-    from app.fleet import approval_gate as ag
+# test_confirmation_writes_a_real_pending_approval_row_and_decides_it: removed (C6, 2026-10-12) — the chat only reads and answers; it no longer pushes, opens PRs or changes files, so there is nothing to confirm. See tests/test_c6_chat_questions_only.py
 
-    session = ChatSession(session_id="td_graph_audit_1", repo_path="/tmp/repo")
-    agent = ChatAgent(session)
-    git_call_count = {"n": 0}
-    responses = [
-        _FakeToolUseStream("git_push", {"branch": "main"}, tool_id="toolu_audit1"),
-        _FakeTextStream("Pushed."),
-    ]
-    p1, p2, p3, p4 = _patched_agent(agent, responses, git_call_count)
-    thread_id = f"chat-{session.session_id}-toolu_audit1"
-
-    try:
-        with p1, p2, p3, p4:
-            await agent.run("push")
-
-            rec = await ag.aget_pending(thread_id)
-            assert rec is not None
-            assert rec.action == "chat_confirmation"
-            assert rec.agent_name == "chat_agent"
-            assert rec.details["description"] == "Push commits to remote repository"
-            assert rec.details["blocking"] is True
-            assert rec.status == "pending"
-
-            await agent.resume("toolu_audit1", True)
-
-        rec_after = await ag.aget_pending(thread_id)
-        assert rec_after is not None
-        assert rec_after.status == "approved"
-        assert rec_after.decided_by == "user"
-    finally:
-        await _cleanup_pending_approval(thread_id)
-
-
-@pytest.mark.asyncio
-async def test_approval_gate_failure_never_blocks_the_real_pause_resume_flow() -> None:
-    """Audit/tracking is best-effort — a broken approval_gate call must
-    never prevent the real confirmation pause/resume from working, matching
-    every other best-effort audit call site in this codebase."""
-    session = ChatSession(session_id="td_graph_audit_2", repo_path="/tmp/repo")
-    agent = ChatAgent(session)
-    git_call_count = {"n": 0}
-    responses = [
-        _FakeToolUseStream("git_push", {"branch": "main"}, tool_id="toolu_audit2"),
-        _FakeTextStream("Pushed."),
-    ]
-    p1, p2, p3, p4 = _patched_agent(agent, responses, git_call_count)
-
-    with (
-        p1,
-        p2,
-        p3,
-        p4,
-        patch(
-            "app.fleet.approval_gate.arequest_human_input",
-            new=AsyncMock(side_effect=RuntimeError("db down")),
-        ),
-    ):
-        await agent.run("push")
-        assert git_call_count["n"] == 0
-
-        with patch(
-            "app.fleet.approval_gate.arecord_decision",
-            new=AsyncMock(side_effect=RuntimeError("db down")),
-        ):
-            resumed = await agent.resume("toolu_audit2", True)
-
-    assert resumed is True
-    assert git_call_count["n"] == 1
+# test_approval_gate_failure_never_blocks_the_real_pause_resume_flow: removed (C6, 2026-10-12) — the chat only reads and answers; it no longer pushes, opens PRs or changes files, so there is nothing to confirm. See tests/test_c6_chat_questions_only.py

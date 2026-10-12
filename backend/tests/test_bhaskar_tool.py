@@ -1109,6 +1109,8 @@ def _candidate_agent_module_names() -> list[str]:
             continue
         if contract["allowed_tools"] == []:
             continue
+        if f.stem == "chat_agent":
+            continue  # C6 (2026-10-12): the chat only reads; bhaskar runs scripts
         names.append(f.stem)
     return names
 
