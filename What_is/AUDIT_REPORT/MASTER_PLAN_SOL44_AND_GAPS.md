@@ -194,7 +194,7 @@ Each batch groups items that touch the same code, so nothing is fixed twice.
 | 10 | G3 | 21 background loops | P1 | ✅ done, local (not pushed) | test_g3_background_loops |
 | 10 | G4 | 9 score modules correct | P1 | ✅ done, local (not pushed) | architecture score test + A25 |
 | 10 | A25 | No-data ≠ perfect score | P1 | ✅ done, local (not pushed) | test_a25_insufficient_data |
-| 10 | G6 | Prompt version auto-rollback | P2 | ⬜ | |
+| 10 | G6 | Prompt version auto-rollback | P2 | ✅ done, local (not pushed) | test_g6_prompt_rollback |
 | 10 | A26 | Baselines and held-out task suite | P1/P2 | 🟡 partial | 11 live evals + judge (2026-10-05) |
 | 11 | A29 | Frontend → backend in compose | P1 | ⬜ | |
 | 11 | A30 | Volume ownership | P1 | ⬜ | |
@@ -696,5 +696,8 @@ Every item gets a full local CI before each push. Close heavy apps first, becaus
   - **A25:** an agent with no or too few runs scored a perfect 1.0 (unexercised objectives default to their best value), and the baseline loop stored such scores after one run, so later real runs were flagged as regressions. `BENCHMARK_MIN_SAMPLES` (5): below it a benchmark is "insufficient data" — never a regression, never stored as a baseline. `tests/test_a25_insufficient_data.py`; five older tests pin the minimum to 1 with a note.
   - **G4:** reviewed the 9 score modules; memory, tools, prompts, agents, documentation and quality already return "no data" honestly. **Real bug:** an architecture review that ran its import check but never finished was stored as a perfect 1.0; now only submitted reviews are scored (test added).
   - **G3:** all 22 loops now stop when switched off (two spun with no pause at interval 0, two had no off switch: new `REPO_REINDEX_INTERVAL_HOURS`, `VERSIONED_LESSON_ARCHIVE_INTERVAL_HOURS`); every loop's repeating work is error-guarded (the fleet scan's budget check was not — one failure ended the loop for good); cluster-wide loops start only through leader election. `tests/test_g3_background_loops.py`.
-- **Next session:** local CI on `1834ea04` was still running at 40% when work stopped; re-run CI on the latest commit, push, confirm GitHub. Then G6, A26, Batches 11–14.
+- **2026-10-12 (afternoon): full local CI on `423c64fe`: 9,447 passed, 22 failed.** 17 were tests of chat behaviour C6 removed (pushing, PRs, file changes, their confirmations) — removed or turned into "not offered" checks; 3 followed A20/A22 (parallel-step files, retry count, tool reachability); 1 was `.env.example` missing the 11 new settings; 2 were the machine running out of free RAM during the run (the resource check correctly refused work) and pass on their own. Fixed in `4c2b2163`.
+- **2026-10-12: Batch 10, G6 prompt auto-rollback. DONE (local).**
+  - The rollback loop judged a deployed prompt on the agent's recent-runs window, which can include runs from before the deploy, so a prompt could be rolled back for results it never produced. Now only runs started after the prompt's `deployed_at` count, at least `BENCHMARK_MIN_SAMPLES` of them, compared with the stored baseline. Every automatic rollback writes an audit-log entry (`prompt_auto_rollback`).
+  - Tests: 4 in `tests/test_g6_prompt_rollback.py`; the two older rollback tests give their fake prompt a deploy time.
 

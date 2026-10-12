@@ -49,7 +49,9 @@ async def test_rolls_back_a_regressed_agent_with_a_real_deployed_prompt() -> Non
     mock_detector.check_fleet.return_value = [gate]
 
     mock_registry = MagicMock()
-    mock_registry.get_deployed.return_value = SimpleNamespace(id=2)
+    mock_registry.get_deployed.return_value = SimpleNamespace(
+        id=2, deployed_at="2026-10-01T00:00:00+00:00"
+    )
     mock_registry.rollback.return_value = SimpleNamespace(version_number=1)
 
     mock_db = AsyncMock()
@@ -68,6 +70,9 @@ async def test_rolls_back_a_regressed_agent_with_a_real_deployed_prompt() -> Non
         ),
         patch("app.db.repository.get_setting", new=AsyncMock(return_value=None)),
         patch("app.db.repository.set_setting", new=AsyncMock()) as mock_set_setting,
+        # G6: the runs-under-this-prompt check has its own tests
+        # (tests/test_g6_prompt_rollback.py)
+        patch("app.main._regressed_under_deployed_prompt", return_value=True),
     ):
         await _run_prompt_auto_rollback_once()
 
@@ -157,7 +162,9 @@ async def test_oscillation_guard_skips_within_cooldown() -> None:
     mock_detector.check_fleet.return_value = [gate]
 
     mock_registry = MagicMock()
-    mock_registry.get_deployed.return_value = SimpleNamespace(id=2)
+    mock_registry.get_deployed.return_value = SimpleNamespace(
+        id=2, deployed_at="2026-10-01T00:00:00+00:00"
+    )
 
     mock_db = AsyncMock()
     recent = datetime.now(timezone.utc).isoformat()
@@ -176,6 +183,9 @@ async def test_oscillation_guard_skips_within_cooldown() -> None:
         ),
         patch("app.db.repository.get_setting", new=AsyncMock(return_value=recent)),
         patch("app.db.repository.set_setting", new=AsyncMock()) as mock_set_setting,
+        # G6: the runs-under-this-prompt check has its own tests
+        # (tests/test_g6_prompt_rollback.py)
+        patch("app.main._regressed_under_deployed_prompt", return_value=True),
     ):
         await _run_prompt_auto_rollback_once()
 

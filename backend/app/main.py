@@ -613,6 +613,45 @@ async def _prompt_auto_rollback_loop() -> None:
             logger.warning("Prompt auto-rollback loop iteration failed: %s", exc)
 
 
+def _regressed_under_deployed_prompt(role_name: str, deployed_at: str | None) -> bool:
+    """G6: True only when enough runs made with the currently deployed prompt
+    exist (BENCHMARK_MIN_SAMPLES) and they score as a regression against
+    the stored baseline."""
+    from datetime import datetime
+
+    from app.fleet.benchmark_manager import (
+        BenchmarkResult,
+        build_regression_report,
+        get_benchmark_manager,
+    )
+    from app.fleet.metrics import get_metrics_collector
+
+    if not deployed_at:
+        return False
+    since = datetime.fromisoformat(deployed_at)
+    runs = []
+    for run in get_metrics_collector().by_agent(role_name, n=200):
+        try:
+            started = datetime.fromisoformat(run.started_at)
+        except ValueError:
+            continue
+        if started.tzinfo is None and since.tzinfo is not None:
+            started = started.replace(tzinfo=since.tzinfo)
+        if started >= since:
+            runs.append(run)
+    bm = get_benchmark_manager()
+    current = BenchmarkResult(
+        agent_name=role_name, objectives=bm._compute_objectives(role_name, runs)
+    )
+    report = build_regression_report(
+        role_name,
+        current,
+        bm._get_baseline(role_name),
+        get_settings().benchmark_regression_threshold,
+    )
+    return report.is_regression
+
+
 async def _run_prompt_auto_rollback_once() -> None:
     from datetime import datetime, timedelta, timezone
 
@@ -635,6 +674,11 @@ async def _run_prompt_auto_rollback_once() -> None:
         deployed = await asyncio.to_thread(registry.get_deployed, role_name)
         if deployed is None:
             continue  # this role's prompt was never versioned through prompt_registry
+        # G6 (2026-10-12): judge the deployed prompt only on runs made with
+        # it — the regression check's window can include runs from before
+        # the deploy, which says nothing about this prompt.
+        if not _regressed_under_deployed_prompt(role_name, deployed.deployed_at):
+            continue
 
         setting_key = f"prompt_auto_rollback_last_at:{role_name}"
         async with factory() as db:
@@ -653,6 +697,24 @@ async def _run_prompt_auto_rollback_once() -> None:
                 continue  # nothing superseded to roll back to
 
             await set_setting(db, setting_key, datetime.now(timezone.utc).isoformat())
+            try:
+                # G6: an automatic change with no human in the loop is
+                # always on the audit trail
+                from app.fleet.audit_log import audit
+
+                audit(
+                    action_type="prompt_auto_rollback",
+                    agent_name=role_name,
+                    description=(
+                        f"prompt rolled back to version {restored.version_number} "
+                        f"after a regression ({gate.report.current_score:.3f} vs "
+                        f"baseline {gate.report.baseline_score:.3f})"
+                    ),
+                    outcome="rolled_back",
+                    details={"restored_version": restored.version_number},
+                )
+            except Exception:
+                logger.warning("Prompt auto-rollback audit entry failed", exc_info=True)
             logger.warning(
                 "Prompt auto-rollback: role=%s regressed %.3f vs baseline %.3f — "
                 "rolled back to version=%d",
