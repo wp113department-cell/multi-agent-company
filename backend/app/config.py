@@ -202,13 +202,16 @@ class Settings(BaseSettings):
     # pricing (claude-sonnet-5, standard rate — not the temporary introductory
     # rate that expires 2026-08-31, so this default does not go stale on that
     # date); verified 2026-08-05, not recalled from training data.
+    # G9 (2026-10-12): $2/$10 per million is now Claude Sonnet 5's standard
+    # price (the 2026-09-01 increase to $3/$15 was cancelled), per
+    # app/fleet/model_pricing.py's verified table.
     cost_per_input_token: float = Field(
-        default=0.000003,
+        default=0.000002,
         description="Cost per input token (USD) — Sonnet tier (claude-sonnet-5); "
         "also the fallback rate for tiers without a dedicated field",
     )
     cost_per_output_token: float = Field(
-        default=0.000015,
+        default=0.00001,
         description="Cost per output token (USD) — Sonnet tier (claude-sonnet-5); "
         "also the fallback rate for tiers without a dedicated field",
     )
@@ -1112,6 +1115,15 @@ class Settings(BaseSettings):
     )
     max_tokens_opus: int = Field(
         default=8192, description="Max tokens for Opus-tier agents."
+    )
+    model_fallbacks: dict[str, str] = Field(
+        default_factory=dict,
+        description='G9: opt-in fallback chain, model id -> model id. When a call fails because its model is not found (retired) or overloaded (529) after the SDK\'s own retries, the agent loop retries once on the fallback, adapting thinking and forced tool choice to it. Empty = off. Example: MODEL_FALLBACKS=\'{"claude-sonnet-5": "claude-sonnet-4-6"}\'',
+    )
+    tool_call_ceiling_floor_seconds: int = Field(
+        default=300,
+        ge=30,
+        description="Sol A28: the agent loop gives up on a single tool call after max(this, 4x the tool's manifest timeout, any timeout the call itself asks for + 60s) and returns a timeout error to the agent instead of waiting forever.",
     )
     agent_max_output_tokens: int = Field(
         default=8192,

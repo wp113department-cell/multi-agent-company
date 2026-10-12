@@ -41,6 +41,8 @@ def lookup_package_doc_hint(package: str) -> str:
                 "10",
                 "--user-agent",
                 "Gridiron-Agent/1.0",
+                "-w",
+                "\n%{http_code}",
                 f"https://pypi.org/pypi/{package}/json",
             ],
             capture_output=True,
@@ -52,14 +54,22 @@ def lookup_package_doc_hint(package: str) -> str:
     except FileNotFoundError:
         return "(could not look up package info — curl not found)"
 
-    if r.returncode != 0 or not r.stdout:
+    # Only a real 404 means "no such package": a network failure or a PyPI
+    # error used to be reported as a missing package (seen 2026-10-12, when
+    # PyPI hiccuped and "requests" was declared not to exist).
+    body, _, status = (r.stdout or "").rpartition("\n")
+    if r.returncode != 0 or not status.strip().isdigit():
+        return f"(could not reach PyPI to look up {package!r})"
+    if status.strip() == "404":
         return (
             f"No PyPI package named {package!r} was found — this is often "
             "a typo, or the import name differs from the pip install name "
             "(e.g. `import cv2` needs `pip install opencv-python`)."
         )
+    if status.strip() != "200":
+        return f"(PyPI answered {status.strip()} for {package!r}; try again later)"
     try:
-        data = _json.loads(r.stdout)
+        data = _json.loads(body)
         info = data["info"]
         summary = str(info.get("summary") or "").strip()
         home_page = str(info.get("home_page") or "").strip()

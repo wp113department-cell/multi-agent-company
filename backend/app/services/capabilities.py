@@ -99,3 +99,121 @@ def reset_cache() -> None:
     """Test-only."""
     global _cache
     _cache = None
+
+
+# ---------------------------------------------------------------------------
+# Sol A28 (2026-10-09): connections the tools depend on, checked for real.
+# Each one is "ready", "not_installed", "not_connected", "not_authorized" or
+# "not_configured", so a tool group that cannot work is visible before a
+# task needs it.
+# ---------------------------------------------------------------------------
+
+# tool-name prefix -> the connection it needs
+TOOL_REQUIREMENTS: dict[str, str] = {
+    "docker_": "docker",
+    "run_": "docker",
+    "bash": "docker",
+    "npm_": "docker",
+    "pip_": "docker",
+    "browser_": "browser",
+    "github_": "github",
+    "create_pr": "github",
+    "git_push": "github",
+    "slack_": "slack",
+    "linear_": "linear",
+}
+
+
+def requirement_for(tool_name: str) -> str | None:
+    for prefix, need in TOOL_REQUIREMENTS.items():
+        if tool_name.startswith(prefix):
+            return need
+    return None
+
+
+def _browser_installed() -> bool:
+    import glob
+    import os
+
+    roots = [
+        os.environ.get("PLAYWRIGHT_BROWSERS_PATH", ""),
+        os.path.expanduser("~/.cache/ms-playwright"),
+        "/ms-playwright",
+    ]
+    return any(r and glob.glob(os.path.join(r, "chromium*")) for r in roots)
+
+
+def _github_status(token: str | None, verify: bool) -> tuple[str, str]:
+    if not token:
+        return "not_configured", "Save a GitHub token in Settings."
+    if not verify:
+        return "ready", "Token saved (press Check again to verify it)."
+    import httpx
+
+    try:
+        res = httpx.get(
+            "https://api.github.com/user",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.github+json",
+            },
+            timeout=8,
+        )
+    except httpx.HTTPError:
+        return "not_connected", "GitHub could not be reached."
+    if res.status_code == 200:
+        return "ready", f"Signed in as {res.json().get('login', '?')}."
+    if res.status_code in (401, 403):
+        return "not_authorized", "GitHub refused the saved token."
+    return "not_connected", f"GitHub answered {res.status_code}."
+
+
+def connections(
+    github_token: str | None, ai_key: str | None, verify: bool = False
+) -> list[dict[str, str]]:
+    import os
+
+    sandbox = check()
+    docker_ok = bool(sandbox.get("sandbox"))
+    gh_status, gh_detail = _github_status(github_token, verify)
+    rows = [
+        (
+            "docker",
+            "Code sandbox (Docker)",
+            "ready" if docker_ok else "not_connected",
+            sandbox.get("note") or "Running code and tests works.",
+        ),
+        (
+            "browser",
+            "Browser tools",
+            "ready" if _browser_installed() else "not_installed",
+            (
+                "Playwright Chromium is installed."
+                if _browser_installed()
+                else "Install it with: playwright install chromium"
+            ),
+        ),
+        ("github", "GitHub", gh_status, gh_detail),
+        (
+            "slack",
+            "Slack messages",
+            "ready" if os.environ.get("SLACK_WEBHOOK_URL") else "not_configured",
+            "Set SLACK_WEBHOOK_URL to send messages.",
+        ),
+        (
+            "linear",
+            "Linear issues",
+            "ready" if os.environ.get("LINEAR_API_KEY") else "not_configured",
+            "Set LINEAR_API_KEY to create issues.",
+        ),
+        (
+            "ai",
+            "AI service",
+            "ready" if ai_key else "not_configured",
+            "Key saved." if ai_key else "Save an AI key in Settings.",
+        ),
+    ]
+    return [
+        {"key": k, "label": label, "status": status, "detail": detail}
+        for k, label, status, detail in rows
+    ]

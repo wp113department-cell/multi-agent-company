@@ -67,14 +67,24 @@ async def _code_sandbox_available() -> bool:
 @router.get("/capabilities")
 async def sandbox_capabilities(
     refresh: bool = False,
+    db: AsyncSession = Depends(get_db),
     _actor: str = Depends(require_authenticated),
 ) -> dict[str, Any]:
-    """Sol A31: what the code sandbox can actually do (cached 10 minutes)."""
+    """Sol A31: what the code sandbox can actually do (cached 10 minutes).
+    Sol A28: plus the connections tools depend on; "Check again" (refresh)
+    also verifies a saved GitHub token with GitHub."""
     import asyncio
 
-    from app.services.capabilities import check
+    from app.services.capabilities import check, connections
 
-    return await asyncio.to_thread(check, refresh)
+    settings = get_settings()
+    github = await get_setting(db, _GITHUB_TOKEN_KEY) or settings.github_token
+    ai_key = await get_setting(db, _ANTHROPIC_KEY) or settings.anthropic_api_key
+    result = dict(await asyncio.to_thread(check, refresh))
+    result["connections"] = await asyncio.to_thread(
+        connections, github or None, ai_key or None, refresh
+    )
+    return result
 
 
 @router.get("")

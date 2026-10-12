@@ -182,7 +182,47 @@ def _topological_subtask_waves(subtasks: list[dict[str, Any]]) -> list[list[int]
             resolved,
         )
         return [[i] for i in range(n)]
-    return waves
+    return [part for wave in waves for part in _clash_free_groups(wave, subtasks)]
+
+
+def _write_set(subtask: dict[str, Any]) -> set[str]:
+    files = subtask.get("files_to_edit") or subtask.get("filesToEdit") or []
+    out: set[str] = set()
+    for f in files:
+        if isinstance(f, str) and f.strip():
+            out.add(f.strip().lstrip("./").rstrip("/"))
+    return out
+
+
+def _overlaps(a: set[str], b: set[str]) -> bool:
+    """Same file, or one is a folder containing the other."""
+    return any(
+        x == y or x.startswith(y + "/") or y.startswith(x + "/") for x in a for y in b
+    )
+
+
+def _clash_free_groups(
+    wave: list[int], subtasks: list[dict[str, Any]]
+) -> list[list[int]]:
+    """Sol A20 (2026-10-12, owner choice "only clash-free steps in
+    parallel"): parallel steps share one worktree, so steps run together only
+    when the files they will edit do not overlap. A step that does not say
+    which files it edits runs on its own. The groups keep the wave's order,
+    so every depends_on edge is still respected."""
+    groups: list[tuple[list[int], set[str]]] = []
+    for i in wave:
+        files = _write_set(subtasks[i])
+        if not files:
+            groups.append(([i], set()))
+            continue
+        for members, used in groups:
+            if used and not _overlaps(files, used):
+                members.append(i)
+                used |= files
+                break
+        else:
+            groups.append(([i], set(files)))
+    return [members for members, _ in groups]
 
 
 # ---------------------------------------------------------------------------

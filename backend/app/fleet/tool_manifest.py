@@ -1892,6 +1892,217 @@ TOOL_MANIFEST: dict[str, ToolManifestEntry] = {
         verification_required=False,
         risk_level="low",
     ),
+    # ----------------------------------------------------------------
+    # Sol A22 (2026-10-09): tools agents use that had no entry here
+    # ----------------------------------------------------------------
+    "ask_human_to_choose": ToolManifestEntry(
+        purpose="Pause and let a human pick one of several valid options",
+        permissions=[],
+        timeout_s=30,
+        retry_policy="none",
+        verification_required=False,
+        risk_level="low",
+    ),
+    "audit_log_read": ToolManifestEntry(
+        purpose="Read the fleet audit trail",
+        permissions=["read_db"],
+        timeout_s=10,
+        retry_policy="none",
+        verification_required=False,
+        risk_level="low",
+    ),
+    "check_dependency_conflicts": ToolManifestEntry(
+        purpose="Check whether proposed PyPI constraints can all be satisfied",
+        permissions=["network"],
+        timeout_s=60,
+        retry_policy="backoff",
+        verification_required=False,
+        risk_level="low",
+    ),
+    "check_last_release": ToolManifestEntry(
+        purpose="Look up when a package last published a release (PyPI/npm)",
+        permissions=["network"],
+        timeout_s=20,
+        retry_policy="backoff",
+        verification_required=False,
+        risk_level="low",
+    ),
+    "check_target_repo_license_compliance": ToolManifestEntry(
+        purpose="Classify the target repo's dependency licences from live PyPI metadata",
+        permissions=["read_repo", "network"],
+        timeout_s=60,
+        retry_policy="backoff",
+        verification_required=False,
+        risk_level="low",
+    ),
+    "find_repeatable_tasks": ToolManifestEntry(
+        purpose="Find past tasks the user may mean by 'do that again'",
+        permissions=["read_db"],
+        timeout_s=10,
+        retry_policy="none",
+        verification_required=False,
+        risk_level="low",
+    ),
+    "fleet_metrics_read": ToolManifestEntry(
+        purpose="Read runtime metrics for an agent",
+        permissions=["read_db"],
+        timeout_s=10,
+        retry_policy="none",
+        verification_required=False,
+        risk_level="low",
+    ),
+    "git_commit_change": ToolManifestEntry(
+        purpose="Stage exactly the named files and commit them (APPLY phase, after human approval)",
+        permissions=["write_repo"],
+        timeout_s=30,
+        retry_policy="none",
+        verification_required=True,
+        risk_level="medium",
+    ),
+    "list_all_tool_specs": ToolManifestEntry(
+        purpose="List every tool schema defined in the codebase",
+        permissions=["read_repo"],
+        timeout_s=10,
+        retry_policy="none",
+        verification_required=False,
+        risk_level="low",
+    ),
+    "list_deploy_artifacts": ToolManifestEntry(
+        purpose="List the project's deployment files (Dockerfiles, compose, workflows)",
+        permissions=["read_repo"],
+        timeout_s=10,
+        retry_policy="none",
+        verification_required=False,
+        risk_level="low",
+    ),
+    "list_migrations": ToolManifestEntry(
+        purpose="List Alembic migrations with revision ids and docstrings (AST, never executed)",
+        permissions=["read_repo"],
+        timeout_s=10,
+        retry_policy="none",
+        verification_required=False,
+        risk_level="low",
+    ),
+    "list_registered_agents": ToolManifestEntry(
+        purpose="List every registered agent's capability contract",
+        permissions=["read_repo"],
+        timeout_s=10,
+        retry_policy="none",
+        verification_required=False,
+        risk_level="low",
+    ),
+    "memory_curate_read": ToolManifestEntry(
+        purpose="List memory entries for curation review",
+        permissions=["read_memory"],
+        timeout_s=10,
+        retry_policy="none",
+        verification_required=False,
+        risk_level="low",
+    ),
+    "memory_curate_write": ToolManifestEntry(
+        purpose="Update a memory entry during curation (APPLY phase)",
+        permissions=["write_memory"],
+        timeout_s=10,
+        retry_policy="none",
+        verification_required=True,
+        risk_level="medium",
+    ),
+    "memory_list_draft_lessons": ToolManifestEntry(
+        purpose="List draft versioned lessons awaiting review",
+        permissions=["read_memory"],
+        timeout_s=10,
+        retry_policy="none",
+        verification_required=False,
+        risk_level="low",
+    ),
+    "memory_promote_lesson": ToolManifestEntry(
+        purpose="Promote a draft lesson to published fleet memory (APPLY phase)",
+        permissions=["write_memory"],
+        timeout_s=10,
+        retry_policy="none",
+        verification_required=True,
+        risk_level="medium",
+    ),
+    "memory_search": ToolManifestEntry(
+        purpose="Semantic search over persistent engineering memory",
+        permissions=["read_memory"],
+        timeout_s=15,
+        retry_policy="none",
+        verification_required=False,
+        risk_level="low",
+    ),
+    "parse_merge_conflicts": ToolManifestEntry(
+        purpose="Parse a file's conflict markers into structured hunks",
+        permissions=["read_repo"],
+        timeout_s=10,
+        retry_policy="none",
+        verification_required=False,
+        risk_level="low",
+    ),
+    "plan_tool_profile": ToolManifestEntry(
+        purpose="Report the minimal tool subset and briefing for a temporary agent",
+        permissions=[],
+        timeout_s=10,
+        retry_policy="none",
+        verification_required=False,
+        risk_level="low",
+    ),
+    "repeat_previous_task": ToolManifestEntry(
+        purpose="Clone a past task into a new task and dispatch it through the pipeline",
+        permissions=["write_db", "execute"],
+        timeout_s=30,
+        retry_policy="none",
+        verification_required=True,
+        risk_level="medium",
+    ),
+    "resolve_merge_conflict": ToolManifestEntry(
+        purpose="Resolve named conflict hunks in a file (ours, theirs or custom)",
+        permissions=["write_repo"],
+        timeout_s=15,
+        retry_policy="none",
+        verification_required=True,
+        risk_level="medium",
+    ),
+    "run_sandboxed_script": ToolManifestEntry(
+        purpose="Run a self-contained Python script in an isolated sandbox",
+        permissions=["execute", "network"],
+        timeout_s=120,
+        retry_policy="none",
+        verification_required=False,
+        risk_level="medium",
+    ),
+    "scan_code_hygiene": ToolManifestEntry(
+        purpose="Structural scan for broken imports, unused files and dead exports",
+        permissions=["read_repo"],
+        timeout_s=60,
+        retry_policy="none",
+        verification_required=False,
+        risk_level="low",
+    ),
+    "scan_reliability": ToolManifestEntry(
+        purpose="Structural scan for external I/O calls with no error handling",
+        permissions=["read_repo"],
+        timeout_s=60,
+        retry_policy="none",
+        verification_required=False,
+        risk_level="low",
+    ),
+    "score_tech_options": ToolManifestEntry(
+        purpose="Deterministic weighted-sum score for candidate technologies",
+        permissions=[],
+        timeout_s=10,
+        retry_policy="none",
+        verification_required=False,
+        risk_level="low",
+    ),
+    "summarize_output": ToolManifestEntry(
+        purpose="LLM summary of a long tool or command output",
+        permissions=[],
+        timeout_s=30,
+        retry_policy="none",
+        verification_required=False,
+        risk_level="low",
+    ),
 }
 
 
@@ -1900,13 +2111,30 @@ TOOL_MANIFEST: dict[str, ToolManifestEntry] = {
 # ---------------------------------------------------------------------------
 
 
+# Every agent's own `submit_*` tool only hands its final result back to the
+# graph (no side effects), so one entry covers them all.
+RESULT_TOOL_ENTRY = ToolManifestEntry(
+    purpose="Return the agent's final structured result to the pipeline",
+    permissions=[],
+    timeout_s=5,
+    retry_policy="none",
+    verification_required=False,
+    risk_level="low",
+)
+
+
 def get_manifest(tool_name: str) -> ToolManifestEntry | None:
-    return TOOL_MANIFEST.get(tool_name)
+    entry = TOOL_MANIFEST.get(tool_name)
+    if entry is None and tool_name.startswith("submit_"):
+        return RESULT_TOOL_ENTRY
+    return entry
 
 
 def is_high_risk(tool_name: str) -> bool:
-    entry = TOOL_MANIFEST.get(tool_name)
-    return entry is not None and entry.risk_level == "high"
+    """Sol A22: a tool with no manifest entry is treated as high risk (fail
+    closed), so it runs only where an agent's contract declares it."""
+    entry = get_manifest(tool_name)
+    return entry is None or entry.risk_level == "high"
 
 
 def get_high_risk_tools() -> list[str]:

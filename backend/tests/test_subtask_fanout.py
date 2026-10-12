@@ -56,10 +56,11 @@ def test_topological_subtask_waves_groups_independent_subtasks() -> None:
     # 0 and 1 are independent; 2 depends on both 0 and 1; 3 is independent
     # of everything.
     subtasks = [
-        {"id": 1, "depends_on": []},
-        {"id": 2, "depends_on": []},
-        {"id": 3, "depends_on": [0, 1]},
-        {"id": 4, "depends_on": []},
+        # UPDATED (Sol A20): parallel steps must edit different files
+        {"id": 1, "depends_on": [], "files_to_edit": ["a.py"]},
+        {"id": 2, "depends_on": [], "files_to_edit": ["b.py"]},
+        {"id": 3, "depends_on": [0, 1], "files_to_edit": ["c.py"]},
+        {"id": 4, "depends_on": [], "files_to_edit": ["d.py"]},
     ]
     waves = _topological_subtask_waves(subtasks)
     assert waves[0] == sorted(waves[0])
@@ -134,8 +135,21 @@ def test_independent_subtasks_run_concurrently_not_sequentially(
             run_manager(
                 task_id=task_id,
                 subtasks=[
-                    {"id": 1, "type": "backend", "title": "A", "description": "a"},
-                    {"id": 2, "type": "backend", "title": "B", "description": "b"},
+                    # UPDATED (Sol A20): parallel steps must edit different files
+                    {
+                        "id": 1,
+                        "type": "backend",
+                        "title": "A",
+                        "description": "a",
+                        "files_to_edit": ["a.py"],
+                    },
+                    {
+                        "id": 2,
+                        "type": "backend",
+                        "title": "B",
+                        "description": "b",
+                        "files_to_edit": ["b.py"],
+                    },
                 ],
                 worktree_path=str(worktree),
                 plan="plan",
@@ -362,8 +376,21 @@ def test_enable_fanout_defaults_false_and_matches_sequential_order(
             run_manager(
                 task_id=task_id,
                 subtasks=[
-                    {"id": 1, "type": "backend", "title": "A", "description": "a"},
-                    {"id": 2, "type": "backend", "title": "B", "description": "b"},
+                    # UPDATED (Sol A20): parallel steps must edit different files
+                    {
+                        "id": 1,
+                        "type": "backend",
+                        "title": "A",
+                        "description": "a",
+                        "files_to_edit": ["a.py"],
+                    },
+                    {
+                        "id": 2,
+                        "type": "backend",
+                        "title": "B",
+                        "description": "b",
+                        "files_to_edit": ["b.py"],
+                    },
                     {"id": 3, "type": "backend", "title": "C", "description": "c"},
                 ],
                 worktree_path=str(worktree),

@@ -101,7 +101,8 @@ def apply_subtask_edits(
     one session's addition to an already-long list).
 
     Each edit is {"index": int, "action": "edit"|"reject", ...fields}.
-    "edit" overlays the given fields (title/description/type/files_to_edit)
+    "edit" overlays the given fields (title/description/type/files_to_edit/
+    depends_on — Sol A19)
     onto subtasks[index] in place, by POSITION — the same position-lockstep
     convention #44's own dynamic-subtask-creation work already established
     for this exact list (a subtask has no independent stable id beyond its
@@ -118,13 +119,15 @@ def apply_subtask_edits(
     if not edits:
         return subtasks
 
+    n = len(subtasks)
+    was_valid = _plan_problem(subtasks) is None
     result = [dict(s) for s in subtasks]
     rejected_indices: set[int] = set()
 
     for edit in edits:
         index = edit.get("index")
         action = edit.get("action", "edit")
-        if not isinstance(index, int) or index < 0 or index >= len(subtasks):
+        if not isinstance(index, int) or index < 0 or index >= n:
             raise SubtaskEditError(f"subtask index {index!r} out of range")
         if action == "reject":
             rejected_indices.add(index)
@@ -132,6 +135,22 @@ def apply_subtask_edits(
             for field in ("type", "title", "description", "files_to_edit"):
                 if field in edit:
                     result[index][field] = edit[field]
+            if "depends_on" in edit:
+                # Sol A19: this used to be ignored although the refusal
+                # message below told the human to edit it.
+                deps = edit["depends_on"] or []
+                if not isinstance(deps, list) or any(
+                    not isinstance(d, int)
+                    or isinstance(d, bool)
+                    or not 0 <= d < n
+                    or d == index
+                    for d in deps
+                ):
+                    raise SubtaskEditError(
+                        f"subtask {index}: depends_on must list other steps "
+                        f"(0-{n - 1}), got {deps!r}"
+                    )
+                result[index]["depends_on"] = sorted(set(deps))
         else:
             raise SubtaskEditError(f"unknown subtask edit action {action!r}")
 
@@ -144,11 +163,55 @@ def apply_subtask_edits(
             if still_referenced:
                 raise SubtaskEditError(
                     f"cannot reject subtask index(es) {sorted(still_referenced)} — "
-                    f"subtask {i} ({sub.get('title', '')!r}) still depends on it"
+                    f"subtask {i} ({sub.get('title', '')!r}) still depends on it; "
+                    "reject that step too, or remove the dependency first"
                 )
-        result = [s for i, s in enumerate(result) if i not in rejected_indices]
+        # Sol A19: positions shift when earlier steps go, so every surviving
+        # depends_on is renumbered — before, a step could end up depending
+        # on the wrong step, or on itself.
+        kept = [i for i in range(n) if i not in rejected_indices]
+        new_index = {old: new for new, old in enumerate(kept)}
+        renumbered = []
+        for old in kept:
+            sub = result[old]
+            if sub.get("depends_on"):
+                sub["depends_on"] = [
+                    new_index[d]
+                    for d in sub["depends_on"]
+                    if isinstance(d, int) and d in new_index
+                ]
+            renumbered.append(sub)
+        result = renumbered
 
+    problem = _plan_problem(result)
+    if was_valid and problem:
+        raise SubtaskEditError(f"these changes would break the plan: {problem}")
     return result
+
+
+def _plan_problem(subtasks: list[dict[str, Any]]) -> str | None:
+    """Why the steps' depends_on do not form a valid order, or None."""
+    n = len(subtasks)
+    deps: list[list[int]] = []
+    for i, sub in enumerate(subtasks):
+        row = []
+        for d in sub.get("depends_on") or []:
+            if not isinstance(d, int) or isinstance(d, bool) or not 0 <= d < n:
+                return f"step {i} depends on a step that does not exist ({d!r})"
+            if d == i:
+                return f"step {i} depends on itself"
+            row.append(d)
+        deps.append(row)
+    remaining = {i: set(row) for i, row in enumerate(deps)}
+    done: set[int] = set()
+    while remaining:
+        ready = [i for i, row in remaining.items() if row <= done]
+        if not ready:
+            return f"steps {sorted(remaining)} depend on each other in a loop"
+        for i in ready:
+            done.add(i)
+            del remaining[i]
+    return None
 
 
 def human_review_node(state: PipelineState) -> PipelineState:

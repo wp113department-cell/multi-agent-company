@@ -177,10 +177,10 @@ Each batch groups items that touch the same code, so nothing is fixed twice.
 | 6 | A08 | Lesson/memory scope per project | P1 | ✅ done, local (not pushed) | ba2a3376 |
 | 7 | A15 | /run-sync arguments | P1 | ✅ done, local (not pushed) | 35470c25 |
 | 7 | A16 | Tuple results (research/DevOps) | P1 | ✅ done, local (not pushed) | 35470c25 |
-| 7 | A22 | Authoritative tool registry | P1 | ⬜ | |
+| 7 | A22 | Authoritative tool registry | P1 | ✅ done, local (not pushed) | test_a22_tool_registry (CI consistency check) |
 | 7 | A27 | Real output caps | P2 | ✅ done, local (not pushed) | a3859db9 |
-| 7 | A28 | Enforced timeouts, real probing | P2 | ⬜ | |
-| 7 | G9 | Model/provider layer and pricing | P2 | ⬜ | |
+| 7 | A28 | Enforced timeouts, real probing | P2 | ✅ done, local (not pushed) | test_a28_dispatch_and_probing |
+| 7 | G9 | Model/provider layer and pricing | P2 | ✅ done, local (not pushed) | test_g9_model_pricing_and_fallback |
 | 8 | A19 | Stable plan step IDs | P1 | ⬜ | |
 | 8 | A20 | Per-subtask worktrees | P1 | ⬜ | |
 | 8 | A21 | Gates fail closed | P1 | ⬜ | |
@@ -635,3 +635,28 @@ Every item gets a full local CI before each push. Close heavy apps first, becaus
   - `agent_output_tokens()` takes the new `AGENT_MAX_OUTPUT_TOKENS` setting (default 8,192, documented in `.env.example`), grows it to budget + 4,096 when a fixed thinking budget needs room, clamps to the ceiling, and lowers the budget if the ceiling is tight.
   - Deliberately not switched to the router's per-tier numbers (Haiku 1,024), which would truncate code written by Haiku agents. Day-to-day behaviour is unchanged apart from 8096 → 8192.
   - Tests: 11 in `tests/test_a27_output_caps.py` (3 fail on the old code). `test_phase54_thinking_budget` was updated to the new rule. 100 agent-loop, Groq, cost-mode and breaker tests pass.
+- **2026-10-12: GitHub CI crash fixed (before any new work).**
+  - The 2026-10-09 GitHub run did not fail on "3 tests": the test process **crashed** (segfault inside Sentry). The A13 test initialised the real Sentry SDK in the shared test process, and its thread integration cannot be undone. It now runs in a child process.
+  - That child process found a real leak: Sentry attaches the process command line (`sys.argv`) to every event, where a password would have no recognisable shape. `sentry_before_send` now drops it.
+  - The browser tests' "is a browser installed?" probe opened `about:blank`, which the URL policy refuses before any browser starts, so they failed instead of skipping on GitHub (no browser in the backend job). The probe now really starts the browser.
+  - The sandbox-runner test passes here with Docker 29 and with GitHub's Docker 28 client. Its failure message now shows its full output in case it recurs on GitHub.
+- **2026-10-12: C6 chat answers questions only + "Make this a task". DONE (local).**
+  - The chat model is offered 70 read-only tools (manifest permissions `read_repo`/`read_memory`, low risk, minus `git_branch`, `export_markdown`, `read_logs`, `list_env_vars`); anything else is refused in the tool node even if asked. The role prompt (`roles/chat.md`) now says it reads and explains, and points to "Make this a task".
+  - Removed together: attachments (API field, upload handling, `run(images=)`), project notes (endpoints, service, injection into chat, privacy export/erasure parts, project-delete cleanup; migration 070 deletes the stored rows), the Terminal tab and its components (backend terminal stays off by default) and the unused xterm packages. Tour, README and `.env.example` updated.
+  - `POST /api/chat/sessions/{id}/make-task`: owner-only (A07), idempotent, uses the chat's project (or, for old chats, the project with the chat's folder), title from the request or the last question, the recent conversation in the description. Chat page: "Make this a task" button opens the new task.
+  - **Real bug found by the new test:** a chat turn's messages are saved in one transaction and share `created_at`, so a reopened chat came back in random order. History now orders by `created_at, id`.
+  - Tests: 9 in `tests/test_c6_chat_questions_only.py`. C1/C3 test files removed with their features; 3 tests that drove the chat into `bash`/repeat-task removed with a note; the privacy and policy-chokepoint tests updated.
+- **2026-10-12: Batch 7, A22 authoritative tool registry. DONE (local).**
+  - 26 tools agents use had no manifest entry (67 counting each agent's `submit_*`): now all have risk, permissions and timeouts (`git_commit_change`, `resolve_merge_conflict`, `memory_curate_write`, `memory_promote_lesson`, `repeat_previous_task` medium; readers low). All `submit_*` result tools share one low-risk entry via `get_manifest()`.
+  - Fail closed: a tool with no entry is now high risk (`is_high_risk`), so it is only offered to an agent whose contract declares it.
+  - CI consistency check: `tests/test_a22_tool_registry.py` fails if any tool an agent declares or defines lacks an entry, or an entry uses an unknown permission. 10 of 11 tests fail on the old code.
+- **2026-10-12: Batch 7, A28 dispatcher timeouts and real probing. DONE (local).**
+  - Every agent tool call runs under a ceiling: max(`TOOL_CALL_CEILING_FLOOR_SECONDS`=300, 4x the manifest timeout, any timeout the call asks for + 60s). Past it, the agent gets "[ERROR] ... timed out" instead of the task hanging forever. The call carries its context; exceptions and results are unchanged except an empty result reads "(no output)". Deliberately generous: several manifest timeouts (2-5 s) describe a typical call, not a limit.
+  - Connections checked for real and shown on Settings ("Code sandbox and connections"): Docker, browser installed, GitHub (token saved; verified with GitHub only on "Check again"), Slack, Linear, AI key — each ready / not installed / not reachable / not authorized / not set up.
+  - Tests: 9 in `tests/test_a28_dispatch_and_probing.py`.
+- **2026-10-12: Batch 7, G9 model pricing and fallback. DONE (local). Batch 7 complete.**
+  - **Real bug:** Sonnet-tier work was priced at $3/$15 per million tokens; Claude Sonnet 5's standard price is $2/$10 (the 2026-09-01 increase was cancelled), so every Sonnet cost was 50% high. Cache reads were assumed 0.1x input on every model (Opus 5.5 is 0.05x).
+  - `app/fleet/model_pricing.py`: per-model input, 5m/1h cache write, cache read and output prices, copied from Anthropic's pricing page on 2026-10-12. Spend tracking uses it (splitting 1h cache writes when reported) and falls back to the tier rates for unlisted models. Sonnet defaults and `.env.example` updated. **Owner: `backend/.env` sets COST_PER_INPUT_TOKEN / COST_PER_OUTPUT_TOKEN itself; change them to 0.000002 / 0.00001.**
+  - Opt-in fallback chain `MODEL_FALLBACKS` (empty = off): on a model-not-found or overloaded (529) error the agent loop retries once on the fallback, adapting thinking, output tokens and forced tool choice.
+  - Tests: 13 in `tests/test_g9_model_pricing_and_fallback.py`, including a check that every model the fleet uses has a price.
+

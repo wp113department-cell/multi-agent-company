@@ -176,8 +176,14 @@ async def check_before_dispatch() -> None:
 
 
 def cost_of(model: str, usage: Any) -> float:
-    """Price one response's usage at its model's tier."""
+    """Price one response's usage: the model's own published prices
+    (app/fleet/model_pricing.py, cache rates included), else its tier."""
+    from app.fleet.model_pricing import cost_usd
     from app.pipeline.cost_controller import cost_rates_for_tier
+
+    exact = cost_usd(model, usage)
+    if exact is not None:
+        return exact
 
     name = (model or "").lower()
     tier = "haiku" if "haiku" in name else "opus" if "opus" in name else "sonnet"

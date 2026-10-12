@@ -284,6 +284,9 @@ export function PipelineView({ pipeline, onSubtaskEditsChange }: Props) {
           <div className="space-y-3">
             {pipeline.subtasks.map((st, idx) => {
               const files = st.files_to_edit ?? st.filesToEdit ?? [];
+              const after = (st.depends_on ?? st.dependsOn ?? [])
+                .map(Number)
+                .filter((d) => Number.isInteger(d) && d >= 0);
               const isRejected = rejected.has(idx);
               const isEditingThis = editingIndex === idx;
               const current = edited[idx] ?? { title: st.title, description: st.description };
@@ -295,6 +298,7 @@ export function PipelineView({ pipeline, onSubtaskEditsChange }: Props) {
                   }`}
                 >
                   <div className="mb-1 flex items-center gap-2">
+                    <span className="text-xs font-semibold text-slate-400">Step {idx + 1}</span>
                     <span className={`rounded px-2 py-0.5 text-xs font-semibold ${subtaskTypeColor(st.type)}`}>
                       {st.type}
                     </span>
@@ -363,6 +367,16 @@ export function PipelineView({ pipeline, onSubtaskEditsChange }: Props) {
                   ) : (
                     <p className={`mb-2 text-xs text-slate-600 ${isRejected ? "line-through" : ""}`}>
                       {current.description}
+                    </p>
+                  )}
+                  {after.length > 0 && (
+                    <p className="mb-1 text-xs text-slate-500">
+                      Runs after step {after.map((d) => d + 1).join(", ")}
+                      {after.some((d) => rejected.has(d)) && (
+                        <span className="ml-1 font-medium text-red-600">
+                          — that step is rejected; reject this one too
+                        </span>
+                      )}
                     </p>
                   )}
                   {files.length > 0 && (

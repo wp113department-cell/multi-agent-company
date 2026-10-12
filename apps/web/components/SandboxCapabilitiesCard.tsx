@@ -11,6 +11,14 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchSandboxCapabilities } from "../lib/api";
 import { Icon } from "./Icon";
 
+const STATUS_WORDS: Record<string, string> = {
+  ready: "ready",
+  not_installed: "not installed",
+  not_connected: "not reachable",
+  not_authorized: "not authorized",
+  not_configured: "not set up",
+};
+
 export function SandboxCapabilitiesCard() {
   const qc = useQueryClient();
   const { data, isLoading, isFetching } = useQuery({
@@ -30,7 +38,7 @@ export function SandboxCapabilitiesCard() {
     <section className="rounded-xl border border-slate-200 bg-white p-6 dark:border-slate-700 dark:bg-slate-900">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200">Code sandbox</h2>
+          <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200">Code sandbox and connections</h2>
           <p className="mt-1 text-xs text-slate-500">
             Code and tests run only in throwaway sandbox containers. This is what they can do on
             this computer.
@@ -70,6 +78,29 @@ export function SandboxCapabilitiesCard() {
             </li>
           ))}
         </ul>
+      )}
+      {data?.connections && data.connections.length > 0 && (
+        <>
+          <h3 className="mt-5 text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Connections
+          </h3>
+          <ul className="mt-2 grid gap-1.5" aria-label="Connections">
+            {data.connections.map((c) => {
+              const ok = c.status === "ready";
+              return (
+                <li key={c.key} className="flex items-start gap-2 text-sm">
+                  <span className={ok ? "mt-0.5 text-green-600" : "mt-0.5 text-amber-600"}>
+                    <Icon name={ok ? "check" : "alert"} size={14} />
+                  </span>
+                  <span className="text-slate-700 dark:text-slate-200">
+                    {c.label}: <span className="font-medium">{STATUS_WORDS[c.status]}</span>
+                    <span className="block text-xs text-slate-500">{c.detail}</span>
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </>
       )}
     </section>
   );

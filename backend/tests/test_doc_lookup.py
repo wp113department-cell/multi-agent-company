@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import pytest
+
 from app.repo_tools.doc_lookup import lookup_package_doc_hint
 
 
@@ -48,7 +50,7 @@ def test_timeout_degrades_cleanly() -> None:
 
 def test_malformed_json_response_degrades_cleanly() -> None:
     fake_result = type(
-        "R", (), {"returncode": 0, "stdout": "not json at all", "stderr": ""}
+        "R", (), {"returncode": 0, "stdout": "not json at all\n200", "stderr": ""}
     )()
     with patch("app.repo_tools.doc_lookup.subprocess.run", return_value=fake_result):
         hint = lookup_package_doc_hint("some-package")
@@ -56,7 +58,27 @@ def test_malformed_json_response_degrades_cleanly() -> None:
 
 
 def test_unexpected_json_shape_degrades_cleanly() -> None:
-    fake_result = type("R", (), {"returncode": 0, "stdout": "{}", "stderr": ""})()
+    fake_result = type("R", (), {"returncode": 0, "stdout": "{}\n200", "stderr": ""})()
     with patch("app.repo_tools.doc_lookup.subprocess.run", return_value=fake_result):
         hint = lookup_package_doc_hint("some-package")
     assert "No PyPI package named" in hint
+
+
+# 2026-10-12: only a real 404 means "no such package". A network failure or
+# a PyPI error was reported as a missing package (a CI run saw "requests"
+# declared non-existent while PyPI hiccuped).
+@pytest.mark.parametrize(
+    ("returncode", "stdout", "expected"),
+    [
+        (7, "", "could not reach PyPI"),
+        (0, "Not Found\n404", "No PyPI package named"),
+        (0, "<html>busy</html>\n503", "PyPI answered 503"),
+    ],
+)
+def test_only_a_404_means_the_package_does_not_exist(
+    returncode: int, stdout: str, expected: str
+) -> None:
+    fake = type("R", (), {"returncode": returncode, "stdout": stdout, "stderr": ""})()
+    with patch("app.repo_tools.doc_lookup.subprocess.run", return_value=fake):
+        hint = lookup_package_doc_hint("requests")
+    assert expected in hint

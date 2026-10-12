@@ -164,7 +164,53 @@ def _call_anthropic(client: anthropic.Anthropic, **kwargs: Any) -> Any:
     real gap.
     """
     breaker = get_anthropic_breaker()
-    return breaker.call(lambda: client.messages.create(**kwargs))
+    try:
+        return breaker.call(lambda: client.messages.create(**kwargs))
+    except (anthropic.NotFoundError, anthropic.InternalServerError) as exc:
+        fallback = _fallback_kwargs(kwargs, exc)
+        if fallback is None:
+            raise
+        logger.warning(
+            "Model %s failed (%s); retrying once on fallback %s",
+            kwargs.get("model"),
+            type(exc).__name__,
+            fallback["model"],
+        )
+        return breaker.call(lambda: client.messages.create(**fallback))
+
+
+# G9 (2026-10-12): opt-in fallback chain. Newer models reject a forced
+# tool_choice and the fixed thinking budget, so both are adapted.
+_NO_FORCED_TOOL_RE = re.compile(r"^claude-(opus-5-5|sonnet-5-5|fable-5-1|mythos-5-1)")
+
+
+def _fallback_kwargs(kwargs: dict[str, Any], exc: Exception) -> dict[str, Any] | None:
+    """The request to retry on the configured fallback model, or None."""
+    if isinstance(exc, anthropic.InternalServerError) and (
+        getattr(exc, "status_code", None) != 529  # only "overloaded"
+    ):
+        return None
+    fallback = get_settings().model_fallbacks.get(str(kwargs.get("model", "")))
+    if not fallback or fallback == kwargs.get("model"):
+        return None
+    from app.fleet.model_router import agent_output_tokens, thinking_param_for
+
+    retry = {**kwargs, "model": fallback}
+    thinking = kwargs.get("thinking")
+    if thinking:
+        budget = thinking.get("budget_tokens") or get_settings().thinking_budget_opus
+        if "haiku" in fallback:
+            retry.pop("thinking")  # Haiku 4.5 rejects adaptive thinking
+        else:
+            retry["thinking"] = thinking_param_for(fallback, budget)
+    if retry.get("thinking") and "max_tokens" in retry:
+        retry["max_tokens"], retry["thinking"] = agent_output_tokens(
+            fallback, int(retry["max_tokens"]), retry["thinking"]
+        )
+    choice = retry.get("tool_choice") or {}
+    if choice.get("type") in ("any", "tool") and _NO_FORCED_TOOL_RE.match(fallback):
+        retry["tool_choice"] = {"type": "auto"}
+    return retry
 
 
 # ---------------------------------------------------------------------------
@@ -2596,6 +2642,69 @@ _RETRY_MAX_ATTEMPTS: dict[str, int] = {"none": 1, "once": 2, "backoff": 3}
 _RETRY_EXCLUDED_PERMISSIONS = {"write_remote", "execute", "write_repo"}
 
 
+class ToolCallTimeout(Exception):
+    """A tool call passed the dispatcher's ceiling (Sol A28)."""
+
+
+def _tool_call_ceiling(tu_name: str, tu_input: dict[str, Any]) -> float:
+    """Sol A28: the most a single tool call may take before the agent gets a
+    timeout error instead of waiting forever. Generous on purpose — several
+    manifest timeouts (2-5 s) describe a typical call, not a limit — and
+    never shorter than a timeout the call itself asks for."""
+    from app.fleet.tool_manifest import get_manifest
+
+    entry = get_manifest(tu_name)
+    floor = float(get_settings().tool_call_ceiling_floor_seconds)
+    ceiling = max(floor, 4.0 * (entry.timeout_s if entry else 0))
+    for key in ("timeout", "timeout_s", "timeout_seconds"):
+        requested = tu_input.get(key) if isinstance(tu_input, dict) else None
+        if isinstance(requested, (int, float)) and requested > 0:
+            ceiling = max(ceiling, float(requested) + 60.0)
+    return ceiling
+
+
+def _call_with_ceiling(
+    handler: Callable[[dict[str, Any]], Any],
+    tu_input: dict[str, Any],
+    ceiling: float,
+    tu_name: str,
+) -> Any:
+    """Run handler(tu_input) in its own thread (carrying this context) and
+    give up after `ceiling` seconds. A synchronous handler cannot be killed,
+    so a timed-out one finishes in the background; its subprocesses keep
+    their own timeouts. Exceptions are re-raised unchanged."""
+    import contextvars
+    import threading
+
+    ctx = contextvars.copy_context()
+    box: dict[str, Any] = {}
+
+    def run() -> None:
+        try:
+            box["value"] = ctx.run(handler, tu_input)
+        except BaseException as exc:  # re-raised in the caller
+            box["error"] = exc
+
+    worker = threading.Thread(target=run, name=f"tool-{tu_name}", daemon=True)
+    worker.start()
+    worker.join(ceiling)
+    if worker.is_alive():
+        logger.error("Tool %s passed its %.0fs ceiling", tu_name, ceiling)
+        raise ToolCallTimeout(
+            f"timed out after {ceiling:.0f}s (the tool did not finish; try a "
+            "smaller step)"
+        )
+    if "error" in box:
+        raise box["error"]
+    return box.get("value")
+
+
+def _tool_result_text(value: Any) -> str:
+    """Sol A28: every tool result reaches the model as text; a handler that
+    returned nothing says so instead of the bare word "None"."""
+    return "(no output)" if value is None else str(value)
+
+
 def _run_tool_with_retry(
     handler: Callable[[dict[str, Any]], Any], tu_name: str, tu_input: dict[str, Any]
 ) -> str:
@@ -2605,18 +2714,21 @@ def _run_tool_with_retry(
     which are never automatically retried regardless of their declared
     policy. Returns the final result string (still [ERROR]/[POLICY]-
     prefixed on exhausted failure, exactly like a non-retried call would)."""
-    from app.fleet.tool_manifest import TOOL_MANIFEST
+    from app.fleet.tool_manifest import get_manifest
 
-    entry = TOOL_MANIFEST.get(tu_name)
+    entry = get_manifest(tu_name)
     policy = entry.retry_policy if entry else "none"
     if entry and _RETRY_EXCLUDED_PERMISSIONS.intersection(entry.permissions):
         policy = "none"
     max_attempts = _RETRY_MAX_ATTEMPTS.get(policy, 1)
+    ceiling = _tool_call_ceiling(tu_name, tu_input)
 
     result_content = ""
     for attempt in range(max_attempts):
         try:
-            result_content = str(handler(tu_input))
+            result_content = _tool_result_text(
+                _call_with_ceiling(handler, tu_input, ceiling, tu_name)
+            )
         except Exception as exc:
             result_content = f"[ERROR] {tu_name} raised: {exc}"
             logger.exception("Tool %s raised", tu_name)
