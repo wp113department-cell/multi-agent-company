@@ -157,28 +157,28 @@ Each batch groups items that touch the same code, so nothing is fixed twice.
 
 | Batch | Item | Title | Priority | Status | Commit / proof |
 |---|---|---|---|---|---|
-| 1 | G1 | Sweep every executing/writing/network tool | P1 | 🟡 code-execution part done | f9e2acf6 (local, not pushed); write/network tools left to Batches 2–3 |
-| 1 | A01 | python_snippet and host executors → Docker | P0 | 🟡 done, awaiting full CI | f9e2acf6 (local, not pushed); wiring test 13/13, tool suites 3,562 passed |
-| 1 | A11 | Job network isolated from control plane | P1 | 🟡 in progress | job sandbox no-network in f9e2acf6; bash-variant part uncommitted (see Resume note) |
-| 1 | A31 | Execution worker with toolchain | P1 | ⬜ | |
+| 1 | G1 | Sweep every executing/writing/network tool | P1 | 🟡 partial | code-execution sweep done (8fddffbb); full per-tool attack sweep left |
+| 1 | A01 | python_snippet and host executors → Docker | P0 | ✅ done, pushed (GitHub CI red on 3 tests, fix first) | 8fddffbb · test_a01_chat_db_tools_sandboxed |
+| 1 | A11 | Job network isolated from control plane | P1 | ✅ done, pushed (GitHub CI red on 3 tests, fix first) | 8fddffbb + 98f067fe · sandbox no network; migrations on owner-set network |
+| 1 | A31 | Execution worker with toolchain | P1 | ✅ done, pushed (GitHub CI red on 3 tests, fix first) | 98f067fe · test_a31_sandbox_runner, test_a31_capabilities |
 | — | A02 | Bhaskar sandbox | P0 | 🟢 | `162f0658` · test_bhaskar_sandbox_docker.py (2026-10-06) |
-| 2 | A04 | Protected paths via symlink | P0 | ⬜ | |
-| 2 | A03 | Arbitrary workspace roots | P0 | ⬜ | |
-| 2 | A10 | Screenshot path escape | P1 | ⬜ | |
-| 3 | A06 | Browser request-wide policy, IPv6, fail-closed | P0 | ⬜ | |
-| 3 | A09 | DNS rebinding in URL checks | P1 | ⬜ | |
-| 4 | G2 | Prompt-injection resilience | P1 | ⬜ | |
-| 5 | A05 | .dockerignore, secrets out of images | P0 | ⬜ | |
-| 5 | A13 | Sentry redaction | P1 | ⬜ | |
-| 5 | G10 | Logs, traces, alerts correct and secret-free | P2 | ⬜ | |
-| 6 | A12 | Token revocation | P1 | ⬜ | |
-| 6 | A07 | Resource ownership | P0 | ⬜ | |
-| 6 | A14 | Privacy export/delete | P1 | ⬜ | |
-| 6 | A08 | Lesson/memory scope per project | P1 | ⬜ | |
-| 7 | A15 | /run-sync arguments | P1 | ✅ | 35470c25 |
-| 7 | A16 | Tuple results (research/DevOps) | P1 | ✅ | 35470c25 |
+| 2 | A04 | Protected paths via symlink | P0 | ✅ done, pushed (GitHub CI red on 3 tests, fix first) | 34588f88 |
+| 2 | A03 | Arbitrary workspace roots | P0 | ✅ done, pushed (GitHub CI red on 3 tests, fix first) | cfa9f60b |
+| 2 | A10 | Screenshot path escape | P1 | ✅ done, pushed (GitHub CI red on 3 tests, fix first) | 72fa4b21 |
+| 3 | A06 | Browser request-wide policy, IPv6, fail-closed | P0 | ✅ done, pushed (GitHub CI red on 3 tests, fix first) | a64377cf · test_a06_a09_network_guard |
+| 3 | A09 | DNS rebinding in URL checks | P1 | ✅ done, pushed (GitHub CI red on 3 tests, fix first) | a64377cf |
+| 4 | G2 | Prompt-injection resilience | P1 | ✅ done, pushed (GitHub CI red on 3 tests, fix first) | 405f9d81 · test_g2_prompt_injection |
+| 5 | A05 | .dockerignore, secrets out of images | P0 | ✅ done, pushed (GitHub CI red on 3 tests, fix first) | aa3ffab0 |
+| 5 | A13 | Sentry redaction | P1 | ✅ done, pushed (GitHub CI red on 3 tests, fix first) | aa3ffab0 |
+| 5 | G10 | Logs, traces, alerts correct and secret-free | P2 | ✅ done, pushed (GitHub CI red on 3 tests, fix first) | aa3ffab0 |
+| 6 | A12 | Token revocation | P1 | ✅ done, pushed (GitHub CI red on 3 tests, fix first) | 4ebd1245 |
+| 6 | A07 | Resource ownership | P0 | ✅ done, pushed (GitHub CI red on 3 tests, fix first) | 0a13fb29 |
+| 6 | A14 | Privacy export/delete | P1 | ✅ done, local (not pushed) | 6954d441 |
+| 6 | A08 | Lesson/memory scope per project | P1 | ✅ done, local (not pushed) | ba2a3376 |
+| 7 | A15 | /run-sync arguments | P1 | ✅ done, local (not pushed) | 35470c25 |
+| 7 | A16 | Tuple results (research/DevOps) | P1 | ✅ done, local (not pushed) | 35470c25 |
 | 7 | A22 | Authoritative tool registry | P1 | ⬜ | |
-| 7 | A27 | Real output caps | P2 | ✅ | |
+| 7 | A27 | Real output caps | P2 | ✅ done, local (not pushed) | a3859db9 |
 | 7 | A28 | Enforced timeouts, real probing | P2 | ⬜ | |
 | 7 | G9 | Model/provider layer and pricing | P2 | ⬜ | |
 | 8 | A19 | Stable plan step IDs | P1 | ⬜ | |
@@ -368,7 +368,30 @@ It has no file or image upload, no list of past chats, no memory carried between
 - **C4 — UI.** A full-width layout with the chat list on the left. Messages render Markdown and code blocks with a copy button, show tool steps as collapsible cards, and show a stop button and a typing state. Add a Chat entry to the menu. The new arcade/pixel style applies.
 - **C5 — Real-time working view.** Show which file or tool the chat agent is using as it happens, with the existing approval prompt for risky steps.
 
-### Next week's order (owner sets the start day)
+### C6 — Chat becomes "questions about a project" (owner decision, 2026-10-12)
+
+Tasks are the way to build and change code; chat only answers questions about a project. The owner chose what stays.
+
+- **Keep:** the past chats list (reopen, rename, delete) and the live activity line.
+- **Remove from chat** (screen, API, tests, tour, docs together, per the impact rule):
+  - **Attachments (C1):** the paperclip, upload handling and attachment tests.
+  - **Project memory notes (C3):** the sidebar panel, the notes endpoints, their injection into chat, and the `projectNotes` part of the privacy export and erasure. Notes were used only by chat.
+  - **Terminal tab:** it exists only on the chat page, so the terminal leaves the product. Its backend endpoint is switched off too (smaller attack surface).
+  - **Every write tool in the chat agent:** editing files, `run_migration`, `seed_database`, git and Docker control. The chat reads files and answers; it no longer asks for write approvals.
+- **Add "Make this a task":** one click creates a task for the same project, with the chat's request and the relevant part of the conversation as the description. It opens the new task, which goes through the full pipeline (plan → code → tests → review → approval → delivery).
+- **Proof:**
+  - Tests that the chat agent has no write tool and the removed endpoints are gone.
+  - "Make this a task" creates exactly one task in the right project and stays owner-only (A07).
+  - Existing task and chat-history tests still pass; tour and menu updated.
+
+### Order from 2026-10-12
+
+1. Fix the 3 tests that failed on GitHub for `0a13fb29` (2 in `test_a06_a09_network_guard`, 1 in `test_a31_sandbox_runner`). Run full local CI, push (it includes A14, A08, A15, A16, A27), confirm GitHub green.
+2. **C6** (chat questions-only + "Make this a task").
+3. The rest of Batch 7 (A22, A28, G9), then Batches 8–14.
+4. **W8** and Batch 15 (G5) when the owner adds the GitHub, Slack and Linear keys.
+
+### Next week's order (owner sets the start day, 2026-10-08; replaced by the order above)
 
 1. The Docker sandbox fix ("After the client demo: first item"), which is also **W3**.
 2. **W2**, **W6**, **W1**, **W4** (local folders become fully usable; GitHub targets the right branch).
