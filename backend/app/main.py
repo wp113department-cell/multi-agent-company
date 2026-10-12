@@ -141,9 +141,13 @@ async def _weekly_reindex_loop() -> None:
     """
     from app.api.repo import _do_reindex
 
-    _SEVEN_DAYS = 7 * 24 * 60 * 60
+    # G3 (2026-10-12): every background loop has an off switch
+    hours = get_settings().repo_reindex_interval_hours
+    if hours <= 0:
+        logger.info("Repo reindex loop disabled (REPO_REINDEX_INTERVAL_HOURS=0)")
+        return
     while True:
-        await asyncio.sleep(_SEVEN_DAYS)
+        await asyncio.sleep(hours * 3600)
         try:
             await _do_reindex()
             logger.info("Weekly auto-reindex complete")
@@ -248,7 +252,14 @@ async def _fleet_agents_scan_loop() -> None:
     while True:
         await asyncio.sleep(interval_hours * 60 * 60)
         for agent_name, module_path, fn_name in scan_fns:
-            if _fleet_scan_budget_exhausted(agent_name):
+            try:
+                exhausted = _fleet_scan_budget_exhausted(agent_name)
+            except Exception as exc:
+                # G3: a failed check used to end this loop for good; skip
+                # this round's scans instead (spends nothing) and carry on
+                logger.warning("Fleet scan budget check failed: %s", exc)
+                break
+            if exhausted:
                 break
             try:
                 import importlib
@@ -268,7 +279,12 @@ async def _versioned_lesson_archive_loop() -> None:
     day, same cadence as the log-retention loop. Set LESSON_RETENTION_DAYS=0
     to disable (archive_expired() itself already no-ops in that case).
     """
-    interval_seconds = 24 * 3600
+    # G3 (2026-10-12): every background loop has an off switch
+    hours = get_settings().versioned_lesson_archive_interval_hours
+    if hours <= 0:
+        logger.info("Versioned lesson archive loop disabled")
+        return
+    interval_seconds = hours * 3600
     while True:
         await asyncio.sleep(interval_seconds)
         try:
@@ -293,6 +309,10 @@ async def _versioned_lesson_consolidation_loop() -> None:
     possible one, same relationship archive_expired has to its own loop)."""
     from app.config import get_settings
 
+    # G3 (2026-10-12): an interval of 0 used to spin this loop with no pause
+    if get_settings().memory_consolidation_interval_hours <= 0:
+        logger.info("Versioned lesson consolidation loop disabled (interval 0)")
+        return
     while True:
         await asyncio.sleep(get_settings().memory_consolidation_interval_hours * 3600)
         try:
@@ -352,6 +372,10 @@ async def _agent_historical_performance_rollup_loop() -> None:
     this loop populates)."""
     from app.config import get_settings
 
+    # G3 (2026-10-12): an interval of 0 used to spin this loop with no pause
+    if get_settings().agent_historical_performance_rollup_interval_hours <= 0:
+        logger.info("Agent performance rollup loop disabled (interval 0)")
+        return
     while True:
         await asyncio.sleep(
             get_settings().agent_historical_performance_rollup_interval_hours * 3600
@@ -465,7 +489,11 @@ async def _benchmark_baseline_loop() -> None:
                         continue  # no real runs yet — nothing meaningful to baseline
                     report = await asyncio.to_thread(bm.compare_to_baseline, cap.name)
                     if report.baseline_score is None:
+                        from app.fleet.benchmark_manager import has_enough_data
+
                         result = await asyncio.to_thread(bm.run_benchmark, cap.name)
+                        if not has_enough_data(result):
+                            continue  # Sol A25: never baseline on a few runs
                         await asyncio.to_thread(bm.store_baseline, cap.name, result)
                         logger.info(
                             "Stored initial baseline for %s: benchmark_score=%.3f",

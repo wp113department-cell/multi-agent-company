@@ -134,7 +134,10 @@ def run_arch_review(
     # DevTask.repo_id, Cluster O's single source of truth for repo scoping
     # (ADR 006); a None (unresolvable) repo_id is never an error — the row
     # is simply not attributable to a specific repo (INV-8).
-    if verified:
+    # G4 (2026-10-12): and only when the review was actually submitted — a
+    # run that ran import_graph but never finished has risks == [], which
+    # compute_architecture_score() scores as a perfect 1.0.
+    if verified and final_state["submitted"]:
         try:
             from app.db.repository import get_task_repo_id_sync
             from app.fleet.architecture_score import (

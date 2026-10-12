@@ -329,3 +329,31 @@ def test_run_arch_review_unverified_run_persists_no_score() -> None:
         ), "an unverified run must never persist an architecture_score row"
     finally:
         _cleanup_sync([task_id], [repo_id])
+
+
+def test_run_arch_review_unfinished_run_persists_no_perfect_score() -> None:
+    """G4 (2026-10-12): a run that ran import_graph (verified) but never
+    submitted its review has risks == [], which used to be stored as a
+    perfect 1.0 architecture score."""
+    from app.agents.architecture_reviewer import run_arch_review
+
+    suffix = uuid.uuid4().hex[:8]
+    repo_id = _make_repo_sync(suffix)
+    task_id = _make_task_sync(f"arch unfinished {suffix}", repo_id)
+    unfinished = {**_fake_final_state([], verified=True), "submitted": False}
+    unfinished["result"] = {}
+
+    try:
+        with (
+            patch(
+                "app.agents.architecture_reviewer.run_agent_graph",
+                return_value=unfinished,
+            ),
+            patch("app.db.repository.get_task_repo_id_sync", return_value=repo_id),
+        ):
+            result = run_arch_review(task_id=task_id, focus="test")
+
+        assert result.status == "blocked"
+        assert get_latest_architecture_score(repo_id) is None
+    finally:
+        _cleanup_sync([task_id], [repo_id])

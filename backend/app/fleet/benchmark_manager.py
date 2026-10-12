@@ -44,6 +44,19 @@ class RegressionReport:
     baseline_score: float | None
     delta: float
     per_objective_delta: dict[str, float]
+    # Sol A25: too few real runs to judge — never a regression, never "perfect"
+    insufficient_data: bool = False
+
+
+def has_enough_data(result: BenchmarkResult | None) -> bool:
+    """Sol A25 (2026-10-12): objectives a run did not exercise default to
+    their best value (no tool calls = perfect accuracy), so a score from too
+    few runs is not evidence. Results without a sample count (e.g.
+    architecture drift's structural counts) are always usable."""
+    if result is None:
+        return False
+    count = result.objectives.get("sample_count")
+    return count is None or count >= get_settings().benchmark_min_samples
 
 
 def build_regression_report(
@@ -73,6 +86,17 @@ def build_regression_report(
             baseline_score=None,
             delta=0.0,
             per_objective_delta={},
+        )
+
+    if not has_enough_data(current) or not has_enough_data(baseline):
+        return RegressionReport(
+            agent_name=name,
+            is_regression=False,
+            current_score=current.objectives["benchmark_score"],
+            baseline_score=baseline.objectives["benchmark_score"],
+            delta=0.0,
+            per_objective_delta={},
+            insufficient_data=True,
         )
 
     current_score = current.objectives["benchmark_score"]
@@ -239,6 +263,8 @@ class BenchmarkManager:
             "compile_success": compile_success,
             "hallucination_rate": hallucination_rate,
             "benchmark_score": benchmark_score,
+            # Sol A25: how many real runs this is based on (see has_enough_data)
+            "sample_count": float(len(runs)),
         }
 
     def run_benchmark(self, agent_name: str, n: int = 20) -> BenchmarkResult:

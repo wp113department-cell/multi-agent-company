@@ -373,6 +373,19 @@ class Settings(BaseSettings):
     # defaulting False so no existing caller/test/cost-budget assumption
     # changes without an operator explicitly choosing the extra 2 LLM
     # calls per subtask this adds.
+    repo_reindex_interval_hours: float = Field(
+        default=168.0,
+        description="G3: hours between automatic re-indexes of the active project (weekly by default). 0 disables the loop.",
+    )
+    versioned_lesson_archive_interval_hours: float = Field(
+        default=24.0,
+        description="G3: hours between archive passes over expired versioned lessons. 0 disables the loop.",
+    )
+    benchmark_min_samples: int = Field(
+        default=5,
+        ge=1,
+        description="Sol A25: fewest real runs an agent's benchmark needs before it is used as a baseline or compared for regressions; below it the result is 'insufficient data'.",
+    )
     backup_status_file: str = Field(
         default="",
         description="Sol A39: path of the backup service's last_backup.json; /health then reports the last backup (ok / failed / stale / none yet). Empty = not reported.",

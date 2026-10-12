@@ -31,6 +31,17 @@ from app.fleet.benchmark_manager import get_benchmark_manager
 from app.fleet.metrics import get_metrics_collector
 from app.fleet.prompt_registry import get_prompt_registry
 
+
+@pytest.fixture(autouse=True)
+def _few_runs_are_enough(monkeypatch: pytest.MonkeyPatch) -> None:
+    """These tests exercise the regression math on a handful of runs; the
+    minimum-sample rule (Sol A25) has its own tests in
+    tests/test_a25_insufficient_data.py."""
+    from app.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "benchmark_min_samples", 1)
+
+
 _ROLES_DIR = Path(__file__).parent.parent / "roles"
 
 

@@ -191,9 +191,9 @@ Each batch groups items that touch the same code, so nothing is fixed twice.
 | 9 | A18 | No silent MemorySaver | P1 | ✅ done, local (not pushed) | test_a17_a18_durable_progress |
 | 9 | A39 | Production backups and restore | P1 | ✅ done, local (not pushed) | test_a39_backup_restore_drill |
 | 9 | G7 | Downgrades, S3, storage lifecycle | P2 | ✅ done, local (not pushed) | test_g7_migration_roundtrip, test_g7_s3_artifacts |
-| 10 | G3 | 21 background loops | P1 | ⬜ | |
-| 10 | G4 | 9 score modules correct | P1 | ⬜ | |
-| 10 | A25 | No-data ≠ perfect score | P1 | ⬜ | |
+| 10 | G3 | 21 background loops | P1 | ✅ done, local (not pushed) | test_g3_background_loops |
+| 10 | G4 | 9 score modules correct | P1 | ✅ done, local (not pushed) | architecture score test + A25 |
+| 10 | A25 | No-data ≠ perfect score | P1 | ✅ done, local (not pushed) | test_a25_insufficient_data |
 | 10 | G6 | Prompt version auto-rollback | P2 | ⬜ | |
 | 10 | A26 | Baselines and held-out task suite | P1/P2 | 🟡 partial | 11 live evals + judge (2026-10-05) |
 | 11 | A29 | Frontend → backend in compose | P1 | ⬜ | |
@@ -692,4 +692,9 @@ Every item gets a full local CI before each push. Close heavy apps first, becaus
   - Every migration rolls back to an empty database and forward again to an identical schema (`tests/test_g7_migration_roundtrip.py`, real Alembic chain on a scratch database).
   - **Real gap:** the S3 artifact store could only talk to AWS (no endpoint setting), so S3-compatible stores (MinIO, R2, B2) could not be used. `S3_ENDPOINT_URL` added; `tests/test_g7_s3_artifacts.py` runs the full trip (save through the app's store, `s3://` row in the database, read back by id with checksum, list, delete) against a real S3-compatible server in Docker (SeaweedFS — MinIO no longer publishes public images).
   - Storage growth and retention were already covered by audit 13's retention tests.
+- **2026-10-12: Batch 10 (part), A25 + G4 + G3. DONE (local).** Remaining in Batch 10: G6, A26.
+  - **A25:** an agent with no or too few runs scored a perfect 1.0 (unexercised objectives default to their best value), and the baseline loop stored such scores after one run, so later real runs were flagged as regressions. `BENCHMARK_MIN_SAMPLES` (5): below it a benchmark is "insufficient data" — never a regression, never stored as a baseline. `tests/test_a25_insufficient_data.py`; five older tests pin the minimum to 1 with a note.
+  - **G4:** reviewed the 9 score modules; memory, tools, prompts, agents, documentation and quality already return "no data" honestly. **Real bug:** an architecture review that ran its import check but never finished was stored as a perfect 1.0; now only submitted reviews are scored (test added).
+  - **G3:** all 22 loops now stop when switched off (two spun with no pause at interval 0, two had no off switch: new `REPO_REINDEX_INTERVAL_HOURS`, `VERSIONED_LESSON_ARCHIVE_INTERVAL_HOURS`); every loop's repeating work is error-guarded (the fleet scan's budget check was not — one failure ended the loop for good); cluster-wide loops start only through leader election. `tests/test_g3_background_loops.py`.
+- **Next session:** local CI on `1834ea04` was still running at 40% when work stopped; re-run CI on the latest commit, push, confirm GitHub. Then G6, A26, Batches 11–14.
 

@@ -19,6 +19,16 @@ from app.fleet.benchmark_manager import BenchmarkManager, get_benchmark_manager
 from app.fleet.metrics import MetricsCollector
 
 
+@pytest.fixture(autouse=True)
+def _few_runs_are_enough(monkeypatch: pytest.MonkeyPatch) -> None:
+    """These tests exercise the regression math on a handful of runs; the
+    minimum-sample rule (Sol A25) has its own tests in
+    tests/test_a25_insufficient_data.py."""
+    from app.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "benchmark_min_samples", 1)
+
+
 def _delete_benchmarks(agent_name: str) -> None:
     from sqlalchemy import delete
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
