@@ -733,16 +733,32 @@ async def make_task(
     actor: str = Depends(require_approver),
 ) -> dict[str, Any]:
     """Create a task in the chat's project from the conversation."""
+    from app.middleware.idempotency import (
+        get_cached_response,
+        release_reservation,
+        store_response,
+    )
+
+    await _check_chat_owner(session_id, actor)  # Sol A07
+    cached = await get_cached_response(db, request, "chat_make_task", actor)
+    if cached is not None:
+        return cached
+    try:
+        result = await _make_task_work(session_id, body, db, actor)
+    except BaseException:
+        await release_reservation(db, request, "chat_make_task", actor)
+        raise
+    await store_response(db, request, "chat_make_task", result, actor)
+    return result
+
+
+async def _make_task_work(
+    session_id: str, body: MakeTaskRequest, db: AsyncSession, actor: str
+) -> dict[str, Any]:
     from sqlalchemy import select
 
     from app.db.models import ChatSessionRecord, Project
     from app.db.repository import create_task
-    from app.middleware.idempotency import get_cached_response, store_response
-
-    await _check_chat_owner(session_id, actor)  # Sol A07
-    cached = await get_cached_response(db, request, "chat_make_task")
-    if cached is not None:
-        return cached
 
     rec = await db.get(ChatSessionRecord, session_id)
     session = get_session(session_id)
@@ -780,10 +796,4 @@ async def make_task(
         created_by=actor,
         project_id=project.id,
     )
-    result: dict[str, Any] = {
-        "taskId": task.id,
-        "title": title,
-        "projectId": project.id,
-    }
-    await store_response(db, request, "chat_make_task", result)
-    return result
+    return {"taskId": task.id, "title": title, "projectId": project.id}

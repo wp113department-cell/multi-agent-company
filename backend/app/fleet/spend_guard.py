@@ -11,10 +11,12 @@ How it works:
   base_graph, chat, memory consolidation, role detection, the router, git
   push summaries, any future call site — goes through one gate. Test mocks
   replace the client object, never this class, so they are unaffected.
-- Before each call: ``check()`` raises ``DailyBudgetExceeded`` once today's
-  recorded spend has reached the cap. Nothing is sent, nothing is billed.
-- After each call: the response's real ``usage`` (input, output, cache write
-  1.25x, cache read 0.1x) is priced by model tier and added to the ledger.
+- Before each call: ``reserve()`` (Sol A24) atomically adds the call's
+  worst-case cost and raises ``DailyBudgetExceeded`` if today's total was
+  already at the cap. Nothing is sent, nothing is billed.
+- After each call: the reservation is replaced by the response's real
+  ``usage`` priced per model (app/fleet/model_pricing.py, cache rates
+  included), or released if the call failed.
 - Ledger: Redis ``INCRBYFLOAT gridiron:spend:<UTC day>`` (atomic, shared by
   every worker process, survives an app restart) when Redis is reachable;
   an in-process counter otherwise (per-process only — documented limit).
@@ -138,6 +140,94 @@ def check() -> None:
         raise DailyBudgetExceeded(limit, spent)
 
 
+# ---------------------------------------------------------------------------
+# Sol A24 (2026-10-12): reserve before, settle after.
+#
+# The cap used to be checked before a call and the cost added after it, so N
+# calls started together all saw the same low total and all went through.
+# Now each call atomically adds its worst-case cost (estimated input + its
+# max_tokens of output, at the model's own price) to today's total before it
+# is sent, and is admitted only if the total *before* its reservation was
+# under the cap. Afterwards the reservation is replaced by the real cost (or
+# released if the call failed). Calls in flight therefore see each other,
+# and the most the cap can be exceeded by is one call's worst case.
+#
+# Redis outage: the ledger falls back to this process only, so with several
+# worker processes the overshoot can reach (processes x cap). Set
+# SPEND_GUARD_REQUIRE_REDIS=true to refuse LLM calls instead while the
+# shared ledger is unreachable (and the cap is on).
+# ---------------------------------------------------------------------------
+
+
+def estimate_worst_case(model: str, kwargs: dict[str, Any]) -> float:
+    import json
+
+    from app.fleet.model_pricing import price_for
+    from app.pipeline.cost_controller import cost_rates_for_tier
+
+    try:
+        text = json.dumps(
+            [kwargs.get("system"), kwargs.get("messages"), kwargs.get("tools")],
+            default=str,
+        )
+    except (TypeError, ValueError):
+        text = ""
+    tokens_in = len(text) // 4
+    tokens_out = int(kwargs.get("max_tokens") or 4096)
+    price = price_for(model)
+    if price is not None:
+        return (tokens_in * price.input + tokens_out * price.output) / 1_000_000
+    name = (model or "").lower()
+    tier = "haiku" if "haiku" in name else "opus" if "opus" in name else "sonnet"
+    rate_in, rate_out = cost_rates_for_tier(tier, get_settings())
+    return tokens_in * rate_in + tokens_out * rate_out
+
+
+def _add(usd: float) -> float:
+    """Add (or, negative, remove) usd from today's total; returns the total
+    after the change. Atomic across processes when Redis is up."""
+    day = _today()
+    with _lock:
+        local_after = _local.get(day, 0.0) + usd
+        _local[day] = local_after
+    client = _redis()
+    if client is not None:
+        try:
+            pipe = client.pipeline()
+            pipe.incrbyfloat(_KEY_PREFIX + day, usd)
+            pipe.expire(_KEY_PREFIX + day, 3 * 86400)
+            shared_after = float(pipe.execute()[0])
+            return max(shared_after, local_after)
+        except Exception as exc:
+            _redis_failed(exc)
+    return local_after
+
+
+def reserve(model: str, kwargs: dict[str, Any]) -> float:
+    """Reserve this call's worst-case cost; raise DailyBudgetExceeded if
+    today's total (including other calls in flight) is already at the cap.
+    Returns the amount reserved (0 when the cap is off)."""
+    settings = get_settings()
+    limit = settings.cost_budget_daily_usd
+    if limit <= 0:
+        return 0.0
+    if settings.spend_guard_require_redis and _redis() is None:
+        raise DailyBudgetExceeded(limit, spent_today())
+    amount = max(estimate_worst_case(model, kwargs), 0.0)
+    after = _add(amount)
+    before = after - amount
+    if before >= limit:
+        _add(-amount)
+        raise DailyBudgetExceeded(limit, before)
+    return amount
+
+
+def settle(reserved: float, actual: float) -> None:
+    """Replace a reservation with the call's real cost."""
+    if reserved or actual:
+        _add(actual - reserved)
+
+
 async def spent_today_with_db_floor() -> float:
     """Ledger spend, floored by today's durable agent_runs cost sum."""
     import asyncio
@@ -201,19 +291,22 @@ def cost_of(model: str, usage: Any) -> float:
     )
 
 
-def _record_response(response: Any, model: str) -> None:
+def _record_response(response: Any, model: str, reserved: float = 0.0) -> None:
+    actual = 0.0
     try:
         usage = getattr(response, "usage", None)
         if usage is not None:
-            record(cost_of(getattr(response, "model", None) or model, usage))
+            actual = cost_of(getattr(response, "model", None) or model, usage)
     except Exception as exc:
         logger.warning("Spend guard: could not record usage: %s", exc)
+    settle(reserved, actual)
 
 
 class _SyncStreamGuard:
-    def __init__(self, inner: Any, model: str) -> None:
+    def __init__(self, inner: Any, model: str, reserved: float = 0.0) -> None:
         self._inner = inner
         self._model = model
+        self._reserved = reserved
         self._stream: Any = None
 
     def __enter__(self) -> Any:
@@ -225,14 +318,17 @@ class _SyncStreamGuard:
             return self._inner.__exit__(*exc)
         finally:
             _record_response(
-                getattr(self._stream, "current_message_snapshot", None), self._model
+                getattr(self._stream, "current_message_snapshot", None),
+                self._model,
+                self._reserved,
             )
 
 
 class _AsyncStreamGuard:
-    def __init__(self, inner: Any, model: str) -> None:
+    def __init__(self, inner: Any, model: str, reserved: float = 0.0) -> None:
         self._inner = inner
         self._model = model
+        self._reserved = reserved
         self._stream: Any = None
 
     async def __aenter__(self) -> Any:
@@ -244,7 +340,9 @@ class _AsyncStreamGuard:
             return await self._inner.__aexit__(*exc)
         finally:
             _record_response(
-                getattr(self._stream, "current_message_snapshot", None), self._model
+                getattr(self._stream, "current_message_snapshot", None),
+                self._model,
+                self._reserved,
             )
 
 
@@ -266,37 +364,57 @@ def install() -> None:
 
     @functools.wraps(orig_create)
     def create(self: Any, *args: Any, **kwargs: Any) -> Any:
-        check()
-        response = orig_create(self, *args, **kwargs)
-        if not kwargs.get("stream"):
-            _record_response(response, str(kwargs.get("model", "")))
+        model = str(kwargs.get("model", ""))
+        reserved = reserve(model, kwargs)
+        try:
+            response = orig_create(self, *args, **kwargs)
+        except BaseException:
+            settle(reserved, 0.0)
+            raise
+        if kwargs.get("stream"):
+            # a raw stream reports usage as it goes; keep the reservation
+            # as this call's (worst-case) charge.
+            return response
+        _record_response(response, model, reserved)
         return response
 
     @functools.wraps(orig_stream)
     def stream(self: Any, *args: Any, **kwargs: Any) -> Any:
-        check()
-        return _SyncStreamGuard(
-            orig_stream(self, *args, **kwargs), str(kwargs.get("model", ""))
-        )
+        model = str(kwargs.get("model", ""))
+        reserved = reserve(model, kwargs)
+        try:
+            inner = orig_stream(self, *args, **kwargs)
+        except BaseException:
+            settle(reserved, 0.0)
+            raise
+        return _SyncStreamGuard(inner, model, reserved)
 
     @functools.wraps(orig_acreate)
     async def acreate(self: Any, *args: Any, **kwargs: Any) -> Any:
         import asyncio
 
-        await asyncio.to_thread(check)
-        response = await orig_acreate(self, *args, **kwargs)
-        if not kwargs.get("stream"):
-            await asyncio.to_thread(
-                _record_response, response, str(kwargs.get("model", ""))
-            )
+        model = str(kwargs.get("model", ""))
+        reserved = await asyncio.to_thread(reserve, model, kwargs)
+        try:
+            response = await orig_acreate(self, *args, **kwargs)
+        except BaseException:
+            await asyncio.to_thread(settle, reserved, 0.0)
+            raise
+        if kwargs.get("stream"):
+            return response
+        await asyncio.to_thread(_record_response, response, model, reserved)
         return response
 
     @functools.wraps(orig_astream)
     def astream(self: Any, *args: Any, **kwargs: Any) -> Any:
-        check()
-        return _AsyncStreamGuard(
-            orig_astream(self, *args, **kwargs), str(kwargs.get("model", ""))
-        )
+        model = str(kwargs.get("model", ""))
+        reserved = reserve(model, kwargs)
+        try:
+            inner = orig_astream(self, *args, **kwargs)
+        except BaseException:
+            settle(reserved, 0.0)
+            raise
+        return _AsyncStreamGuard(inner, model, reserved)
 
     Messages.create = create  # type: ignore[method-assign]
     Messages.stream = stream  # type: ignore[method-assign]

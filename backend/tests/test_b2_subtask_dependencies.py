@@ -8,6 +8,7 @@ although both functions' docstrings promise a sequential fallback for a malforme
 
 from __future__ import annotations
 
+import itertools
 import logging
 import random
 
@@ -19,9 +20,18 @@ from app.agents.manager import (
     _topological_subtask_waves as waves,
 )
 
+_files = itertools.count()
+
 
 def st(*deps):
-    return {"type": "backend", "title": "t", "depends_on": list(deps)}
+    # UPDATED (Sol A20): each step edits its own file, so independent steps
+    # may share a parallel wave (steps with no files run alone).
+    return {
+        "type": "backend",
+        "title": "t",
+        "depends_on": list(deps),
+        "files_to_edit": [f"f{next(_files)}.py"],
+    }
 
 
 @pytest.mark.parametrize(
@@ -33,7 +43,19 @@ def st(*deps):
         ([st(2), st(), st(1)], [1, 2, 0], [[1], [2], [0]]),  # dependency listed later
         ([st(), st(0, 0, 0)], [0, 1], [[0], [1]]),  # duplicate edges
         ([], [], []),
-        ([st(), {"type": "b", "title": "x", "depends_on": None}], [0, 1], [[0, 1]]),
+        (
+            [
+                st(),
+                {
+                    "type": "b",
+                    "title": "x",
+                    "depends_on": None,
+                    "files_to_edit": ["x.py"],
+                },
+            ],
+            [0, 1],
+            [[0, 1]],
+        ),
     ],
 )
 def test_valid_graphs(subtasks, exp_order, exp_waves) -> None:

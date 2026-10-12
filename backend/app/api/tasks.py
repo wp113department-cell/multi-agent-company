@@ -37,7 +37,11 @@ from app.db.repository import (
     resolve_task_repo_path,
 )
 from app.config import get_settings
-from app.middleware.idempotency import get_cached_response, store_response
+from app.middleware.idempotency import (
+    get_cached_response,
+    release_reservation,
+    store_response,
+)
 from app.middleware.rbac import require_approver, require_authenticated
 from app.pipeline.queue_adapter import dispatch_job
 from app.rate_limit import limiter
@@ -217,53 +221,58 @@ async def create(
     # actually already succeeded) previously always created a second,
     # duplicate task row. An Idempotency-Key header makes a retried call
     # return the original created task instead.
-    cached = await get_cached_response(db, request, "create_task")
+    cached = await get_cached_response(db, request, "create_task", _actor)
     if cached is not None:
         return cached
+    try:
+        repo_id = body.repo_id
+        project_name = body.project
+        if body.project_id is not None:
+            from app.db.models import Epic, Goal, Project
 
-    repo_id = body.repo_id
-    project_name = body.project
-    if body.project_id is not None:
-        from app.db.models import Epic, Goal, Project
+            proj = await db.get(Project, body.project_id)
+            if proj is None:
+                raise HTTPException(status_code=404, detail="Project not found")
+            repo_id = proj.repo_id
+            project_name = proj.name
+            if body.goal_id:
+                goal_row = await db.get(Goal, body.goal_id)
+                if goal_row is None or goal_row.project_id != proj.id:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="That goal does not belong to this project",
+                    )
+            if body.epic_id:
+                epic_row = await db.get(Epic, body.epic_id)
+                if epic_row is None or epic_row.project_id != proj.id:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="That epic does not belong to this project",
+                    )
+        elif body.goal_id or body.epic_id:
+            raise HTTPException(
+                status_code=400, detail="A goal or epic needs a project_id as well"
+            )
 
-        proj = await db.get(Project, body.project_id)
-        if proj is None:
-            raise HTTPException(status_code=404, detail="Project not found")
-        repo_id = proj.repo_id
-        project_name = proj.name
-        if body.goal_id:
-            goal_row = await db.get(Goal, body.goal_id)
-            if goal_row is None or goal_row.project_id != proj.id:
-                raise HTTPException(
-                    status_code=400, detail="That goal does not belong to this project"
-                )
-        if body.epic_id:
-            epic_row = await db.get(Epic, body.epic_id)
-            if epic_row is None or epic_row.project_id != proj.id:
-                raise HTTPException(
-                    status_code=400, detail="That epic does not belong to this project"
-                )
-    elif body.goal_id or body.epic_id:
-        raise HTTPException(
-            status_code=400, detail="A goal or epic needs a project_id as well"
+        task = await create_task(
+            db,
+            body.title,
+            body.description,
+            repo_id=repo_id,
+            priority=body.priority,
+            project=project_name,
+            depends_on=body.depends_on,
+            created_by=_actor,
+            project_id=body.project_id,
+            goal_id=body.goal_id or None,
+            epic_id=body.epic_id or None,
+            execution_mode=body.execution_mode,
         )
-
-    task = await create_task(
-        db,
-        body.title,
-        body.description,
-        repo_id=repo_id,
-        priority=body.priority,
-        project=project_name,
-        depends_on=body.depends_on,
-        created_by=_actor,
-        project_id=body.project_id,
-        goal_id=body.goal_id or None,
-        epic_id=body.epic_id or None,
-        execution_mode=body.execution_mode,
-    )
-    result = _task_to_dict(task)
-    await store_response(db, request, "create_task", result)
+        result = _task_to_dict(task)
+    except BaseException:
+        await release_reservation(db, request, "create_task", _actor)
+        raise
+    await store_response(db, request, "create_task", result, _actor)
     return result
 
 
@@ -1249,11 +1258,22 @@ async def push_task(
     a push. An `Idempotency-Key` header now makes a retried call return the
     original trigger response instead of dispatching a second time.
     """
-    from app.api.approvals import dispatch_git_push_decision
-
-    cached = await get_cached_response(db, request, "push_task")
+    cached = await get_cached_response(db, request, "push_task", _approver)
     if cached is not None:
         return cached
+    try:
+        result = await _push_task_work(task_id, background_tasks, db)
+    except BaseException:
+        await release_reservation(db, request, "push_task", _approver)
+        raise
+    await store_response(db, request, "push_task", result, _approver)
+    return result
+
+
+async def _push_task_work(
+    task_id: int, background_tasks: BackgroundTasks, db: AsyncSession
+) -> dict[str, Any]:
+    from app.api.approvals import dispatch_git_push_decision
 
     task = await get_task(db, task_id)
     if not task:
@@ -1267,9 +1287,7 @@ async def push_task(
     from app.services import demo
 
     if await demo.simulate(db, task_id, "push_approved"):
-        result = {"triggered": True, "taskId": task_id}
-        await store_response(db, request, "push_task", result)
-        return result
+        return {"triggered": True, "taskId": task_id}
 
     _clear_stale_abort(task_id)
     await dispatch_job(
@@ -1279,9 +1297,7 @@ async def push_task(
         True,
         priority=task.priority,
     )
-    result = {"triggered": True, "taskId": task_id}
-    await store_response(db, request, "push_task", result)
-    return result
+    return {"triggered": True, "taskId": task_id}
 
 
 # ---------------------------------------------------------------------------

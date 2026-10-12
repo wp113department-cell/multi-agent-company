@@ -373,6 +373,18 @@ class Settings(BaseSettings):
     # defaulting False so no existing caller/test/cost-budget assumption
     # changes without an operator explicitly choosing the extra 2 LLM
     # calls per subtask this adds.
+    spend_guard_require_redis: bool = Field(
+        default=False,
+        description="Sol A24: with the daily cap on, refuse LLM calls while Redis (the shared spend ledger) is unreachable, instead of falling back to a per-process ledger (where several worker processes could each spend up to the cap).",
+    )
+    quality_gates_fail_closed: bool = Field(
+        default=True,
+        description="Sol A21: a required quality check (required_quality_gates) that crashes or cannot run blocks the step (it is retried like a finding) instead of counting as passed. Checks skipped on purpose (economy cost mode) stay skipped.",
+    )
+    required_quality_gates: list[str] = Field(
+        default_factory=lambda: ["security", "dependency"],
+        description="Sol A21: quality checks that must actually run before a step is done (security, architecture, dependency).",
+    )
     enable_security_architecture_gates: bool = Field(
         default=True,
         description="Run security_reviewer, architecture_reviewer and dependency_security_agent as real quality gates after each subtask's QA/review passes — critical/high findings (security_architecture_gates_block_severities) now get one real self-correction retry through the dev agent (T2-B5, GRIDIRON_PARTIAL #453/#455) before blocking, the same safety net reviewer-blocking-findings already had, which is what makes mandatory-by-default safe here.",

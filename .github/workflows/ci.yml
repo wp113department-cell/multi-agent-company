@@ -35,6 +35,17 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+      # G8 (2026-10-12): one shared Redis, as in production, so the
+      # multi-process tests (tests/test_g8_multi_process.py) run here too.
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     env:
       DATABASE_URL: postgresql+asyncpg://gridiron:gridiron_dev_only@localhost:5432/gridiron_test

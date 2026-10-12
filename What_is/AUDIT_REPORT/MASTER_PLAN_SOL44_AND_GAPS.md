@@ -181,12 +181,12 @@ Each batch groups items that touch the same code, so nothing is fixed twice.
 | 7 | A27 | Real output caps | P2 | ✅ done, local (not pushed) | a3859db9 |
 | 7 | A28 | Enforced timeouts, real probing | P2 | ✅ done, local (not pushed) | test_a28_dispatch_and_probing |
 | 7 | G9 | Model/provider layer and pricing | P2 | ✅ done, local (not pushed) | test_g9_model_pricing_and_fallback |
-| 8 | A19 | Stable plan step IDs | P1 | ⬜ | |
-| 8 | A20 | Per-subtask worktrees | P1 | ⬜ | |
-| 8 | A21 | Gates fail closed | P1 | ⬜ | |
-| 8 | A23 | Atomic idempotency | P1 | ⬜ | |
-| 8 | A24 | Atomic spend reservation | P1 | 🟡 partial | scan budget guard `b830b77f` |
-| 8 | G8 | Multi-process concurrency | P2 | ⬜ | |
+| 8 | A19 | Stable plan step IDs | P1 | ✅ done, local (not pushed) | test_a19_plan_step_dependencies |
+| 8 | A20 | Per-subtask worktrees | P1 | ✅ done, local (not pushed) | test_a20_clash_free_parallel_steps (owner: clash-free only) |
+| 8 | A21 | Gates fail closed | P1 | ✅ done, local (not pushed) | test_a21_gates_fail_closed |
+| 8 | A23 | Atomic idempotency | P1 | ✅ done, local (not pushed) | test_a23_atomic_idempotency |
+| 8 | A24 | Atomic spend reservation | P1 | ✅ done, local (not pushed) | test_a24_spend_reservation |
+| 8 | G8 | Multi-process concurrency | P2 | ✅ done, local (not pushed) | test_g8_multi_process (+ Redis in CI) |
 | 9 | A17 | Durable savers in RQ | P1 | ⬜ | |
 | 9 | A18 | No silent MemorySaver | P1 | ⬜ | |
 | 9 | A39 | Production backups and restore | P1 | 🟡 partial | dev backup service (2026-10-02) |
@@ -659,4 +659,23 @@ Every item gets a full local CI before each push. Close heavy apps first, becaus
   - `app/fleet/model_pricing.py`: per-model input, 5m/1h cache write, cache read and output prices, copied from Anthropic's pricing page on 2026-10-12. Spend tracking uses it (splitting 1h cache writes when reported) and falls back to the tier rates for unlisted models. Sonnet defaults and `.env.example` updated. **Owner: `backend/.env` sets COST_PER_INPUT_TOKEN / COST_PER_OUTPUT_TOKEN itself; change them to 0.000002 / 0.00001.**
   - Opt-in fallback chain `MODEL_FALLBACKS` (empty = off): on a model-not-found or overloaded (529) error the agent loop retries once on the fallback, adapting thinking, output tokens and forced tool choice.
   - Tests: 13 in `tests/test_g9_model_pricing_and_fallback.py`, including a check that every model the fleet uses has a price.
+- **2026-10-12: Batch 8, A19 plan step dependencies. DONE (local).**
+  - Rejecting an earlier step shifted the later ones without renumbering their `depends_on`, so a step could depend on the wrong step or itself (and the manager then silently dropped the ordering). `apply_subtask_edits` now renumbers, applies `depends_on` edits (validated: other existing steps only), and refuses changes that would break a valid plan (loop, missing step, self-dependency). The plan view shows "Step N" and "Runs after step …", warning when a prerequisite is rejected.
+  - Tests: 5 in `tests/test_a19_plan_step_dependencies.py` (4 fail on the old code).
+- **2026-10-12: Batch 8, A20 parallel steps. DONE (local)** (owner chose "only clash-free steps in parallel").
+  - Parallel steps share one worktree. Within a dependency wave, steps now run together only when their `files_to_edit` do not overlap (a folder overlaps the files inside it); a step that does not say what it edits runs alone. Dependency order is unchanged.
+  - Tests: 5 in `tests/test_a20_clash_free_parallel_steps.py`; the fan-out and dependency tests now give their parallel steps separate files.
+- **2026-10-12: Batch 8, A21 quality gates fail closed. DONE (local).**
+  - A reviewer that crashed (timeout, malformed output, outage) or ended "failed"/"blocked" counted as passed. Now each check is passed / failed / unavailable / skipped; a **required** check (`REQUIRED_QUALITY_GATES`, default security + dependency) that could not run blocks the step, which is retried like a finding. Checks skipped on purpose (economy mode) stay skipped; `QUALITY_GATES_FAIL_CLOSED=false` restores the old behaviour.
+  - Tests: 8 in `tests/test_a21_gates_fail_closed.py` (5 fail on the old code); the old "one gate failing does not block" test now expects the block.
+- **2026-10-12: Batch 8, A23 atomic idempotency. DONE (local).**
+  - The key is reserved atomically (`INSERT … ON CONFLICT DO NOTHING`) before the work: a simultaneous duplicate gets 409 "already being processed", a finished one replays its response, a key reused with a different body gets 409, keys are scoped per user, and a failed request frees its key. Create task, push task and chat make-task use it.
+  - Tests: 4 in `tests/test_a23_atomic_idempotency.py` (two overlapping requests → one task; 3 fail on the old code).
+- **2026-10-12: Batch 8, A24 atomic spend reservation. DONE (local).**
+  - Each LLM call atomically reserves its worst-case cost (estimated input + max_tokens of output at the model's price) before it is sent and is admitted only if today's total (including calls in flight) was under the cap; afterwards the real cost replaces the reservation, or it is released on failure. Most the cap can be exceeded by: one call's worst case. Redis outage: per-process ledger (overshoot up to processes × cap), or `SPEND_GUARD_REQUIRE_REDIS=true` to refuse calls instead.
+  - Tests: 5 in `tests/test_a24_spend_reservation.py` (20 simultaneous calls against a small cap; 3 fail on the old code).
+- **2026-10-12: Batch 8, G8 multi-process concurrency. DONE (local). Batch 8 complete.**
+  - `tests/test_g8_multi_process.py` starts two real API server processes on one database: the same requests sent to both at once still create one task per key. Four worker processes share one spend cap through Redis (it caught that the child processes had the shared ledger switched off by the test config — production has it on). With Redis unreachable, each process keeps its own count, or calls are refused when required.
+  - GitHub CI's backend job now has a Redis service, as production and local runs do.
+  - Not covered here: parallel approvals and RQ workers (approvals are guarded by their own state check; the RQ path is Batch 9, A17).
 

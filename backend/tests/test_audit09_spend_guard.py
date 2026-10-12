@@ -148,13 +148,11 @@ def test_async_client_and_stream_are_guarded_too(guard: Any) -> None:
 
     asyncio.run(_run())
     assert counter.calls == 1
-    s = get_settings()
-    first = (
-        1000 * s.cost_per_input_token
-        + 400 * s.cost_per_input_token * 1.25
-        + 2000 * s.cost_per_input_token * 0.1
-        + 200 * s.cost_per_output_token
-    )
+    # UPDATED (G9, 2026-10-12): priced from the model's own published
+    # rates (app/fleet/model_pricing.py), not tier rates x fixed cache
+    # multipliers — Claude Sonnet 5.5 is $2 in / $2.50 5m write / $0.10
+    # cache read / $10 out per million.
+    first = (1000 * 2 + 400 * 2.5 + 2000 * 0.10 + 200 * 10) / 1_000_000
     assert guard.spent_today() == pytest.approx(first + 1.0)
 
 

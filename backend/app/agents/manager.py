@@ -964,14 +964,18 @@ async def _dispatch_one_subtask(
                     )
                     local_tokens_in += gate_tokens_in
                     local_tokens_out += gate_tokens_out
-                except Exception:
-                    logger.debug(
-                        "Advisory security/architecture gates failed for "
-                        "subtask %d (non-fatal, non-blocking)",
+                except Exception as gate_exc:
+                    logger.warning(
+                        "Quality gates failed for subtask %d",
                         subtask_id,
                         exc_info=True,
                     )
-                    gate_blocked_reason = None
+                    # Sol A21: this used to count as "all checks passed".
+                    gate_blocked_reason = (
+                        f"the quality checks could not run ({type(gate_exc).__name__})"
+                        if get_settings().quality_gates_fail_closed
+                        else None
+                    )
 
             if gate_blocked_reason is None:
                 subtask_status = "completed"
@@ -1174,6 +1178,13 @@ def _gate_block_reason(
     return None
 
 
+class _GateUnavailable:
+    """Sol A21: a quality check that was meant to run but could not."""
+
+    def __init__(self, error: BaseException) -> None:
+        self.error = f"{type(error).__name__}: {error}"[:300]
+
+
 async def _run_advisory_quality_gates(
     *,
     task_id: int,
@@ -1267,7 +1278,7 @@ async def _run_advisory_quality_gates(
                 subtask_id,
                 exc,
             )
-            return None
+            return _GateUnavailable(exc)
 
     async def _run_architecture() -> Any:
         try:
@@ -1280,7 +1291,7 @@ async def _run_advisory_quality_gates(
                 subtask_id,
                 exc,
             )
-            return None
+            return _GateUnavailable(exc)
 
     async def _run_dependency() -> Any:
         try:
@@ -1296,7 +1307,7 @@ async def _run_advisory_quality_gates(
                 subtask_id,
                 exc,
             )
-            return None
+            return _GateUnavailable(exc)
 
     async def _run_regression() -> Any:
         # T2-B5 (#456) — compare_to_baseline()'s own _get_baseline() calls
@@ -1316,7 +1327,7 @@ async def _run_advisory_quality_gates(
                 agent_name,
                 exc,
             )
-            return None
+            return _GateUnavailable(exc)
 
     async def _run_documentation() -> Any:
         if not worktree_path or not files_changed:
@@ -1331,7 +1342,7 @@ async def _run_advisory_quality_gates(
                 subtask_id,
                 exc,
             )
-            return None
+            return _GateUnavailable(exc)
 
     (
         security_result,
@@ -1356,11 +1367,53 @@ async def _run_advisory_quality_gates(
     tokens_in = 0
     tokens_out = 0
     block_reason: str | None = None
+    settings = get_settings()
+    required = {g.lower() for g in settings.required_quality_gates}
+    llm_results: list[tuple[str, Any]] = []
     for label, result in (
         ("security", security_result),
         ("architecture", arch_result),
         ("dependency", dependency_result),
     ):
+        # A reviewer that ended "failed"/"blocked" gave no verdict either.
+        if result is not None and not isinstance(result, _GateUnavailable):
+            if getattr(result, "status", "completed") in ("failed", "blocked"):
+                tokens_in += result.tokens_in
+                tokens_out += result.tokens_out
+                result = _GateUnavailable(RuntimeError(result.summary or result.status))
+        llm_results.append((label, result))
+    for label, result in llm_results:
+        if isinstance(result, _GateUnavailable):
+            # Sol A21: a check that crashed used to count as passed.
+            this_block_reason = (
+                f"the {label} check could not run ({result.error}); it is "
+                "required, so this step is not done until it runs"
+                if settings.quality_gates_fail_closed and label in required
+                else None
+            )
+            if this_block_reason and block_reason is None:
+                block_reason = this_block_reason
+            await publish_event(
+                GridironEvent(
+                    event_type=(
+                        "subtask.advisory_gate_blocked"
+                        if this_block_reason
+                        else "subtask.advisory_gate_unavailable"
+                    ),
+                    task_id=str(task_id),
+                    epic_id=epic_id,
+                    payload={
+                        "subtask_id": subtask_id,
+                        "gate": label,
+                        "state": "unavailable",
+                        "error": result.error,
+                        "block_reason": this_block_reason,
+                    },
+                    emitted_by="manager",
+                ),
+                db=db,
+            )
+            continue
         if result is None:
             continue
         tokens_in += result.tokens_in
@@ -1425,6 +1478,12 @@ async def _run_advisory_quality_gates(
     # No LLM tokens (it's pure math over already-collected metrics), and its
     # own `blocked` already encodes "a real regression past
     # benchmark_regression_threshold" — no separate severity filter needed.
+    if isinstance(regression_gate, _GateUnavailable):
+        logger.warning("Regression check unavailable: %s", regression_gate.error)
+        regression_gate = None
+    if isinstance(doc_report, _GateUnavailable):
+        logger.warning("Documentation check unavailable: %s", doc_report.error)
+        doc_report = None
     if regression_gate is not None:
         this_block_reason = regression_gate.reason if regression_gate.blocked else None
         if this_block_reason and block_reason is None:

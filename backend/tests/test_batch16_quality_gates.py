@@ -110,7 +110,12 @@ class TestRunAdvisoryQualityGates:
 
         assert tokens_in == 20  # arch + dep
         assert tokens_out == 40
-        assert block_reason is None
+        # UPDATED (Sol A21, 2026-10-12): a crashed check used to count as
+        # passed. Security is a required check, so it now blocks (and the
+        # step is retried); tests/test_a21_gates_fail_closed.py has the rest.
+        assert block_reason is not None and "security check could not run" in (
+            block_reason
+        )
 
     def test_critical_security_finding_blocks(self) -> None:
         from app.agents.manager import _run_advisory_quality_gates
