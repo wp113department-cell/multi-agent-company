@@ -76,3 +76,12 @@ describe("approveTaskPlan", () => {
     expect(init.method).toBe("POST");
   });
 });
+
+describe("createTask priority (Sol A34)", () => {
+  it.each(["low", "medium", "high"] as const)("sends priority %s to the backend", async (priority) => {
+    const mockFetch = mockFetchOk({ id: 1 });
+    await createTask({ title: "t", description: "d", priority });
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body)).priority).toBe(priority);
+  });
+});

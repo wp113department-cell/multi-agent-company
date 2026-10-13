@@ -14,6 +14,7 @@ network; skips without Docker.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import time
@@ -91,7 +92,7 @@ def _script(
     for k, v in env.items():
         envs += ["-e", f"{k}={v}"]
     return _docker(
-        "run", "--rm", "--network", drill["net"], "--user", "root",
+        "run", "--rm", "--network", drill["net"], "--user", f"{os.getuid()}:{os.getgid()}",
         "-v", f"{ROOT / 'scripts'}:/scripts:ro",
         "-v", f"{drill['work'] / 'backups'}:/backups",
         "-v", f"{drill['work'] / 'repos'}:/data/repos:ro",
