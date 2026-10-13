@@ -71,6 +71,8 @@ interface ConfirmMessage {
   details: string;
   resolved?: boolean;
   answer?: boolean;
+  /** Sol A37: the answer is on its way to the server */
+  sending?: boolean;
 }
 
 type ChatMessage = TextMessage | ToolCallMessage | ConfirmMessage;
@@ -221,12 +223,14 @@ function ConfirmBlock({
       <div className="flex gap-2">
         <button
           onClick={() => onConfirm(msg.actionId, true)}
-          className="rounded-lg bg-green-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-green-700"
+          disabled={msg.sending}
+          className="rounded-lg bg-green-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
         >
-          Approve
+          {msg.sending ? "Sending…" : "Approve"}
         </button>
         <button
           onClick={() => onConfirm(msg.actionId, false)}
+          disabled={msg.sending}
           className="rounded-lg border border-red-300 px-4 py-1.5 text-sm font-medium text-red-600 hover:bg-red-50 dark:border-red-700 dark:text-red-400"
         >
           Deny
@@ -379,6 +383,23 @@ export default function ChatPage() {
     [streaming, sessionId],
   );
 
+  // Sol A37 (2026-10-13): the open chat is kept in the page address, so a
+  // refresh (or a shared link) reopens it instead of losing it.
+  const restoredRef = useRef(false);
+  useEffect(() => {
+    if (!restoredRef.current) return; // the restore below reads it first
+    const url = new URL(window.location.href);
+    if (sessionId) url.searchParams.set("chat", sessionId);
+    else url.searchParams.delete("chat");
+    window.history.replaceState(null, "", url.toString());
+  }, [sessionId]);
+  useEffect(() => {
+    if (restoredRef.current) return;
+    restoredRef.current = true;
+    const id = new URLSearchParams(window.location.search).get("chat");
+    if (id) void openChat({ id } as ChatSummary);
+  }, [openChat]);
+
   const saveRename = useCallback(async () => {
     if (!renamingId) return;
     const title = renameText.trim();
@@ -413,16 +434,18 @@ export default function ChatPage() {
   const handleConfirm = useCallback(
     async (actionId: string, approved: boolean) => {
       if (!sessionId) return;
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.kind === "confirm" && m.actionId === actionId
-            ? { ...m, resolved: true, answer: approved }
-            : m,
-        ),
-      );
+      // Sol A37: shown as answered only once the server accepted it — a
+      // failed confirmation used to look approved while nothing happened.
+      const mark = (patch: Partial<ConfirmMessage>) =>
+        setMessages((prev) =>
+          prev.map((m) => (m.kind === "confirm" && m.actionId === actionId ? { ...m, ...patch } : m)),
+        );
+      mark({ sending: true });
       try {
         await confirmChatAction(sessionId, actionId, approved);
+        mark({ sending: false, resolved: true, answer: approved });
       } catch (e: unknown) {
+        mark({ sending: false });
         setError(e instanceof Error ? e.message : String(e));
       }
     },
@@ -699,6 +722,13 @@ export default function ChatPage() {
           handleSseEvent(event);
         }
         if (reachedTerminalRef.current) break;
+      }
+      // Sol A37: the stream ended without its final event (a proxy or the
+      // server closed it early) — reattach instead of stopping half-way.
+      if (!reachedTerminalRef.current) {
+        dispatchedReconnect = true;
+        reconnect(sessionId, 0);
+        return;
       }
     } catch (e: unknown) {
       if ((e as Error).name === "AbortError") return;
