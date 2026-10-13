@@ -47,7 +47,9 @@ class ResumePayload(BaseModel):
 
 @router.get("/{task_id}/stream")
 async def stream_task_events(
-    task_id: str, _actor: str = Depends(require_authenticated)
+    task_id: str,
+    after: int = 0,
+    _actor: str = Depends(require_authenticated),
 ) -> StreamingResponse:
     """SSE event stream for a running task.
 
@@ -68,7 +70,8 @@ async def stream_task_events(
         # OpenCode's real constant); the previous 30s meant the plan's own
         # "heartbeat tested with 16s wait" success criterion could never
         # observe one in time.
-        async for event in stream.subscribe(timeout=15.0):
+        # Sol A36: ?after=<seq> resumes after the last event the client has
+        async for event in stream.subscribe(timeout=15.0, after=max(0, after)):
             payload = json.dumps(event, default=str)
             yield f"data: {payload}\n\n"
 

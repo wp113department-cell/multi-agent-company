@@ -114,6 +114,9 @@ class TaskStream:
     def __init__(self, task_id: str | int, *, durable: bool = False) -> None:
         self.task_id = str(task_id)
         self._history: deque[dict[str, Any]] = deque(maxlen=_HISTORY_MAXLEN)
+        # Sol A36: every event gets the next number, so a reconnecting
+        # client can ask for "after N" and drop anything it already has.
+        self._seq = 0
         self._subscriber_queues: list[asyncio.Queue[dict[str, Any]]] = []
         self._state_lock = threading.Lock()
         self._abort_event = threading.Event()
@@ -183,6 +186,8 @@ class TaskStream:
         event.setdefault("task_id", self.task_id)
         event.setdefault("ts", time.time())
         with self._state_lock:
+            self._seq += 1
+            event["seq"] = self._seq
             self._history.append(event)
             queues = list(self._subscriber_queues)
             self.last_activity = time.monotonic()
@@ -322,7 +327,7 @@ class TaskStream:
             return None
 
     async def subscribe(
-        self, timeout: float = 60.0
+        self, timeout: float = 60.0, after: int = 0
     ) -> AsyncGenerator[dict[str, Any], None]:
         """Async generator — yields events until 'done', 'error', or
         'stopped'. Each call gets its own queue (real fan-out): concurrent
@@ -337,6 +342,8 @@ class TaskStream:
             self._subscriber_queues.append(queue)
         try:
             for event in history_snapshot:
+                if int(event.get("seq", 0)) <= after:
+                    continue  # Sol A36: the client already has it
                 yield event
                 if event.get("type") in ("done", "error", "stopped"):
                     return
@@ -345,6 +352,8 @@ class TaskStream:
                     event = await asyncio.wait_for(queue.get(), timeout=timeout)
                 except asyncio.TimeoutError:
                     yield {"type": "ping", "ts": time.time()}
+                    continue
+                if int(event.get("seq", 0)) <= after:
                     continue
                 yield event
                 if event.get("type") in ("done", "error", "stopped"):

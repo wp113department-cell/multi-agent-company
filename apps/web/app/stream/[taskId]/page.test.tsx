@@ -65,7 +65,7 @@ describe("ActivityFeedPage SSE reconnect-with-backoff", () => {
   it("opens exactly one connection on mount", async () => {
     render(<ActivityFeedPage />);
     await vi.waitFor(() => expect(FakeEventSource.instances.length).toBe(1));
-    expect(getInstance(0).url).toBe("/api/tasks/task-1/stream");
+    expect(getInstance(0).url).toBe("/api/tasks/task-1/stream?after=0");
   });
 
   it("reconnects with backoff after a transient connection error", async () => {
@@ -91,10 +91,36 @@ describe("ActivityFeedPage SSE reconnect-with-backoff", () => {
     await act(() => vi.advanceTimersByTimeAsync(1000));
 
     await vi.waitFor(() => expect(FakeEventSource.instances.length).toBe(2));
-    expect(getInstance(1).url).toBe("/api/tasks/task-1/stream");
+    expect(getInstance(1).url).toBe("/api/tasks/task-1/stream?after=0");
 
     act(() => getInstance(1).onopen?.());
     await vi.waitFor(() => expect(screen.getByText("running")).toBeInTheDocument());
+  });
+
+  it("a reconnect resumes after the last event and never shows it twice (Sol A36)", async () => {
+    render(<ActivityFeedPage />);
+    await vi.waitFor(() => expect(FakeEventSource.instances.length).toBe(1));
+    const first = getInstance(0);
+    const send = (es: FakeEventSource, seq: number) =>
+      act(() =>
+        es.onmessage?.({
+          data: JSON.stringify({ type: "thinking", content: "x", agent: `step${seq}`, ts: seq, seq }),
+        } as MessageEvent),
+      );
+    act(() => first.onopen?.());
+    send(first, 1);
+    send(first, 2);
+    act(() => first.onerror?.());
+    await act(() => vi.advanceTimersByTimeAsync(1000));
+    await vi.waitFor(() => expect(FakeEventSource.instances.length).toBe(2));
+    const second = getInstance(1);
+    expect(second.url).toBe("/api/tasks/task-1/stream?after=2");
+    act(() => second.onopen?.());
+    send(second, 2); // a replayed duplicate
+    send(second, 3);
+    await vi.waitFor(() => expect(screen.getByText("step3 thinking…")).toBeInTheDocument());
+    expect(screen.getAllByText("step2 thinking…")).toHaveLength(1);
+    expect(screen.getAllByText(/^step\d thinking…$/)).toHaveLength(3);
   });
 
   it("does NOT reconnect after a genuine terminal event from the server", async () => {

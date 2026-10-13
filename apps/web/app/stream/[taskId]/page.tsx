@@ -28,6 +28,9 @@ import { Icon } from "../../../components/Icon";
 // Types
 // ---------------------------------------------------------------------------
 
+/** Sol A36: only the latest events are kept on screen during long tasks. */
+const MAX_EVENTS_SHOWN = 1000;
+
 type ActivityEvent =
   | { type: "thinking"; content: string; agent: string; ts: number }
   | { type: "tool_call"; tool: string; input: Record<string, unknown>; id: string; ts: number }
@@ -181,6 +184,10 @@ export default function ActivityFeedPage() {
   const esRef = useRef<EventSource | null>(null);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reachedTerminalRef = useRef(false);
+  // Sol A36 (2026-10-13): the number of the last event shown. A reconnect
+  // asks the server for events after it, and anything already shown is
+  // dropped, so a reconnect never duplicates the history.
+  const lastSeqRef = useRef(0);
 
   // Gap-closure Stage 1.4 (answers.md) — MAX_RECONNECT_ATTEMPTS/BASE_DELAY_MS
   // bound reconnect-with-backoff: before this, es.onerror unconditionally
@@ -210,7 +217,7 @@ export default function ActivityFeedPage() {
       setStatus(attempt === 0 ? "connecting" : "reconnecting");
       setReconnectAttempt(attempt);
 
-      const es = new EventSource(`/api/tasks/${taskId}/stream`);
+      const es = new EventSource(`/api/tasks/${taskId}/stream?after=${lastSeqRef.current}`);
       esRef.current = es;
 
       es.onopen = () => {
@@ -223,7 +230,16 @@ export default function ActivityFeedPage() {
           const event = JSON.parse(e.data) as ActivityEvent;
           if (event.type === "ping") return;
 
-          setEvents(prev => [...prev, event]);
+          const seq = (event as { seq?: number }).seq;
+          if (typeof seq === "number") {
+            if (seq <= lastSeqRef.current) return; // already shown
+            lastSeqRef.current = seq;
+          }
+          // keep the page light during very long tasks
+          setEvents(prev => {
+            const next = [...prev, event];
+            return next.length > MAX_EVENTS_SHOWN ? next.slice(-MAX_EVENTS_SHOWN) : next;
+          });
 
           if (event.type === "token_usage") {
             setTokenUsage({ in: event.tokens_in, out: event.tokens_out, cost: event.cost_usd });
