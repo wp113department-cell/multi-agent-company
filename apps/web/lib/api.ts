@@ -196,10 +196,15 @@ export async function createTask(input: {
   epicId?: string | null;
   priority?: "low" | "medium" | "high";
   executionMode?: "economy" | "max";
+  /** Sol A33: the same key for every attempt of one form submission */
+  idempotencyKey?: string;
 }): Promise<DevTask> {
   const res = await apiFetch(`/api/tasks`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(input.idempotencyKey ? { "Idempotency-Key": input.idempotencyKey } : {}),
+    },
     body: JSON.stringify({
       title: input.title,
       description: input.description,

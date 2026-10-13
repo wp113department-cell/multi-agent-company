@@ -9,6 +9,7 @@ import {
   extractPdfs,
   fetchAppSettings,
   uploadTaskImages,
+  type DevTask,
   type PdfFileResult,
   type ProjectDetail,
 } from "../lib/api";
@@ -191,9 +192,16 @@ export function NewTaskForm({ project }: { project: ProjectDetail | null }) {
     return text;
   }
 
+  // Sol A33 (2026-10-13): a task whose image upload failed used to be
+  // created again on the next submit. The created task is kept until its
+  // images are uploaded, so the next press only retries the upload, and one
+  // idempotency key covers every attempt of this submission.
+  const [pendingTask, setPendingTask] = useState<DevTask | null>(null);
+  const submissionKey = useRef<string>(crypto.randomUUID());
+
   const mutation = useMutation({
     mutationFn: async () => {
-      const task = await createTask({
+      const task = pendingTask ?? await createTask({
         title: titleFrom(description),
         description: buildFinalDescription(),
         projectId: project?.id ?? null,
@@ -201,15 +209,27 @@ export function NewTaskForm({ project }: { project: ProjectDetail | null }) {
         epicId: epicId || null,
         priority,
         executionMode: mode,
+        idempotencyKey: submissionKey.current,
       });
       if (images.length > 0) {
         // Images are stored against a real task_id (unlike PDFs, which just
         // extract text client-side) — upload happens after task creation.
-        await uploadTaskImages(task.id, images);
+        setPendingTask(task);
+        try {
+          await uploadTaskImages(task.id, images);
+        } catch (e) {
+          const why = e instanceof Error ? e.message : "upload failed";
+          throw new Error(
+            `The task "${task.title}" was created, but its images did not upload (${why}). ` +
+              "Press the button again to retry the upload — no second task is created.",
+          );
+        }
       }
       return task;
     },
     onSuccess: (task) => {
+      setPendingTask(null);
+      submissionKey.current = crypto.randomUUID();
       setCreated(task.title);
       setDescription("");
       setPdfs([]);
@@ -531,7 +551,13 @@ export function NewTaskForm({ project }: { project: ProjectDetail | null }) {
           disabled={!canSubmit || mutation.isPending}
           className="rounded-lg bg-orange-600 px-6 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
         >
-          {mutation.isPending ? "Creating…" : "Create task"}
+          {mutation.isPending
+            ? pendingTask
+              ? "Uploading…"
+              : "Creating…"
+            : pendingTask
+              ? "Retry image upload"
+              : "Create task"}
         </button>
       </div>
     </form>
