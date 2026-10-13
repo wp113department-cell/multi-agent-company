@@ -201,12 +201,12 @@ Each batch groups items that touch the same code, so nothing is fixed twice.
 | 11 | A40 | Readiness endpoint | P1 | ✅ done, local (not pushed) | test_a40_readiness |
 | 11 | A42 | run.sh dev-only, visible errors | P2 | ✅ done, local (not pushed) | run.sh dev-only, 127.0.0.1, named DB volume, migrations fail loudly |
 | 11 | A44 | Non-root frontend, CSP | P3 | 🟡 runtime done (non-root, nonce CSP); accessibility part in Batch 12 | apps/web/middleware.test.ts + browser check |
-| 12 | A32 | Task pagination | P1/P2 | ⬜ | |
-| 12 | A33 | No duplicate task on upload failure | P1/P2 | ⬜ | |
-| 12 | A34 | Priority sent | P2 | ⬜ | |
-| 12 | A35 | Errors and session expiry shown | P2 | ⬜ | |
-| 12 | A36 | Stream dedup on reconnect | P2 | ⬜ | |
-| 12 | A37 | Chat history and confirmations | P2 | ⬜ | |
+| 12 | A32 | Task pagination | P1/P2 | ✅ done, local (not pushed) | test_a32_task_paging (cursor off-by-one fixed) |
+| 12 | A33 | No duplicate task on upload failure | P1/P2 | ✅ done, local (not pushed) | NewTaskForm.test.tsx |
+| 12 | A34 | Priority sent | P2 | ✅ done, local (not pushed) | lib/api.test.ts (already fixed in UI redesign) |
+| 12 | A35 | Errors and session expiry shown | P2 | ✅ done, local (not pushed) | lib/api.test.ts + task list errors |
+| 12 | A36 | Stream dedup on reconnect | P2 | ✅ done, local (not pushed) | test_a36_stream_resume + stream page test |
+| 12 | A37 | Chat history and confirmations | P2 | ✅ done, local (not pushed) | chat refresh/confirm/early-EOF |
 | 12 | A38 | Streaming render performance | P2 | ⬜ | |
 | 12 | G13 | Frontend XSS | P3 | ⬜ | |
 | 13 | A41 | Real-stack CI journeys, safe inputs | P2 | ⬜ | |
@@ -717,4 +717,13 @@ Every item gets a full local CI before each push. Close heavy apps first, becaus
   - CSP moved to `middleware.ts` with a fresh nonce per request: production `script-src 'self' 'nonce-…' 'strict-dynamic'` (no `unsafe-inline` for scripts); development keeps the policy Fast Refresh needs. The root layout reads the request headers so every page is rendered per request and carries its nonce. Verified in a real browser on the production build: 5/5 inline scripts carry the nonce, no CSP violations, the page is interactive. Inline *styles* stay allowed (Tailwind, next/font).
   - The frontend image runs as the unprivileged `node` user and starts Next directly (pnpm via corepack would try to download itself as a non-root user); verified: user `node`, `/login` 200 with the nonce policy.
   - Tests: `apps/web/middleware.test.ts` (3). The accessibility part of A44 (keyboard/focus/axe journeys) is in Batch 12.
+- **2026-10-13: GitHub CI on `bca91d47` (everything up to yesterday, pushed by the owner): 9,457 passed, 1 failed** — the A39 drill edited a file its container created as root (GitHub runs Docker natively). Fixed in `0936ad02` (the drill's containers run as the test user). CI scripts moved to `~/.local/share/crr2906-ci/` (reboot-proof).
+- **2026-10-13: Batch 12 (part): A32–A37. DONE (local).** Remaining in Batch 12: A38 (render performance), G13 (frontend XSS), A44 accessibility.
+  - **A32:** the task list pages with a cursor ("Load older tasks"), filters by status on the server and shows real per-status counts (`GET /api/tasks/counts`). **Real bug:** the next-page cursor pointed at the first task of the next page, which was then skipped — one task lost at every page boundary.
+  - **A33:** a failed image upload no longer creates a second task: the created task is kept and the button becomes "Retry image upload"; one Idempotency-Key per submission.
+  - **A34:** already fixed in the UI redesign; a test locks priority low/medium/high in the payload.
+  - **A35:** task-list load errors show with Retry; Stop/Resume check the server's answer (Resume keeps the message on failure); a 401 anywhere sends the user to login with an expiry note and back to the page they were on.
+  - **A36:** activity events are numbered; a reconnect asks for events after the last one and drops repeats; the page keeps the latest 1,000 events. Also fixed: a resumed task's live view ended at the old "stopped" event on reconnect.
+  - **A37:** the open chat is kept in the address (`?chat=`) so a refresh reopens it; a confirmation counts only after the server accepts it; a stream that ends early reattaches.
+- **Next session:** check local CI (started on `5a7d9861`), run it on the latest commit, push, confirm GitHub; then A38, G13, A44 accessibility, Batches 13–14; web-search API key decision.
 
