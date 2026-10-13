@@ -44,5 +44,12 @@ COPY --from=build /repo/apps/web/next.config.mjs ./apps/web/next.config.mjs
 COPY --from=deps /repo/node_modules ./node_modules
 COPY --from=deps /repo/apps/web/node_modules ./apps/web/node_modules
 
+# Sol A44 (2026-10-13): run as the image's unprivileged `node` user, not
+# root. Next.js writes its cache under .next at runtime, so that folder is
+# handed to `node`. Started with node directly: pnpm via corepack would look
+# for its cache in the non-root user's home and try to download pnpm.
+RUN chown -R node:node /repo/apps/web/.next
+USER node
+WORKDIR /repo/apps/web
 EXPOSE 3000
-CMD ["pnpm", "--filter", "@gridiron/web", "run", "start"]
+CMD ["node", "node_modules/next/dist/bin/next", "start", "-p", "3000"]

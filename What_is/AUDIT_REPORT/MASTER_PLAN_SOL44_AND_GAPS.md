@@ -197,10 +197,10 @@ Each batch groups items that touch the same code, so nothing is fixed twice.
 | 10 | G6 | Prompt version auto-rollback | P2 | ✅ done, local (not pushed) | test_g6_prompt_rollback |
 | 10 | A26 | Baselines and held-out task suite | P1/P2 | 🟡 code done; live held-out run needs D3 | test_a26_eval_baselines |
 | 11 | A29 | Frontend → backend in compose | P1 | ✅ done (earlier) | 1100c832 — frontend image proxies to backend:8000; owner's Windows compose run worked |
-| 11 | A30 | Volume ownership | P1 | ✅ done, local (not pushed) | backend/Dockerfile creates /data owned by appuser; fresh-volume proof pending (Docker build) |
+| 11 | A30 | Volume ownership | P1 | ✅ done, local (not pushed) | fresh-volume proof 2026-10-13 + test_a30_data_volume_ownership |
 | 11 | A40 | Readiness endpoint | P1 | ✅ done, local (not pushed) | test_a40_readiness |
 | 11 | A42 | run.sh dev-only, visible errors | P2 | ✅ done, local (not pushed) | run.sh dev-only, 127.0.0.1, named DB volume, migrations fail loudly |
-| 11 | A44 | Non-root frontend, CSP | P3 | ⬜ | |
+| 11 | A44 | Non-root frontend, CSP | P3 | 🟡 runtime done (non-root, nonce CSP); accessibility part in Batch 12 | apps/web/middleware.test.ts + browser check |
 | 12 | A32 | Task pagination | P1/P2 | ⬜ | |
 | 12 | A33 | No duplicate task on upload failure | P1/P2 | ⬜ | |
 | 12 | A34 | Priority sent | P2 | ⬜ | |
@@ -710,5 +710,11 @@ Every item gets a full local CI before each push. Close heavy apps first, becaus
   - **A30:** the backend image now creates `/data`, `/data/worktrees` and `/data/repos` owned by the non-root user, so fresh named volumes start writable. Still to do: prove it with a fresh-volume container run (clone, worktree, registry write).
   - **A40:** new `GET /ready` (readiness) checks loaded agents, a running queue worker (RQ), durable progress (when required), writable worktree/repo storage and the code sandbox; any failure answers 503 naming it. `/health` stays the liveness probe. 6 tests in `tests/test_a40_readiness.py`.
   - **A42:** `run.sh` is marked development-only and refuses `DEPLOYMENT_ENV=production`; database, backend and frontend listen on 127.0.0.1 only; the database keeps its data in the `gridiron-pgdata` volume; a failed migration stops start-up instead of being hidden.
-- **Next session (2026-10-13):** check the local CI run on `4c2b2163`, run CI on the latest commit, push and confirm GitHub green; A30 fresh-volume proof; A44; Batches 12–14.
+- **2026-10-13: local CI on `4c2b2163` fully green (15/15 steps).** The owner committed the ddgs web-search switch (`bca91d47`, "enhanced web search") and pushed everything up to it; GitHub CI run 38360293934 checks it.
+- **2026-10-13: web_search fixed.** `duckduckgo_search` (renamed upstream) returned no results even for "python"; switched to `ddgs==9.16.0`, which returned the right results (official LangGraph docs first) until the search sites rate-limited this machine after repeated test searches. Owner decision pending: optional Brave/Tavily API key with the free search as fallback.
+- **2026-10-13: A30 proven.** From the built image with brand-new named volumes, as `appuser`: clone into `/data/repos`, worktree in `/data/worktrees`, registry write in `/data`. `tests/test_a30_data_volume_ownership.py` keeps the Dockerfile rule.
+- **2026-10-13: A44 runtime part. DONE (local).**
+  - CSP moved to `middleware.ts` with a fresh nonce per request: production `script-src 'self' 'nonce-…' 'strict-dynamic'` (no `unsafe-inline` for scripts); development keeps the policy Fast Refresh needs. The root layout reads the request headers so every page is rendered per request and carries its nonce. Verified in a real browser on the production build: 5/5 inline scripts carry the nonce, no CSP violations, the page is interactive. Inline *styles* stay allowed (Tailwind, next/font).
+  - The frontend image runs as the unprivileged `node` user and starts Next directly (pnpm via corepack would try to download itself as a non-root user); verified: user `node`, `/login` 200 with the nonce policy.
+  - Tests: `apps/web/middleware.test.ts` (3). The accessibility part of A44 (keyboard/focus/axe journeys) is in Batch 12.
 

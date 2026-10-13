@@ -2,8 +2,49 @@ import { NextRequest, NextResponse } from "next/server";
 
 const PUBLIC_PATHS = ["/login", "/api/auth/login", "/api/auth/setup"];
 
+const isDev = process.env.NODE_ENV !== "production";
+
+/**
+ * Sol A44 (2026-10-13): Content-Security-Policy with a fresh nonce per
+ * request. In production only scripts carrying this request's nonce run
+ * ('strict-dynamic' lets them load the app's own chunks), so script-src no
+ * longer needs 'unsafe-inline'. `next dev` keeps the looser policy: Fast
+ * Refresh needs eval and inline scripts. Inline *styles* stay allowed
+ * (Tailwind and next/font inject them).
+ */
+function contentSecurityPolicy(nonce: string): string {
+  const scriptSrc = isDev
+    ? "script-src 'self' 'unsafe-inline' 'unsafe-eval'"
+    : `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`;
+  return [
+    "default-src 'self'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+    "img-src 'self' data: blob:",
+    "object-src 'none'",
+    scriptSrc,
+    "style-src 'self' 'unsafe-inline'",
+    "connect-src 'self'",
+  ].join("; ");
+}
+
 export function middleware(request: NextRequest) {
+  const nonce = btoa(crypto.randomUUID());
+  const csp = contentSecurityPolicy(nonce);
+  const requestHeaders = new Headers(request.headers);
+  // Next.js reads the nonce from the request's CSP header and adds it to
+  // the scripts it renders.
+  requestHeaders.set("x-nonce", nonce);
+  requestHeaders.set("Content-Security-Policy", csp);
+  const response = route(request, requestHeaders);
+  response.headers.set("Content-Security-Policy", csp);
+  return response;
+}
+
+function route(request: NextRequest, requestHeaders: Headers): NextResponse {
   const { pathname } = request.nextUrl;
+  const next = () => NextResponse.next({ request: { headers: requestHeaders } });
 
   // Allow public paths and static assets
   if (
@@ -12,7 +53,7 @@ export function middleware(request: NextRequest) {
     pathname.startsWith("/favicon") ||
     pathname.includes(".")
   ) {
-    return NextResponse.next();
+    return next();
   }
 
   // Check for JWT in Authorization header (API calls) or cookie
@@ -22,7 +63,7 @@ export function middleware(request: NextRequest) {
   const tokenCookie = rawCookie ? decodeURIComponent(rawCookie) : undefined;
 
   if (authHeader?.startsWith("Bearer ") || tokenCookie) {
-    return NextResponse.next();
+    return next();
   }
 
   // For browser navigation (no auth header), redirect to login
@@ -35,7 +76,7 @@ export function middleware(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  return NextResponse.next();
+  return next();
 }
 
 export const config = {

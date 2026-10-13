@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import { Press_Start_2P, Space_Grotesk } from "next/font/google";
 import "./globals.css";
 import { Providers } from "./providers";
@@ -18,7 +19,11 @@ export const metadata: Metadata = {
     "Multi Agentic Company: a team of specialised AI agents that plans, codes, tests and reviews software, with humans approving every important step.",
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  // Sol A44: reading the request headers renders every page per request, so
+  // each response's scripts carry that request's CSP nonce (a page built
+  // ahead of time could not).
+  await headers();
   return (
     <html lang="en" className={`${arcade.variable} ${sans.variable}`}>
       <body className="min-h-screen overflow-x-hidden text-slate-900 dark:text-slate-100">
