@@ -18,7 +18,7 @@ groq==1.5.0
 google-genai==2.25.0  # TEMPORARY, easily removable — see app/agents/gemini_adapter.py's own docstring
 langgraph-checkpoint-postgres==3.1.1
 psycopg[binary]==3.3.4
-duckduckgo-search==8.1.1
+ddgs==9.16.0
 playwright==1.61.0
 pdfplumber==0.11.10
 rq==2.10.0

@@ -89,7 +89,9 @@ def web_search_handler(inp: dict[str, Any]) -> str:
     if not query:
         return "[ERROR] query is required"
     try:
-        from duckduckgo_search import DDGS
+        # 2026-10-13: `duckduckgo_search` was renamed upstream to `ddgs`; the
+        # old package returned no results at all (even for "python").
+        from ddgs import DDGS
 
         results = list(DDGS().text(query, max_results=5))
         if not results:

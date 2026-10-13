@@ -74,9 +74,9 @@ def test_web_search_handler_handles_library_exceptions_gracefully(monkeypatch) -
         def text(self, *args, **kwargs):
             raise RuntimeError("simulated network failure")
 
-    import duckduckgo_search
+    import ddgs
 
-    monkeypatch.setattr(duckduckgo_search, "DDGS", lambda: _BoomDDGS())
+    monkeypatch.setattr(ddgs, "DDGS", lambda: _BoomDDGS())
     result = web_search_module.web_search_handler({"query": "anything"})
     assert result.startswith("[ERROR] web_search failed:")
 
@@ -95,9 +95,9 @@ def test_web_search_handler_truncates_long_output(monkeypatch) -> None:
                 for i in range(5)
             ]
 
-    import duckduckgo_search
+    import ddgs
 
-    monkeypatch.setattr(duckduckgo_search, "DDGS", lambda: _HugeDDGS())
+    monkeypatch.setattr(ddgs, "DDGS", lambda: _HugeDDGS())
     result = web_search_module.web_search_handler({"query": "anything"})
     assert len(result) <= 6000
 
