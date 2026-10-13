@@ -22,8 +22,25 @@ async function apiFetch(input: RequestInfo | URL, init: RequestInit = {}): Promi
   });
 }
 
+/**
+ * Sol A35 (2026-10-13): one place for an expired or revoked login. A 401 on
+ * any API call sends the user to the login page (keeping where they were)
+ * instead of each page showing its own confusing error.
+ */
+export function redirectIfSessionExpired(status: number): void {
+  if (
+    status === 401 &&
+    typeof window !== "undefined" &&
+    !window.location.pathname.startsWith("/login")
+  ) {
+    const from = window.location.pathname + window.location.search;
+    window.location.assign(`/login?expired=1&from=${encodeURIComponent(from)}`);
+  }
+}
+
 async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
+    redirectIfSessionExpired(res.status);
     const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
     // Production audit 14: the account must change its password first.
     if (
@@ -121,6 +138,32 @@ export interface ArtifactRecord {
 // ---------------------------------------------------------------------------
 // Task CRUD
 // ---------------------------------------------------------------------------
+
+/** Sol A32: one page of a project's tasks, newest first, plus the cursor
+ * for the next (older) page. */
+export async function fetchTaskPage(input: {
+  projectId?: number | null;
+  status?: string;
+  cursor?: number | null;
+  limit?: number;
+}): Promise<{ tasks: DevTask[]; nextCursor: number | null }> {
+  const params = new URLSearchParams();
+  if (input.status && input.status !== "all") params.set("status", input.status);
+  if (input.projectId != null) params.set("project_id", String(input.projectId));
+  if (input.cursor != null) params.set("cursor", String(input.cursor));
+  params.set("limit", String(input.limit ?? 50));
+  const res = await apiFetch(`/api/tasks?${params.toString()}`, { cache: "no-store" });
+  const data = await handleResponse<{ tasks: DevTask[]; nextCursor: number | null }>(res);
+  return { tasks: data.tasks, nextCursor: data.nextCursor ?? null };
+}
+
+/** Sol A32: tasks per status for the whole project (not just one page). */
+export async function fetchTaskCounts(
+  projectId: number,
+): Promise<{ counts: Record<string, number>; total: number }> {
+  const res = await apiFetch(`/api/tasks/counts?project_id=${projectId}`, { cache: "no-store" });
+  return handleResponse(res);
+}
 
 export async function fetchTasks(
   status?: string,

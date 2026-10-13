@@ -8,10 +8,11 @@
 import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { NewTaskForm } from "../../components/NewTaskForm";
 import {
-  fetchTasks,
+  fetchTaskCounts,
+  fetchTaskPage,
   getCurrentProjectId,
   getProject,
   listProjects,
@@ -144,19 +145,32 @@ function TasksInner() {
     enabled: projectId != null,
   });
 
-  const { data: tasks = [], isLoading } = useQuery({
-    queryKey: ["tasks", "project", projectId],
-    queryFn: () => fetchTasks(undefined, null, projectId, 100),
+  // Sol A32: the list is paged on the server (newest first, "Load older
+  // tasks" fetches the next page) and the status filter is applied there,
+  // so older and filtered tasks are reachable. Counts come from the server
+  // for the whole project, not from the loaded page.
+  const taskPages = useInfiniteQuery({
+    queryKey: ["tasks", "project", projectId, filter],
+    queryFn: ({ pageParam }) =>
+      fetchTaskPage({ projectId, status: filter, cursor: pageParam, limit: 50 }),
+    initialPageParam: null as number | null,
+    getNextPageParam: (last) => last.nextCursor,
     enabled: projectId != null,
     refetchInterval: 4000,
   });
-
-  const counts = useMemo(() => {
-    const c: Record<string, number> = {};
-    for (const t of tasks) c[t.status] = (c[t.status] ?? 0) + 1;
-    return c;
-  }, [tasks]);
-  const shown = filter === "all" ? tasks : tasks.filter((t) => t.status === filter);
+  const shown = useMemo(
+    () => (taskPages.data?.pages ?? []).flatMap((p) => p.tasks),
+    [taskPages.data],
+  );
+  const isLoading = taskPages.isLoading;
+  const { data: countData } = useQuery({
+    queryKey: ["tasks", "counts", projectId],
+    queryFn: () => fetchTaskCounts(projectId as number),
+    enabled: projectId != null,
+    refetchInterval: 4000,
+  });
+  const counts = countData?.counts ?? {};
+  const total = countData?.total ?? shown.length;
   const waitingForYou = counts.ready_for_review ?? 0;
 
   if (!loadingProjects && projects.length === 0) {
@@ -214,7 +228,7 @@ function TasksInner() {
       <section aria-label="Tasks" className="space-y-3">
         <div className="flex gap-2 overflow-x-auto pb-1" role="tablist" aria-label="Filter by status">
           {[{ id: "all", label: "All" }, ...STATUSES].map((s) => {
-            const n = s.id === "all" ? tasks.length : counts[s.id] ?? 0;
+            const n = s.id === "all" ? total : counts[s.id] ?? 0;
             const active = filter === s.id;
             return (
               <button
@@ -237,9 +251,21 @@ function TasksInner() {
 
         <div className="space-y-2">
           {isLoading && <p className="p-4 text-sm text-slate-500">Loading tasks…</p>}
-          {!isLoading && shown.length === 0 && (
+          {taskPages.isError && (
+            // Sol A35: a failed load used to look like an empty project
+            <div role="alert" className="flex items-center justify-between gap-3 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-300">
+              <span>
+                Could not load tasks:{" "}
+                {taskPages.error instanceof Error ? taskPages.error.message : "unknown error"}
+              </span>
+              <button type="button" onClick={() => void taskPages.refetch()} className="font-semibold underline">
+                Retry
+              </button>
+            </div>
+          )}
+          {!isLoading && !taskPages.isError && shown.length === 0 && (
             <p className="rounded-2xl border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500 dark:border-slate-700">
-              {tasks.length === 0
+              {total === 0
                 ? "No tasks in this project yet. Describe your first one above."
                 : "No tasks with this status."}
             </p>
@@ -285,6 +311,16 @@ function TasksInner() {
               </div>
             </article>
           ))}
+          {taskPages.hasNextPage && (
+            <button
+              type="button"
+              onClick={() => void taskPages.fetchNextPage()}
+              disabled={taskPages.isFetchingNextPage}
+              className="w-full rounded-xl border border-slate-200 py-2.5 text-sm font-medium text-slate-600 hover:border-orange-200 disabled:opacity-50 dark:border-slate-700 dark:text-slate-300"
+            >
+              {taskPages.isFetchingNextPage ? "Loading…" : "Load older tasks"}
+            </button>
+          )}
         </div>
       </section>
     </div>

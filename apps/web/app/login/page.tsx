@@ -34,8 +34,17 @@ export default function LoginPage() {
   const [newPw, setNewPw] = useState("");
   const [confirmPw, setConfirmPw] = useState("");
 
+  // Sol A35: sent here because the session expired — say so, and go back to
+  // the page the user was on after signing in (internal paths only).
+  const [notice, setNotice] = useState<string | null>(null);
+  const [returnTo, setReturnTo] = useState("/start");
+
   useEffect(() => {
-    if (new URLSearchParams(window.location.search).get("change") === "1") setStage("change");
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("change") === "1") setStage("change");
+    if (params.get("expired") === "1") setNotice("Your session expired. Sign in again to continue.");
+    const from = params.get("from") ?? "";
+    if (from.startsWith("/") && !from.startsWith("//") && !from.startsWith("/login")) setReturnTo(from);
   }, []);
 
   async function handleChange(e: FormEvent) {
@@ -70,7 +79,7 @@ export default function LoginPage() {
       setCurrentPw(pass);
       setStage("change");
     } else if (result.ok) {
-      router.push("/start");
+      router.push(returnTo);
     } else {
       setError(result.error ?? "Login failed");
     }
@@ -325,6 +334,11 @@ export default function LoginPage() {
               />
             </div>
 
+            {notice && !error && (
+              <p role="status" className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-900/20 dark:text-amber-200">
+                {notice}
+              </p>
+            )}
             {error && (
               <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-400">
                 {error}

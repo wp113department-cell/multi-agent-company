@@ -20,6 +20,10 @@ test.describe("Task list and detail", () => {
     await page.route("**/api/tasks?*", (route) =>
       route.fulfill(json({ tasks: [SAMPLE_TASK], nextCursor: null }))
     );
+    // Sol A32: per-status totals for the whole project
+    await page.route("**/api/tasks/counts*", (route) =>
+      route.fulfill(json({ counts: { [SAMPLE_TASK.status]: 1 }, total: 1 }))
+    );
     await page.route("**/api/tasks", (route) => {
       if (route.request().method() === "GET") {
         return route.fulfill(json({ tasks: [SAMPLE_TASK], nextCursor: null }));

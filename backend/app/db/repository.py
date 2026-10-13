@@ -404,9 +404,26 @@ async def list_tasks(
     rows: list[DevTask] = list(result.scalars())
     next_cursor: int | None = None
     if len(rows) > limit:
-        next_cursor = rows[limit].id
         rows = rows[:limit]
+        # Sol A32: the next page asks for ids below the cursor, so the cursor
+        # is the last task returned — it used to be the first task of the
+        # next page, which was then skipped at every page boundary.
+        next_cursor = rows[-1].id
     return rows, next_cursor
+
+
+async def count_tasks_by_status(
+    db: AsyncSession, project_id: int | None = None, repo_id: int | None = None
+) -> dict[str, int]:
+    """Sol A32: real per-status totals (the list endpoint returns one page)."""
+    from sqlalchemy import func
+
+    q = select(DevTask.status, func.count()).group_by(DevTask.status)
+    if project_id is not None:
+        q = q.where(DevTask.project_id == project_id)
+    if repo_id is not None:
+        q = q.where(DevTask.repo_id == repo_id)
+    return {str(status): int(n) for status, n in (await db.execute(q)).all()}
 
 
 async def transition_task(

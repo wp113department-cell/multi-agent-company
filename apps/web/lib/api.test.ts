@@ -5,6 +5,7 @@ import {
   createTask,
   deleteRepo,
   fetchTasks,
+  redirectIfSessionExpired,
   updateTaskStatus,
 } from "./api";
 
@@ -83,5 +84,25 @@ describe("createTask priority (Sol A34)", () => {
     await createTask({ title: "t", description: "d", priority });
     const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
     expect(JSON.parse(String(init.body)).priority).toBe(priority);
+  });
+});
+
+
+describe("expired session (Sol A35)", () => {
+  it("a 401 sends the user to login, keeping where they were", () => {
+    const assign = vi.fn();
+    vi.stubGlobal("location", { pathname: "/tasks", search: "?project=7", assign });
+    redirectIfSessionExpired(401);
+    expect(assign).toHaveBeenCalledWith("/login?expired=1&from=%2Ftasks%3Fproject%3D7");
+  });
+
+  it("other errors and the login page itself do not redirect", () => {
+    const assign = vi.fn();
+    vi.stubGlobal("location", { pathname: "/tasks", search: "", assign });
+    redirectIfSessionExpired(403);
+    redirectIfSessionExpired(500);
+    vi.stubGlobal("location", { pathname: "/login", search: "", assign });
+    redirectIfSessionExpired(401);
+    expect(assign).not.toHaveBeenCalled();
   });
 });

@@ -297,6 +297,20 @@ async def list_all(
     return {"tasks": [_task_to_dict(t) for t in tasks], "nextCursor": next_cursor}
 
 
+@router.get("/counts")
+async def counts(
+    repo_id: int | None = Query(None),
+    project_id: int | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
+) -> dict[str, Any]:
+    """Sol A32: tasks per status for the whole project, not just one page."""
+    from app.db.repository import count_tasks_by_status
+
+    by_status = await count_tasks_by_status(db, project_id=project_id, repo_id=repo_id)
+    return {"counts": by_status, "total": sum(by_status.values())}
+
+
 @router.get("/{task_id}")
 async def get_one(
     task_id: int,

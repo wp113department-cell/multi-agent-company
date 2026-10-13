@@ -21,6 +21,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { authHeaders } from "@/lib/auth";
+import { redirectIfSessionExpired } from "@/lib/api";
 import { Icon } from "../../../components/Icon";
 
 // ---------------------------------------------------------------------------
@@ -285,10 +286,24 @@ export default function ActivityFeedPage() {
     };
   }, [taskId, connect]);
 
+  // Sol A35 (2026-10-13): a failed Stop/Resume used to look like success —
+  // Resume cleared the message and reconnected even when the server refused.
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  async function failureText(res: Response): Promise<string> {
+    redirectIfSessionExpired(res.status);
+    const body = (await res.json().catch(() => ({}))) as { detail?: unknown };
+    return typeof body.detail === "string" ? body.detail : `HTTP ${res.status}`;
+  }
+
   const handleStop = useCallback(async () => {
     setStopping(true);
+    setActionError(null);
     try {
-      await fetch(`/api/tasks/${taskId}/stop`, { method: "POST", headers: authHeaders() });
+      const res = await fetch(`/api/tasks/${taskId}/stop`, { method: "POST", headers: authHeaders() });
+      if (!res.ok) setActionError(`Could not stop: ${await failureText(res)}`);
+    } catch {
+      setActionError("Could not stop: the server could not be reached.");
     } finally {
       setStopping(false);
     }
@@ -296,16 +311,23 @@ export default function ActivityFeedPage() {
 
   const handleResume = useCallback(async () => {
     setResumeLoading(true);
+    setActionError(null);
     try {
-      await fetch(`/api/tasks/${taskId}/resume`, {
+      const res = await fetch(`/api/tasks/${taskId}/resume`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({ message: resumeMsg, files: [] }),
       });
+      if (!res.ok) {
+        setActionError(`Could not resume: ${await failureText(res)}`);
+        return; // keep the message and the stopped state for another try
+      }
       setResumeMsg("");
       reachedTerminalRef.current = false;
       if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
       connect(0);
+    } catch {
+      setActionError("Could not resume: the server could not be reached.");
     } finally {
       setResumeLoading(false);
     }
@@ -431,6 +453,12 @@ export default function ActivityFeedPage() {
             </button>
           )}
         </div>
+
+        {actionError && (
+          <p role="alert" style={{ margin: "8px 0", color: "#b91c1c", fontSize: 13 }}>
+            {actionError}
+          </p>
+        )}
 
         <div className="events-list">
           {events.length === 0 && status === "connecting" && (
