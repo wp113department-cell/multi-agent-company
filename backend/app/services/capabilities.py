@@ -120,6 +120,7 @@ TOOL_REQUIREMENTS: dict[str, str] = {
     "create_pr": "github",
     "git_push": "github",
     "slack_": "slack",
+    "web_search": "web_search",
     "linear_": "linear",
 }
 
@@ -173,6 +174,9 @@ def connections(
 ) -> list[dict[str, str]]:
     import os
 
+    from app.config import get_settings
+
+    web_key = get_settings().firecrawl_api_key
     sandbox = check()
     docker_ok = bool(sandbox.get("sandbox"))
     gh_status, gh_detail = _github_status(github_token, verify)
@@ -205,6 +209,16 @@ def connections(
             "Linear issues",
             "ready" if os.environ.get("LINEAR_API_KEY") else "not_configured",
             "Set LINEAR_API_KEY to create issues.",
+        ),
+        (
+            "web_search",
+            "Web search (Firecrawl)",
+            "ready" if web_key else "not_configured",
+            (
+                "Key saved."
+                if web_key
+                else "Set FIRECRAWL_API_KEY to let agents search the web."
+            ),
         ),
         (
             "ai",

@@ -1,30 +1,26 @@
-"""web_search tool #88 — tool_enhance.md productionization pass
-(2026-08-24).
+"""web_search tool — Firecrawl (2026-10-14, owner decision).
 
-No security vulnerability found. Single implementation (not
-duplicated — `make_research_handlers()` and `make_chat_handlers()`
-both wire the exact same function object), extracted verbatim into
-`app.tools.integrations.web_search` purely for modularization. `query`
-is a plain search string with no subprocess/shell/path-handling
-surface; `DDGS()`'s own default `timeout=10` already bounds the
-outbound HTTP call; `max_results=5` is a fixed literal, not
-LLM-controlled; already wrapped in a broad `try/except Exception`.
+Replaces the DuckDuckGo scraping search: `duckduckgo_search` (renamed
+upstream) returned no results at all, and its successor `ddgs` was
+rate-limited by the search sites after a few queries. Firecrawl is a keyed
+API (FIRECRAWL_API_KEY).
 
-Confirmed NOT in `CHAT_TOOLS` — intentional, the interactive chat
-session never gets unrestricted live web search.
+These tests use a fake Firecrawl client: CI has no key and a real search
+spends the owner's credits. The real service was checked once by hand on
+2026-10-14 (5 results, official LangGraph docs first).
 
-Real search-result CONTENT already gets wrapped as untrusted data and
-scanned for prompt-injection markers by a separate, pre-existing
-defense layer (`test_phase63_prompt_injection_defense.py`) — unrelated
-to this tool's own code, not re-tested here.
-
-Tests here that reach the network use a real, common query — matching
-this test suite's own established pattern of hitting real external
-services rather than mocking them entirely (see tool #86's
-`test_fetch_url_hardening.py`).
+Confirmed NOT in `CHAT_TOOLS` — intentional, the interactive chat session
+never gets live web search. Result content is wrapped as untrusted data and
+scanned for prompt-injection markers by the agent loop
+(`test_phase63_prompt_injection_defense.py`), not re-tested here.
 """
 
 from __future__ import annotations
+
+from types import SimpleNamespace
+from typing import Any
+
+import pytest
 
 from app.agents.tools import (
     CHAT_TOOLS,
@@ -32,7 +28,43 @@ from app.agents.tools import (
     make_chat_handlers,
     make_research_handlers,
 )
+from app.config import get_settings
 from app.tools.integrations.web_search import WEB_SEARCH_TOOL, web_search_handler
+
+KEY = "fc-test-key-not-real"
+
+
+class _FakeFirecrawl:
+    calls: list[dict[str, Any]] = []
+    web: list[Any] = []
+    error: Exception | None = None
+
+    def __init__(self, api_key: str) -> None:
+        self.api_key = api_key
+
+    def search(self, query: str, **kw: Any) -> Any:
+        _FakeFirecrawl.calls.append({"query": query, "api_key": self.api_key, **kw})
+        if _FakeFirecrawl.error:
+            raise _FakeFirecrawl.error
+        return SimpleNamespace(web=_FakeFirecrawl.web)
+
+
+def _hit(i: int, description: str = "about it") -> Any:
+    return SimpleNamespace(
+        title=f"Result {i}", url=f"https://example.com/{i}", description=description
+    )
+
+
+@pytest.fixture
+def firecrawl(monkeypatch: pytest.MonkeyPatch) -> type[_FakeFirecrawl]:
+    import firecrawl as firecrawl_pkg
+
+    _FakeFirecrawl.calls = []
+    _FakeFirecrawl.web = [_hit(1), _hit(2)]
+    _FakeFirecrawl.error = None
+    monkeypatch.setattr(firecrawl_pkg, "Firecrawl", _FakeFirecrawl)
+    monkeypatch.setattr(get_settings(), "firecrawl_api_key", KEY)
+    return _FakeFirecrawl
 
 
 def test_web_search_tool_schema_requires_query() -> None:
@@ -41,8 +73,6 @@ def test_web_search_tool_schema_requires_query() -> None:
 
 
 def test_web_search_is_not_in_chat_tools() -> None:
-    """Intentional — the interactive session never gets unrestricted
-    live web search."""
     names = [t["name"] for t in CHAT_TOOLS]
     assert "web_search" not in names
 
@@ -52,71 +82,44 @@ def test_web_search_appears_exactly_once_in_research_tools() -> None:
     assert names.count("web_search") == 1
 
 
-def test_web_search_handler_rejects_empty_query() -> None:
-    assert web_search_handler({"query": ""}) == "[ERROR] query is required"
+@pytest.mark.parametrize("inp", [{"query": ""}, {"query": "   "}, {}])
+def test_an_empty_query_is_refused(inp: dict[str, Any]) -> None:
+    assert web_search_handler(inp) == "[ERROR] query is required"
 
 
-def test_web_search_handler_rejects_whitespace_only_query() -> None:
-    assert web_search_handler({"query": "   "}) == "[ERROR] query is required"
+def test_without_a_key_it_says_web_search_is_not_set_up(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(get_settings(), "firecrawl_api_key", "")
+    result = web_search_handler({"query": "langgraph"})
+    assert result.startswith("[ERROR] web search is not set up")
 
 
-def test_web_search_handler_rejects_missing_query() -> None:
-    assert web_search_handler({}) == "[ERROR] query is required"
+def test_results_are_titles_urls_and_descriptions(firecrawl: Any) -> None:
+    result = web_search_handler({"query": "langgraph docs"})
+    assert "## Result 1\nhttps://example.com/1\nabout it" in result
+    [call] = firecrawl.calls
+    assert call["query"] == "langgraph docs" and call["limit"] == 5
+    assert call["api_key"] == KEY
 
 
-def test_web_search_handler_handles_library_exceptions_gracefully(monkeypatch) -> None:
-    """Real, exercised path: if the underlying library raises for any
-    reason (network down, blocked, rate-limited), the handler must not
-    propagate an uncaught exception."""
-    import app.tools.integrations.web_search as web_search_module
+def test_no_results_is_reported_honestly(firecrawl: Any) -> None:
+    firecrawl.web = []
+    assert web_search_handler({"query": "zzz"}) == "(no results found for: 'zzz')"
 
-    class _BoomDDGS:
-        def text(self, *args, **kwargs):
-            raise RuntimeError("simulated network failure")
 
-    import ddgs
-
-    monkeypatch.setattr(ddgs, "DDGS", lambda: _BoomDDGS())
-    result = web_search_module.web_search_handler({"query": "anything"})
+def test_a_failure_never_raises_and_never_leaks_the_key(firecrawl: Any) -> None:
+    firecrawl.error = RuntimeError(f"401 Unauthorized for key {KEY}")
+    result = web_search_handler({"query": "anything"})
     assert result.startswith("[ERROR] web_search failed:")
+    assert KEY not in result
 
 
-def test_web_search_handler_truncates_long_output(monkeypatch) -> None:
-    import app.tools.integrations.web_search as web_search_module
-
-    class _HugeDDGS:
-        def text(self, *args, **kwargs):
-            return [
-                {
-                    "title": f"T{i}",
-                    "href": f"https://example.com/{i}",
-                    "body": "x" * 500,
-                }
-                for i in range(5)
-            ]
-
-    import ddgs
-
-    monkeypatch.setattr(ddgs, "DDGS", lambda: _HugeDDGS())
-    result = web_search_module.web_search_handler({"query": "anything"})
-    assert len(result) <= 6000
+def test_long_output_is_capped(firecrawl: Any) -> None:
+    firecrawl.web = [_hit(i, "x" * 2000) for i in range(5)]
+    assert len(web_search_handler({"query": "anything"})) <= 6000
 
 
-# ---------------------------------------------------------------------------
-# Regression — legitimate usage must keep working, on both real access
-# paths (a real, live network search)
-# ---------------------------------------------------------------------------
-
-
-def test_make_research_handlers_real_search_returns_real_results() -> None:
-    handlers = make_research_handlers(".")
-    result = handlers["web_search"]({"query": "python programming"})
-    assert "[ERROR]" not in result
-    assert "python" in result.lower() or "Python" in result
-
-
-def test_make_chat_handlers_real_search_returns_real_results() -> None:
-    handlers = make_chat_handlers(".")
-    result = handlers["web_search"]({"query": "python programming"})
-    assert "[ERROR]" not in result
-    assert "python" in result.lower() or "Python" in result
+def test_both_agent_handler_sets_use_it(firecrawl: Any) -> None:
+    for handlers in (make_research_handlers("."), make_chat_handlers(".")):
+        assert "Result 1" in handlers["web_search"]({"query": "python"})

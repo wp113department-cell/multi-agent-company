@@ -1197,6 +1197,10 @@ class Settings(BaseSettings):
         default="",
         description="GitHub personal access token for creating PRs via the REST API. Prefer setting via the UI (stored in the DB) over this env var.",
     )
+    firecrawl_api_key: str = Field(
+        default="",
+        description="Firecrawl API key for the web_search tool (https://firecrawl.dev). Empty = web search reports that it is not set up.",
+    )
     github_api_base_url: str = Field(
         default="https://api.github.com",
         description="GitHub REST API base URL — override for GitHub Enterprise.",

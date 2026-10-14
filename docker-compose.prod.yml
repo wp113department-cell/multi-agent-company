@@ -149,6 +149,7 @@ services:
       BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
       QUEUE_BACKEND: ${QUEUE_BACKEND:-rq}
       ANTHROPIC_API_KEY: '${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY is required}'
+      FIRECRAWL_API_KEY: ${FIRECRAWL_API_KEY:-}  # web_search tool; empty = web search not set up
       CORS_ORIGINS: '${CORS_ORIGINS:?CORS_ORIGINS is required in production — comma-separated list of your real frontend origin(s)}'
       SENTRY_DSN: ${SENTRY_DSN:-}
       # Real, already-enforced by Settings' _require_secure_production_auth
@@ -214,6 +215,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       REQUIRE_DURABLE_CHECKPOINTS: "true"  # Sol A18: never run work whose progress cannot be saved
       ANTHROPIC_API_KEY: '${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY is required}'
+      FIRECRAWL_API_KEY: ${FIRECRAWL_API_KEY:-}  # web_search tool; empty = web search not set up
       JWT_SECRET_KEY: '${JWT_SECRET_KEY:?JWT_SECRET_KEY is required in production}'
       JWT_AUTH_ENABLED: "true"
       RBAC_ENABLED: "true"
