@@ -93,7 +93,7 @@ function TaskAction({ task }: { task: DevTask }) {
   }
   if (task.status === "ready_for_review") {
     return (
-      <Link href={`/tasks/${task.id}`} className={`${base} bg-amber-500 text-white hover:bg-amber-600`}>
+      <Link href={`/tasks/${task.id}`} className={`${base} bg-amber-700 text-white hover:bg-amber-800`}>
         Review plan
       </Link>
     );

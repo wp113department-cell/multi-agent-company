@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { isAuthenticated } from "../lib/auth";
 import { BrandMark, BRAND_NAME } from "./BrandMark";
@@ -145,9 +145,41 @@ export function ProductTour() {
     }
   }, []);
 
+  // A44 accessibility (2026-10-16): keyboard focus moves into the tour,
+  // stays inside it while it is open (Tab / Shift+Tab wrap), and returns to
+  // where it was when the tour closes.
+  const cardRef = useRef<HTMLDivElement>(null);
+  const primaryRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const before = document.activeElement as HTMLElement | null;
+    primaryRef.current?.focus();
+    return () => before?.focus?.();
+  }, [open]);
+  useEffect(() => {
+    if (open) primaryRef.current?.focus();
+  }, [idx, open]);
+
   useEffect(() => {
     if (!open) return;
     function onKey(e: KeyboardEvent) {
+      if (e.key === "Tab" && cardRef.current) {
+        const items = Array.from(cardRef.current.querySelectorAll<HTMLElement>("button"));
+        const first = items[0];
+        const lastItem = items[items.length - 1];
+        if (!first || !lastItem) return;
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          lastItem.focus();
+        } else if (!e.shiftKey && document.activeElement === lastItem) {
+          e.preventDefault();
+          first.focus();
+        } else if (!cardRef.current.contains(document.activeElement)) {
+          e.preventDefault();
+          first.focus();
+        }
+        return;
+      }
       if (e.key === "Escape") finish();
       if (e.key === "ArrowRight") setIdx((i) => Math.min(i + 1, STEPS.length - 1));
       if (e.key === "ArrowLeft") setIdx((i) => Math.max(i - 1, 0));
@@ -188,6 +220,7 @@ export function ProductTour() {
       )}
 
       <div
+        ref={cardRef}
         style={cardStyle}
         className="rounded-2xl border border-orange-100 bg-white p-5 shadow-2xl dark:border-slate-700 dark:bg-slate-900"
       >
@@ -237,6 +270,7 @@ export function ProductTour() {
             )}
             <button
               type="button"
+              ref={primaryRef}
               onClick={() => (last ? finish() : setIdx(idx + 1))}
               className="btn-primary rounded-lg bg-orange-600 px-4 py-1.5 text-sm font-semibold text-white"
             >

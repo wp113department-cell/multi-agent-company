@@ -820,7 +820,7 @@ export default function ChatPage() {
         </div>
         <ul className="flex-1 overflow-y-auto p-2" aria-label="Past chats">
           {chats.length === 0 && (
-            <li className="px-2 py-3 text-xs text-slate-400">No chats yet for this project.</li>
+            <li className="px-2 py-3 text-xs text-slate-500">No chats yet for this project.</li>
           )}
           {chats.map((c) => (
             <li key={c.id} className="group">

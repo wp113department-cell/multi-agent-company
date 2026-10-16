@@ -86,13 +86,13 @@ function LabelPicker({
     <div>
       <div className="mb-1.5 flex items-center justify-between">
         <label htmlFor={id} className="text-sm font-medium text-slate-700 dark:text-slate-300">
-          {kind} <span className="font-normal text-slate-400">(optional)</span>
+          {kind} <span className="font-normal text-slate-500">(optional)</span>
         </label>
         {!adding && (
           <button
             type="button"
             onClick={() => setAdding(true)}
-            className="text-xs font-semibold text-orange-600 hover:text-orange-700"
+            className="text-xs font-semibold text-orange-700 hover:text-orange-800"
           >
             <span className="inline-flex items-center gap-1"><Icon name="plus" size={12} /> New {kind.toLowerCase()}</span>
           </button>
@@ -339,7 +339,7 @@ export function NewTaskForm({ project }: { project: ProjectDetail | null }) {
           <button
             type="button"
             onClick={() => setShowAttach((s) => !s)}
-            className="font-medium text-orange-600 hover:text-orange-700"
+            className="font-medium text-orange-700 hover:text-orange-800"
           >
             <span className="inline-flex items-center gap-1"><Icon name="paperclip" size={13} /> {showAttach ? "Hide attachments" : "Attach files (PDFs, images)"}</span>
             {pdfs.length + images.length > 0 ? ` · ${pdfs.length + images.length} attached` : ""}
