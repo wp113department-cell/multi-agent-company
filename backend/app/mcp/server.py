@@ -149,176 +149,42 @@ def _get_repo(params: dict[str, Any]) -> str:
     return str(repo_path)
 
 
+def _invalid_params(message: str) -> dict[str, Any]:
+    return {"error": {"code": -32602, "message": message}}
+
+
 def _handle(method: str, params: dict[str, Any]) -> Any:
-    settings = get_settings()  # noqa: F841
+    if method == "ping":
+        # G12 (2026-10-16): required by MCP; clients use it as a keep-alive
+        return {}
 
     if method == "tools/list":
         return {"tools": _TOOLS}
 
     if method == "tools/call":
         tool_name = params.get("name", "")
-        tool_params = params.get("arguments", {})
-        repo = _get_repo(tool_params)
-
-        if tool_name == "index_repository":
-            idx = index_repository(repo)
-            total_symbols = sum(len(f.symbols) for f in idx.files.values())
-            return {
-                "content": [
-                    {
-                        "type": "text",
-                        "text": json.dumps(
-                            {"files": len(idx.files), "symbols": total_symbols}
-                        ),
-                    }
-                ]
-            }
-
-        if tool_name == "search_symbols":
-            query = tool_params.get("query", "").lower()
-            idx = index_repository(repo)
-            matches = []
-            for rel_path, fi in idx.files.items():
-                for sym in fi.symbols:
-                    if query in sym.name.lower():
-                        matches.append(
-                            {
-                                "file": rel_path,
-                                "name": sym.name,
-                                "kind": sym.kind,
-                                "line": sym.line_start,
-                            }
-                        )
-            return {"content": [{"type": "text", "text": json.dumps(matches[:50])}]}
-
-        if tool_name == "build_context":
-            idx = index_repository(repo)
-            ctx = build_context(
-                task_description=tool_params["task_description"], index=idx
+        tool_params = params.get("arguments") or {}
+        tool = next((t for t in _TOOLS if t["name"] == tool_name), None)
+        if tool is None:
+            return _invalid_params(f"Unknown tool: {tool_name}")
+        missing = [
+            name
+            for name in tool["inputSchema"].get("required", [])  # type: ignore[attr-defined]
+            if not tool_params.get(name)
+        ]
+        if missing:
+            return _invalid_params(
+                f"Missing required argument(s): {', '.join(missing)}"
             )
+        try:
+            return _call_tool(tool_name, tool_params)
+        except Exception as exc:
+            # G12: a failing tool is a tool result the model can read
+            # (isError), not a broken protocol exchange
             return {
-                "content": [
-                    {
-                        "type": "text",
-                        "text": json.dumps(
-                            {
-                                "relevant_files": ctx.relevant_files,
-                                "dependency_chain": ctx.dependency_chain,
-                                "related_symbols": ctx.related_symbols,
-                                "summary": ctx.summary,
-                            }
-                        ),
-                    }
-                ]
+                "content": [{"type": "text", "text": f"{type(exc).__name__}: {exc}"}],
+                "isError": True,
             }
-
-        if tool_name == "query_dependencies":
-            file_path = tool_params.get("file_path", "")
-            idx = index_repository(repo)
-            edges = build_call_graph(idx)
-            deps = edges.get(file_path, [])
-            return {
-                "content": [
-                    {
-                        "type": "text",
-                        "text": json.dumps({"file": file_path, "dependencies": deps}),
-                    }
-                ]
-            }
-
-        if tool_name == "semantic_search":
-            import re
-
-            from app.repo_tools.embeddings import semantic_search as _vector_search
-
-            query = tool_params.get("query", "")
-            top_k = int(tool_params.get("top_k", 20))
-
-            # Blocker (audit_v1.md 4.2 #1): this tool is literally named
-            # "semantic_search" but used to only do keyword scoring —
-            # despite its own description claiming otherwise. Now tries
-            # the real pgvector query first; _vector_search itself no-ops
-            # (returns []) when VOYAGE_API_KEY is unset or this repo
-            # hasn't been indexed with embeddings, so falling through to
-            # keyword scoring below is a real, not theoretical, fallback.
-            semantic_matches = _vector_search(query, repo, top_k=top_k)
-            if semantic_matches:
-                results: list[dict[str, Any]] = [
-                    {"file": p, "score": None, "method": "semantic"}
-                    for p in semantic_matches
-                ]
-                return {
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": json.dumps({"results": results, "query": query}),
-                        }
-                    ]
-                }
-
-            idx = index_repository(repo)
-            query_tokens = [w.lower() for w in re.split(r"\W+", query) if len(w) > 2]
-            scores: dict[str, float] = {}
-            for rel_path, fi in idx.files.items():
-                symbol_names = [s.name for s in fi.symbols]
-                combined = (
-                    rel_path.lower() + " " + " ".join(s.lower() for s in symbol_names)
-                )
-                scores[rel_path] = sum(1.0 for tok in query_tokens if tok in combined)
-            sorted_files = sorted(scores.items(), key=lambda x: x[1], reverse=True)
-            results = [
-                {"file": p, "score": s, "method": "keyword"}
-                for p, s in sorted_files
-                if s > 0
-            ][:top_k]
-            return {
-                "content": [
-                    {
-                        "type": "text",
-                        "text": json.dumps({"results": results, "query": query}),
-                    }
-                ]
-            }
-
-        if tool_name == "get_file_summary":
-            file_path = tool_params.get("file_path", "")
-            idx = index_repository(repo)
-            file_info = idx.files.get(file_path)
-            if file_info is None:
-                return {
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": json.dumps(
-                                {"error": f"File not found: {file_path}"}
-                            ),
-                        }
-                    ]
-                }
-            return {
-                "content": [
-                    {
-                        "type": "text",
-                        "text": json.dumps(
-                            {
-                                "file": file_path,
-                                "language": file_info.language,
-                                "symbols": [
-                                    {
-                                        "name": s.name,
-                                        "kind": s.kind,
-                                        "line": s.line_start,
-                                    }
-                                    for s in file_info.symbols
-                                ],
-                                "imports": file_info.imports,
-                            }
-                        ),
-                    }
-                ]
-            }
-
-        return {"error": {"code": -32601, "message": f"Unknown tool: {tool_name}"}}
 
     if method == "initialize":
         return {
@@ -328,6 +194,166 @@ def _handle(method: str, params: dict[str, Any]) -> Any:
         }
 
     return {"error": {"code": -32601, "message": f"Unknown method: {method}"}}
+
+
+def _call_tool(tool_name: str, tool_params: dict[str, Any]) -> Any:
+    repo = _get_repo(tool_params)
+
+    if tool_name == "index_repository":
+        idx = index_repository(repo)
+        total_symbols = sum(len(f.symbols) for f in idx.files.values())
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": json.dumps(
+                        {"files": len(idx.files), "symbols": total_symbols}
+                    ),
+                }
+            ]
+        }
+
+    if tool_name == "search_symbols":
+        query = tool_params.get("query", "").lower()
+        idx = index_repository(repo)
+        matches = []
+        for rel_path, fi in idx.files.items():
+            for sym in fi.symbols:
+                if query in sym.name.lower():
+                    matches.append(
+                        {
+                            "file": rel_path,
+                            "name": sym.name,
+                            "kind": sym.kind,
+                            "line": sym.line_start,
+                        }
+                    )
+        return {"content": [{"type": "text", "text": json.dumps(matches[:50])}]}
+
+    if tool_name == "build_context":
+        idx = index_repository(repo)
+        ctx = build_context(task_description=tool_params["task_description"], index=idx)
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": json.dumps(
+                        {
+                            "relevant_files": ctx.relevant_files,
+                            "dependency_chain": ctx.dependency_chain,
+                            "related_symbols": ctx.related_symbols,
+                            "summary": ctx.summary,
+                        }
+                    ),
+                }
+            ]
+        }
+
+    if tool_name == "query_dependencies":
+        file_path = tool_params.get("file_path", "")
+        idx = index_repository(repo)
+        edges = build_call_graph(idx)
+        deps = edges.get(file_path, [])
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": json.dumps({"file": file_path, "dependencies": deps}),
+                }
+            ]
+        }
+
+    if tool_name == "semantic_search":
+        import re
+
+        from app.repo_tools.embeddings import semantic_search as _vector_search
+
+        query = tool_params.get("query", "")
+        top_k = int(tool_params.get("top_k", 20))
+
+        # Blocker (audit_v1.md 4.2 #1): this tool is literally named
+        # "semantic_search" but used to only do keyword scoring —
+        # despite its own description claiming otherwise. Now tries
+        # the real pgvector query first; _vector_search itself no-ops
+        # (returns []) when VOYAGE_API_KEY is unset or this repo
+        # hasn't been indexed with embeddings, so falling through to
+        # keyword scoring below is a real, not theoretical, fallback.
+        semantic_matches = _vector_search(query, repo, top_k=top_k)
+        if semantic_matches:
+            results: list[dict[str, Any]] = [
+                {"file": p, "score": None, "method": "semantic"}
+                for p in semantic_matches
+            ]
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": json.dumps({"results": results, "query": query}),
+                    }
+                ]
+            }
+
+        idx = index_repository(repo)
+        query_tokens = [w.lower() for w in re.split(r"\W+", query) if len(w) > 2]
+        scores: dict[str, float] = {}
+        for rel_path, fi in idx.files.items():
+            symbol_names = [s.name for s in fi.symbols]
+            combined = (
+                rel_path.lower() + " " + " ".join(s.lower() for s in symbol_names)
+            )
+            scores[rel_path] = sum(1.0 for tok in query_tokens if tok in combined)
+        sorted_files = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+        results = [
+            {"file": p, "score": s, "method": "keyword"}
+            for p, s in sorted_files
+            if s > 0
+        ][:top_k]
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": json.dumps({"results": results, "query": query}),
+                }
+            ]
+        }
+
+    if tool_name == "get_file_summary":
+        file_path = tool_params.get("file_path", "")
+        idx = index_repository(repo)
+        file_info = idx.files.get(file_path)
+        if file_info is None:
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": json.dumps({"error": f"File not found: {file_path}"}),
+                    }
+                ]
+            }
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": json.dumps(
+                        {
+                            "file": file_path,
+                            "language": file_info.language,
+                            "symbols": [
+                                {
+                                    "name": s.name,
+                                    "kind": s.kind,
+                                    "line": s.line_start,
+                                }
+                                for s in file_info.symbols
+                            ],
+                            "imports": file_info.imports,
+                        }
+                    ),
+                }
+            ]
+        }
+
+    raise AssertionError(f"tool {tool_name} is listed but not handled")
 
 
 def run_stdio_server() -> None:
@@ -348,9 +374,13 @@ def run_stdio_server() -> None:
             print(json.dumps(resp), flush=True)
             continue
 
-        req_id = req.get("id")
         method = req.get("method", "")
-        params = req.get("params", {})
+        params = req.get("params") or {}
+        if "id" not in req:
+            # G12 (2026-10-16): a notification (e.g. notifications/initialized)
+            # must never be answered; replying with id null broke clients
+            continue
+        req_id = req.get("id")
 
         try:
             result = _handle(method, params)

@@ -8,3 +8,5 @@ ruff==0.15.20
 black==26.5.1
 tree-sitter==0.26.0
 pip-audit==2.10.1
+# G12: the official MCP client drives app/mcp/server.py over real stdio in tests
+mcp==2.3.0

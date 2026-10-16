@@ -213,7 +213,7 @@ Each batch groups items that touch the same code, so nothing is fixed twice.
 | 13 | A43 | Alert outbox, signed webhooks | P2 | ✅ outgoing (outbox, retries, dead letters, signed); incoming receiver waits for W8/G5 | backend/tests/test_a43_alert_outbox.py |
 | 13 | G14 | Supply chain and licences | P3 | ✅ | CI job `supply-chain`; backend/tests/test_g14_supply_chain.py |
 | 14 | G11 | Goals → roadmap → epics end to end | P3 | ⬜ | |
-| 14 | G12 | MCP server | P3 | ⬜ | |
+| 14 | G12 | MCP server | P3 | ✅ | backend/tests/test_g12_mcp_stdio_client.py |
 | 15 | G5 | Live GitHub/Slack/Linear | P2 | ⬜ | needs D5 |
 
 **Totals:** 58 items: 1 done, 3 partial, 54 pending.
@@ -744,5 +744,10 @@ Every item gets a full local CI before each push. Close heavy apps first, becaus
   - **Pinned images:** every base image (python 3.11/3.12-slim, node 22-slim, pgvector pg16, redis 7-alpine) is pinned by digest in the Dockerfiles, both compose files and CI. Dependabot (`.github/dependabot.yml`) opens a monthly pull request when a newer image is published, so pins still get security fixes. A test fails on any unpinned base image.
   - **Vendored repos** (`repos/`, 11 reference projects): git-ignored and excluded from every Docker build context, so nothing from them ships. Licences: MIT or Apache-2.0, except `autogen` (top-level licence file is CC-BY for its docs) and `andrej-karpathy-skills` (no licence, all rights reserved). Both must stay reference-only: copy no code from them.
   - Not pinned: the runtime sandbox default `alpine:latest` (`BASH_SANDBOX_IMAGE`), which the runner's image allow-list matches by name; production uses the toolchain image built from the pinned python base.
-- **Next session:** Batch 14 (G11 goals → roadmap → epics, G12 MCP server). Run full local CI and push.
+- **2026-10-16: Batch 14, G12 MCP server. DONE (local).**
+  - Tested with the **official MCP client** (`mcp==2.3.0`, dev dependency only) driving `python -m app.mcp.server` over real stdio: handshake, ping, tool list, and all 6 tools on a copy of the demo repo.
+  - **Real bugs:** the server answered the `notifications/initialized` notification (with id null) and did not support `ping`, so the official client failed on its first keep-alive. A failing tool (for example a refused `repo_path`) came back as an internal protocol error instead of a tool result the model can read (`isError`). A missing argument raised a bare `KeyError`; it and an unknown tool are now "invalid params" (-32602).
+  - **Exposure and authentication:** stdio only. No network port, so only a program the local user starts can reach it, with that user's rights; there is nothing to authenticate. `repo_path` must stay under TARGET_REPO_PATH, REPOS_DIR or WORKTREES_DIR (checked again through the real client).
+  - Tests: 4 in `tests/test_g12_mcp_stdio_client.py`; 3 fail on the old code. The 7 older MCP tests still pass.
+- **Next session:** G11 (goals → roadmap → executive → epics end to end, mocked model). Then run full local CI on the latest commit and push (a run on `de01723d` was started before G12).
 
