@@ -28,6 +28,7 @@ import {
   updateTaskStatus,
 } from "../../../lib/api";
 import { Icon } from "../../../components/Icon";
+import { safeExternalUrl } from "@/lib/safeUrl";
 
 // #439 (2026-09-22, "User satisfaction — real, not proxy") — the backend
 // endpoint (POST /api/ratings) existed with no way for a user to actually
@@ -522,9 +523,9 @@ export default function TaskDetailPage() {
             >
               {PR_STATUS_LABELS[taskPr.prStatus] ?? taskPr.prStatus}
             </span>
-            {taskPr.prUrl && (
+            {safeExternalUrl(taskPr.prUrl) && (
               <a
-                href={taskPr.prUrl}
+                href={safeExternalUrl(taskPr.prUrl) ?? undefined}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-sm text-blue-600 underline"
