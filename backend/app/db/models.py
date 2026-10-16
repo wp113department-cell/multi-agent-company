@@ -12,12 +12,14 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -504,6 +506,43 @@ class FailedEvent(Base):
     error: Mapped[str] = mapped_column(Text)
     failed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class AlertOutbox(Base):
+    """Sol A43 (2026-10-16): outgoing alert webhooks, stored before they are
+    sent so an outage of the receiving service does not lose them.
+    status: pending (to send or retry) → sent, or dead after
+    ALERT_MAX_ATTEMPTS failed attempts. event_id goes out with every attempt
+    so the receiver can drop a repeat."""
+
+    __tablename__ = "alert_outbox"
+    __table_args__ = (
+        # the same alert is queued only once while it is still undelivered
+        Index(
+            "uq_alert_outbox_pending_dedup",
+            "dedup_key",
+            unique=True,
+            postgresql_where=text("status = 'pending'"),
+        ),
+        Index("ix_alert_outbox_due", "status", "next_attempt_at"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    event_id: Mapped[str] = mapped_column(UUID(as_uuid=False), unique=True)
+    dedup_key: Mapped[str] = mapped_column(String(64))
+    payload: Mapped[Any] = mapped_column(JSONB)
+    status: Mapped[str] = mapped_column(String(10), default="pending")
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    next_attempt_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    sent_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
 
 

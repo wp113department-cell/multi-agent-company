@@ -210,7 +210,7 @@ Each batch groups items that touch the same code, so nothing is fixed twice.
 | 12 | A38 | Streaming render performance | P2 | ✅ | apps/web/lib/frameBatch.test.ts |
 | 12 | G13 | Frontend XSS | P3 | ✅ | apps/web/lib/safeUrl.test.ts |
 | 13 | A41 | Real-stack CI journeys, safe inputs | P2 | ✅ | CI job `real-journeys` (9/9 locally) |
-| 13 | A43 | Alert outbox, signed webhooks | P2 | ⬜ | |
+| 13 | A43 | Alert outbox, signed webhooks | P2 | ✅ outgoing (outbox, retries, dead letters, signed); incoming receiver waits for W8/G5 | backend/tests/test_a43_alert_outbox.py |
 | 13 | G14 | Supply chain and licences | P3 | ⬜ | |
 | 14 | G11 | Goals → roadmap → epics end to end | P3 | ⬜ | |
 | 14 | G12 | MCP server | P3 | ⬜ | |
@@ -733,5 +733,10 @@ Every item gets a full local CI before each push. Close heavy apps first, becaus
 - **2026-10-16: Batch 13, A41. DONE (local).**
   - The real-stack journeys from audit 12 (`apps/web/e2e-real/journeys.spec.ts`) now run in CI (job `real-journeys`) through `scripts/e2e_real_stack.sh`: throwaway database, demo data, a throwaway approver, real backend, production frontend build. Fake Anthropic key; the live-AI journeys never run there. Locally 9/9 passed, including A5 (forced password change), which had always been skipped because no account was set up for it.
   - **Safe workflow inputs:** the load-test workflow no longer takes an API token as a run input (inputs are shown in the run log); it uses the `STAGING_API_TOKEN` secret. The staging URL reaches the shell only as an environment variable and must look like an http(s) URL, so it cannot inject commands. Its failure step now prints the right log file.
-- **Next session:** A43 (alert outbox, signed webhooks), G14 (supply chain); then Batch 14 (G11, G12). Run full local CI and push.
+- **2026-10-16: Batch 13, A43. DONE (local).**
+  - **Real gap:** an alert was one POST, so every alert raised while the receiving service was down was lost. Alerts are now stored first (new table `alert_outbox`, migration 071), sent at once, and retried every 30 s with growing waits (30 s up to 1 h). After `ALERT_MAX_ATTEMPTS` (8) an alert stays as a dead letter and is logged as an error. The same alert is queued only once while undelivered. Every attempt carries the same `X-Gridiron-Event-Id`, so the receiver can drop repeats. With `ALERT_WEBHOOK_SECRET` set, alerts are signed (`X-Gridiron-Signature`, HMAC-SHA256 over `X-Gridiron-Timestamp` and the body), so the receiver can check where they came from and refuse replayed ones. If the database cannot be reached, the alert is still sent once, as before.
+  - **Real bug:** the production compose file never passed `ALERT_WEBHOOK_URL` to the backend or the worker, so alerts could not be turned on in production. Fixed for both services.
+  - **Incoming webhooks:** there is still no incoming GitHub/CI receiver, and no feature needs one yet. The audit asks for signed, replay-protected incoming events "when needed". That part belongs with W8/G5 (GitHub integration, waiting for the owner's keys).
+  - Tests: 6 in `tests/test_a43_alert_outbox.py` (outage then recovery, dead letter, deduplication, signed, unsigned, database down); 4 fail on the old code. The older alert tests still pass.
+- **Next session:** G14 (supply chain); then Batch 14 (G11, G12). Run full local CI and push.
 

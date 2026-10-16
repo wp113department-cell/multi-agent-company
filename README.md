@@ -193,7 +193,8 @@ Full reference in `backend/.env.example`. Key variables:
 | `ARTIFACT_BACKEND` | — | `db` (default) or `s3` |
 | `S3_BUCKET` | — | S3 bucket (required when `ARTIFACT_BACKEND=s3`) |
 | `SENTRY_DSN` | — | Sentry DSN (optional) |
-| `ALERT_WEBHOOK_URL` | — | Webhook for task blocked/failed alerts (optional) |
+| `ALERT_WEBHOOK_URL` | — | Webhook for task blocked/failed alerts (optional); undelivered alerts are retried |
+| `ALERT_WEBHOOK_SECRET` | — | Signs alerts (`X-Gridiron-Signature`, HMAC-SHA256 over timestamp and body) |
 
 ---
 

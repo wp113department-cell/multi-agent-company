@@ -1042,6 +1042,24 @@ class Settings(BaseSettings):
         default=True,
         description="Send alert webhook when task status becomes 'blocked'",
     )
+    # Sol A43 (2026-10-16): alerts go through a durable outbox (table
+    # alert_outbox) and are retried until delivered or given up on.
+    alert_webhook_secret: str = Field(
+        default="",
+        description=(
+            "When set, every alert carries X-Gridiron-Signature: sha256=HMAC("
+            "secret, '<X-Gridiron-Timestamp>.<body>') so the receiver can check "
+            "it came from here and refuse old (replayed) ones."
+        ),
+    )
+    alert_max_attempts: int = Field(
+        default=8,
+        description="Delivery attempts before an alert is kept as a dead letter.",
+    )
+    alert_retry_interval_seconds: int = Field(
+        default=30,
+        description="How often undelivered alerts are retried. 0 disables retries.",
+    )
 
     # Log retention — automatic cleanup of old task logs
     log_retention_days: int = Field(

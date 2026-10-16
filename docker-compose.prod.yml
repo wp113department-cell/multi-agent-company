@@ -150,6 +150,10 @@ services:
       QUEUE_BACKEND: ${QUEUE_BACKEND:-rq}
       ANTHROPIC_API_KEY: '${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY is required}'
       FIRECRAWL_API_KEY: ${FIRECRAWL_API_KEY:-}  # web_search tool; empty = web search not set up
+      # Sol A43: these were never passed, so alerts could not be turned on in production
+      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
+      ALERT_WEBHOOK_SECRET: ${ALERT_WEBHOOK_SECRET:-}
+      ALERT_ON_BLOCKED: ${ALERT_ON_BLOCKED:-true}
       CORS_ORIGINS: '${CORS_ORIGINS:?CORS_ORIGINS is required in production — comma-separated list of your real frontend origin(s)}'
       SENTRY_DSN: ${SENTRY_DSN:-}
       # Real, already-enforced by Settings' _require_secure_production_auth
@@ -216,6 +220,10 @@ services:
       REQUIRE_DURABLE_CHECKPOINTS: "true"  # Sol A18: never run work whose progress cannot be saved
       ANTHROPIC_API_KEY: '${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY is required}'
       FIRECRAWL_API_KEY: ${FIRECRAWL_API_KEY:-}  # web_search tool; empty = web search not set up
+      # Sol A43: these were never passed, so alerts could not be turned on in production
+      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
+      ALERT_WEBHOOK_SECRET: ${ALERT_WEBHOOK_SECRET:-}
+      ALERT_ON_BLOCKED: ${ALERT_ON_BLOCKED:-true}
       JWT_SECRET_KEY: '${JWT_SECRET_KEY:?JWT_SECRET_KEY is required in production}'
       JWT_AUTH_ENABLED: "true"
       RBAC_ENABLED: "true"

@@ -593,8 +593,13 @@ class TestAlertService:
             async def __aexit__(self, *_: Any) -> None:
                 pass
 
-            async def post(self, url: str, json: dict[str, Any]) -> "_FakeResp":
-                captured.append(json)
+            async def post(
+                self, url: str, content: bytes, headers: dict[str, str]
+            ) -> "_FakeResp":
+                # Sol A43: alerts are sent as a raw (signable) JSON body
+                import json
+
+                captured.append(json.loads(content))
                 return _FakeResp()
 
         monkeypatch.setattr(alert_mod.httpx, "AsyncClient", lambda **kw: _FakeClient())
@@ -603,10 +608,29 @@ class TestAlertService:
         settings = get_settings()
         original_url = settings.alert_webhook_url
         settings.alert_webhook_url = "https://hooks.example.com/test"
+        from sqlalchemy import delete
+
+        from app.db.models import AlertOutbox
+        from app.db.session import new_isolated_async_engine
+
+        async def _clear_outbox() -> None:
+            # Sol A43: alerts are stored in alert_outbox; a pending copy left
+            # by an earlier run would hold this one back as a repeat
+            engine = new_isolated_async_engine()
+            async with engine.begin() as conn:
+                await conn.execute(
+                    delete(AlertOutbox).where(
+                        AlertOutbox.payload["task_id"].as_integer() == 999
+                    )
+                )
+            await engine.dispose()
+
+        await _clear_outbox()
         try:
             await alert_mod.send_task_alert(999, "blocked", "Agent hit max retries")
         finally:
             settings.alert_webhook_url = original_url
+            await _clear_outbox()
 
         assert len(captured) == 1
         payload = captured[0]

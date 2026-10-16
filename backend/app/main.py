@@ -1202,6 +1202,24 @@ async def _dependency_auto_dispatch_loop() -> None:
             logger.warning("Dependency auto-dispatch loop iteration failed: %s", exc)
 
 
+async def _alert_outbox_loop() -> None:
+    """Sol A43 (2026-10-16): retry alerts whose webhook delivery failed
+    (app/services/alert.py). Set ALERT_RETRY_INTERVAL_SECONDS=0 to disable."""
+    interval_seconds = get_settings().alert_retry_interval_seconds
+    if interval_seconds <= 0:
+        logger.info("Alert retry loop disabled (ALERT_RETRY_INTERVAL_SECONDS=0)")
+        return
+
+    from app.services.alert import deliver_due_alerts
+
+    while True:
+        await asyncio.sleep(interval_seconds)
+        try:
+            await deliver_due_alerts()
+        except Exception as exc:
+            logger.warning("Alert retry loop iteration failed: %s", exc)
+
+
 async def _doc_agent_auto_trigger_loop() -> None:
     """Gap-closure Day 52 (Stage 2, answers.md Q41 "Auto-trigger 'when code
     changes': NO for all of the above. All four real doc agents are
@@ -1774,6 +1792,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         "loop:prompts_score_compute",
         "loop:enhancement_quality_monitor",
         "loop:dependency_auto_dispatch",
+        "loop:alert_outbox",  # Sol A43
         # Production audit 08 follow-up (Sentry GRIDIRON-BACKEND-2): these 4
         # loops were started below but missing here, so the pool (one held
         # connection per leader loop, max_overflow=0) was 4 short — they
@@ -1934,6 +1953,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             _leader_election_engine,
         )
     )
+    alert_outbox_task = asyncio.create_task(
+        _run_as_leader("loop:alert_outbox", _alert_outbox_loop, _leader_election_engine)
+    )
 
     yield
 
@@ -1956,6 +1978,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     documentation_score_compute_task.cancel()
     enhancement_quality_monitor_task.cancel()
     dependency_auto_dispatch_task.cancel()
+    alert_outbox_task.cancel()
     bg_process_liveness_task.cancel()
     lesson_store_refresh_task.cancel()
     barot_temp_agent_ttl_task.cancel()
@@ -1980,6 +2003,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         documentation_score_compute_task,
         enhancement_quality_monitor_task,
         dependency_auto_dispatch_task,
+        alert_outbox_task,
         bg_process_liveness_task,
         lesson_store_refresh_task,
         barot_temp_agent_ttl_task,
