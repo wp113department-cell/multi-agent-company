@@ -31,7 +31,10 @@ export NEXT_PUBLIC_API_URL="$E2E_API_URL"
 mkdir -p "$WORK"
 
 PIDS=()
-cleanup() { for p in "${PIDS[@]}"; do kill "$p" 2>/dev/null || true; done; }
+# Stop each server with everything it started (`npx next start` runs a
+# separate next-server process that outlived a plain kill and kept the port).
+kill_tree() { for c in $(pgrep -P "$1"); do kill_tree "$c"; done; kill "$1" 2>/dev/null || true; }
+cleanup() { for p in "${PIDS[@]}"; do kill_tree "$p"; done; }
 trap cleanup EXIT
 
 wait_for() {  # url, name
