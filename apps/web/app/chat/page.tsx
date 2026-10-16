@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   confirmChatAction,
@@ -19,6 +19,7 @@ import type { ChatSummary, Project } from "@/lib/api";
 import { authHeaders } from "@/lib/auth";
 import { Icon } from "../../components/Icon";
 import { activityFor } from "../../lib/chatActivity";
+import { createFrameBatcher } from "../../lib/frameBatch";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -80,6 +81,9 @@ type ChatMessage = TextMessage | ToolCallMessage | ConfirmMessage;
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/** Sol A38: messages drawn by default in a long chat. */
+const MAX_MESSAGES_SHOWN = 200;
 
 function uid() {
   return Math.random().toString(36).slice(2);
@@ -292,10 +296,21 @@ export default function ChatPage() {
       .catch(() => {});
   }, []);
 
-  // Auto-scroll
+  // Auto-scroll. Sol A38 (2026-10-16): an instant jump while streaming and
+  // only when the user is already near the bottom — a smooth scroll on
+  // every streamed piece made long answers sluggish and pulled the view
+  // away from anyone reading further up.
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    const el = bottomRef.current;
+    const box = el?.parentElement;
+    if (!el || !box) return;
+    const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 200;
+    if (nearBottom || !streaming) el.scrollIntoView({ behavior: streaming ? "auto" : "smooth" });
+  }, [messages, streaming]);
+
+  // Sol A38: only the latest messages are drawn; older ones on request.
+  const [showAll, setShowAll] = useState(false);
+  const visibleMessages = showAll ? messages : messages.slice(-MAX_MESSAGES_SHOWN);
 
   const repoPath = selectedRepo;
   const selectedProject = repos.find((r) => r.localPath === selectedRepo) ?? null;
@@ -487,16 +502,31 @@ export default function ChatPage() {
   const BASE_RECONNECT_DELAY_MS = 1000;
 
   // ---- Shared SSE event handling (initial fetch-stream + reconnect EventSource) ----
+  // Sol A38: streamed text is drawn at most once per screen frame instead
+  // of re-rendering the whole message list for every small piece.
+  const textBatch = useMemo(
+    () =>
+      createFrameBatcher(() => {
+        const id = assistantMsgIdRef.current;
+        const content = assistantContentRef.current;
+        setMessages((prev) =>
+          prev.map((m) => (m.id === id && m.kind === "text" ? { ...m, content } : m)),
+        );
+      }),
+    [],
+  );
+  useEffect(() => () => textBatch.cancel(), [textBatch]);
+
   const handleSseEvent = useCallback((event: SseEvent) => {
     setActivity((current) => activityFor(event, current));
     if (event.type === "text_delta") {
       assistantContentRef.current += event.text;
-      const id = assistantMsgIdRef.current;
-      const content = assistantContentRef.current;
-      setMessages((prev) =>
-        prev.map((m) => (m.id === id && m.kind === "text" ? { ...m, content } : m)),
-      );
-    } else if (event.type === "tool_call") {
+      textBatch.schedule();
+      return;
+    }
+    // anything else is shown after the text that came before it
+    textBatch.flushNow();
+    if (event.type === "tool_call") {
       if (assistantContentRef.current.trim()) {
         assistantMsgIdRef.current = uid();
         assistantContentRef.current = "";
@@ -579,7 +609,7 @@ export default function ChatPage() {
         setMessages((prev) => prev.filter((m) => m.id !== staleId));
       }
     }
-  }, []);
+  }, [textBatch]);
 
   // ---- Reconnect to a dropped stream ----
   // The agent runs as a backend background task decoupled from the HTTP
@@ -974,7 +1004,16 @@ export default function ChatPage() {
               </div>
             )}
 
-            {messages.map((msg) => {
+            {!showAll && messages.length > MAX_MESSAGES_SHOWN && (
+              <button
+                type="button"
+                onClick={() => setShowAll(true)}
+                className="mx-auto block rounded-full border border-slate-200 px-3 py-1 text-xs text-slate-500 hover:bg-slate-50 dark:border-slate-700"
+              >
+                Show {messages.length - MAX_MESSAGES_SHOWN} earlier messages
+              </button>
+            )}
+            {visibleMessages.map((msg) => {
               if (msg.kind === "text") {
                 if (!msg.content && !streaming) return null;
                 return (
