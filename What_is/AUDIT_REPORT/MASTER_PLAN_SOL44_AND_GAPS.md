@@ -211,7 +211,7 @@ Each batch groups items that touch the same code, so nothing is fixed twice.
 | 12 | G13 | Frontend XSS | P3 | ✅ | apps/web/lib/safeUrl.test.ts |
 | 13 | A41 | Real-stack CI journeys, safe inputs | P2 | ✅ | CI job `real-journeys` (9/9 locally) |
 | 13 | A43 | Alert outbox, signed webhooks | P2 | ✅ outgoing (outbox, retries, dead letters, signed); incoming receiver waits for W8/G5 | backend/tests/test_a43_alert_outbox.py |
-| 13 | G14 | Supply chain and licences | P3 | ⬜ | |
+| 13 | G14 | Supply chain and licences | P3 | ✅ | CI job `supply-chain`; backend/tests/test_g14_supply_chain.py |
 | 14 | G11 | Goals → roadmap → epics end to end | P3 | ⬜ | |
 | 14 | G12 | MCP server | P3 | ⬜ | |
 | 15 | G5 | Live GitHub/Slack/Linear | P2 | ⬜ | needs D5 |
@@ -738,5 +738,11 @@ Every item gets a full local CI before each push. Close heavy apps first, becaus
   - **Real bug:** the production compose file never passed `ALERT_WEBHOOK_URL` to the backend or the worker, so alerts could not be turned on in production. Fixed for both services.
   - **Incoming webhooks:** there is still no incoming GitHub/CI receiver, and no feature needs one yet. The audit asks for signed, replay-protected incoming events "when needed". That part belongs with W8/G5 (GitHub integration, waiting for the owner's keys).
   - Tests: 6 in `tests/test_a43_alert_outbox.py` (outage then recovery, dead letter, deduplication, signed, unsigned, database down); 4 fail on the old code. The older alert tests still pass.
-- **Next session:** G14 (supply chain); then Batch 14 (G11, G12). Run full local CI and push.
+- **2026-10-16: Batch 13, G14. DONE (local).**
+  - **Licences:** `scripts/supply_chain.py` reads the licence of every shipped package: the full Python dependency tree of `backend/requirements.txt` and the web app's production npm packages, 170 in all. It fails when one has a strong copyleft licence (GPL, AGPL, SSPL, EUPL, OSL) or no licence, unless the package was reviewed and listed with the reason. Today: no problem. LGPL packages (psycopg, and libvips through sharp) are dynamically linked, which the LGPL allows. A test found and fixed a gap in the rule: the "GPLv3" classifier form was missed.
+  - **SBOM:** the same script writes a CycloneDX 1.5 SBOM (name, version, purl, licence). The new CI job `supply-chain` keeps it for 90 days with each run.
+  - **Pinned images:** every base image (python 3.11/3.12-slim, node 22-slim, pgvector pg16, redis 7-alpine) is pinned by digest in the Dockerfiles, both compose files and CI. Dependabot (`.github/dependabot.yml`) opens a monthly pull request when a newer image is published, so pins still get security fixes. A test fails on any unpinned base image.
+  - **Vendored repos** (`repos/`, 11 reference projects): git-ignored and excluded from every Docker build context, so nothing from them ships. Licences: MIT or Apache-2.0, except `autogen` (top-level licence file is CC-BY for its docs) and `andrej-karpathy-skills` (no licence, all rights reserved). Both must stay reference-only: copy no code from them.
+  - Not pinned: the runtime sandbox default `alpine:latest` (`BASH_SANDBOX_IMAGE`), which the runner's image allow-list matches by name; production uses the toolchain image built from the pinned python base.
+- **Next session:** Batch 14 (G11 goals → roadmap → epics, G12 MCP server). Run full local CI and push.
 

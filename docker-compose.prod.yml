@@ -50,7 +50,7 @@ x-logging: &default-logging
 
 services:
   db:
-    image: pgvector/pgvector:pg16
+    image: pgvector/pgvector:pg16@sha256:7b822b0aac60967beb1ea5e576b8602c94c300a157d187f385ae3e0da199b90a
     restart: unless-stopped
     logging: *default-logging
     environment:
@@ -70,7 +70,7 @@ services:
           memory: 2g
 
   redis:
-    image: redis:7-alpine
+    image: redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
     restart: unless-stopped
     logging: *default-logging
     command: redis-server --appendonly yes
@@ -258,7 +258,7 @@ services:
   # does not survive losing that disk. RPO = BACKUP_INTERVAL_SECONDS (24 h
   # by default); restore with scripts/restore_db.sh (see disaster_recovery.md).
   backup:
-    image: pgvector/pgvector:pg16
+    image: pgvector/pgvector:pg16@sha256:7b822b0aac60967beb1ea5e576b8602c94c300a157d187f385ae3e0da199b90a
     restart: unless-stopped
     logging: *default-logging
     entrypoint: ["bash", "-c"]

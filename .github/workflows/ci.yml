@@ -23,7 +23,7 @@ jobs:
 
     services:
       postgres:
-        image: pgvector/pgvector:pg16
+        image: pgvector/pgvector:pg16@sha256:7b822b0aac60967beb1ea5e576b8602c94c300a157d187f385ae3e0da199b90a
         env:
           POSTGRES_USER: gridiron
           POSTGRES_PASSWORD: gridiron_dev_only
@@ -38,7 +38,7 @@ jobs:
       # G8 (2026-10-12): one shared Redis, as in production, so the
       # multi-process tests (tests/test_g8_multi_process.py) run here too.
       redis:
-        image: redis:7-alpine
+        image: redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
         ports:
           - 6379:6379
         options: >-
@@ -358,7 +358,7 @@ jobs:
 
     services:
       postgres:
-        image: pgvector/pgvector:pg16
+        image: pgvector/pgvector:pg16@sha256:7b822b0aac60967beb1ea5e576b8602c94c300a157d187f385ae3e0da199b90a
         env:
           POSTGRES_USER: gridiron
           POSTGRES_PASSWORD: gridiron_dev_only
@@ -371,7 +371,7 @@ jobs:
           --health-timeout 5s
           --health-retries 5
       redis:
-        image: redis:7-alpine
+        image: redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
         ports:
           - 6379:6379
 
@@ -422,6 +422,52 @@ jobs:
           name: real-journeys-results
           path: apps/web/test-results/
           retention-days: 7
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Sol G14 (2026-10-16): licences of every shipped package (Python and the
+  # web app's production npm packages) and a CycloneDX SBOM per run.
+  # ──────────────────────────────────────────────────────────────────────
+  supply-chain:
+    name: Licences and SBOM
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements*.txt
+
+      - name: Install backend dependencies
+        run: pip install -r backend/requirements.txt
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 11.9.0
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check licences and write the SBOM
+        run: python scripts/supply_chain.py --sbom sbom.cdx.json
+
+      - name: Upload SBOM
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: sbom
+          path: sbom.cdx.json
+          retention-days: 90
 
   # ──────────────────────────────────────────────────────────────────────
   # Security scan — pip-audit

@@ -6,7 +6,7 @@
 # your orchestrator's real secrets store before using this anywhere shared.
 services:
   db:
-    image: pgvector/pgvector:pg16
+    image: pgvector/pgvector:pg16@sha256:7b822b0aac60967beb1ea5e576b8602c94c300a157d187f385ae3e0da199b90a
     restart: unless-stopped
     environment:
       POSTGRES_USER: gridiron
@@ -23,7 +23,7 @@ services:
       retries: 10
 
   redis:
-    image: redis:7-alpine
+    image: redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
     restart: unless-stopped
     ports:
       - "127.0.0.1:${REDIS_PORT:-6379}:6379"
@@ -212,7 +212,7 @@ services:
   # Set GRIDIRON_BACKUP_DIR (repo-root .env) to a folder on ANOTHER disk —
   # a backup on the database's own disk does not survive losing that disk.
   backup:
-    image: pgvector/pgvector:pg16
+    image: pgvector/pgvector:pg16@sha256:7b822b0aac60967beb1ea5e576b8602c94c300a157d187f385ae3e0da199b90a
     restart: unless-stopped
     entrypoint: ["bash", "-c"]
     command:

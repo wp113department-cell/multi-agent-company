@@ -1,0 +1,17 @@
+# Sol G14 (2026-10-16): base images are pinned by digest (tag@sha256:…) so a
+# build always gets the exact image that was tested. Dependabot opens a pull
+# request once a month when a newer image is published for the same tag, so
+# the pins still pick up security fixes; CI checks each one before merge.
+version: 2
+updates:
+  - package-ecosystem: docker
+    directories:
+      - /backend
+      - /backend/docker/bash-sandbox
+      - /apps/web
+    schedule:
+      interval: monthly
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: monthly
