@@ -25,10 +25,10 @@ on:
         description: "Optional: run against a real deployed BASE_URL instead of spinning up a local instance"
         required: false
         type: string
-      api_token:
-        description: "Optional: bearer token for auth-gated endpoints (/api/tasks, /api/metrics)"
-        required: false
-        type: string
+      # Sol A41 (2026-10-16): the bearer token for auth-gated endpoints is no
+      # longer a workflow input (inputs are visible in the run's details and
+      # were pasted into the shell). Store it as the repository secret
+      # STAGING_API_TOKEN instead.
 
 concurrency:
   group: load-test-${{ github.ref }}
@@ -124,7 +124,9 @@ jobs:
 
       - name: Dump backend log on failure
         if: failure()
-        run: cat backend/uvicorn.log || true
+        # this job already runs in backend/ (defaults.run.working-directory);
+        # `backend/uvicorn.log` pointed at a file that never existed
+        run: cat uvicorn.log || true
 
   k6-against-staging:
     name: k6 load + stress (staging)
@@ -141,8 +143,26 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y k6
 
+      # Sol A41: inputs and secrets reach the shell only as environment
+      # variables (never `${{ }}` inside a run: script, which allowed command
+      # injection through the URL input), and the URL must be http(s).
+      - name: Check the staging URL
+        env:
+          STAGING_BASE_URL: ${{ github.event.inputs.staging_base_url }}
+        run: |
+          if [[ ! "$STAGING_BASE_URL" =~ ^https?://[A-Za-z0-9._~:/?#@%=+-]+$ ]]; then
+            echo "staging_base_url must be an http(s) URL with plain URL characters only" >&2
+            exit 1
+          fi
+
       - name: k6 load scenario
-        run: k6 run -e BASE_URL="${{ github.event.inputs.staging_base_url }}" -e API_TOKEN="${{ github.event.inputs.api_token }}" -e SCENARIO=load backend/tests/load/gridiron_load_test.js
+        env:
+          STAGING_BASE_URL: ${{ github.event.inputs.staging_base_url }}
+          API_TOKEN: ${{ secrets.STAGING_API_TOKEN }}
+        run: k6 run -e BASE_URL="$STAGING_BASE_URL" -e API_TOKEN="$API_TOKEN" -e SCENARIO=load backend/tests/load/gridiron_load_test.js
 
       - name: k6 stress scenario
-        run: k6 run -e BASE_URL="${{ github.event.inputs.staging_base_url }}" -e API_TOKEN="${{ github.event.inputs.api_token }}" -e SCENARIO=stress backend/tests/load/gridiron_load_test.js
+        env:
+          STAGING_BASE_URL: ${{ github.event.inputs.staging_base_url }}
+          API_TOKEN: ${{ secrets.STAGING_API_TOKEN }}
+        run: k6 run -e BASE_URL="$STAGING_BASE_URL" -e API_TOKEN="$API_TOKEN" -e SCENARIO=stress backend/tests/load/gridiron_load_test.js

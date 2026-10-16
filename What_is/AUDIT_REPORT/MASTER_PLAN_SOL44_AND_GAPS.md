@@ -200,16 +200,16 @@ Each batch groups items that touch the same code, so nothing is fixed twice.
 | 11 | A30 | Volume ownership | P1 | ✅ done, local (not pushed) | fresh-volume proof 2026-10-13 + test_a30_data_volume_ownership |
 | 11 | A40 | Readiness endpoint | P1 | ✅ done, local (not pushed) | test_a40_readiness |
 | 11 | A42 | run.sh dev-only, visible errors | P2 | ✅ done, local (not pushed) | run.sh dev-only, 127.0.0.1, named DB volume, migrations fail loudly |
-| 11 | A44 | Non-root frontend, CSP | P3 | 🟡 runtime done (non-root, nonce CSP); accessibility part in Batch 12 | apps/web/middleware.test.ts + browser check |
+| 11 | A44 | Non-root frontend, CSP | P3 | ✅ runtime (non-root, nonce CSP) + accessibility (axe, keyboard, tour focus) | apps/web/middleware.test.ts, apps/web/e2e/a11y.spec.ts |
 | 12 | A32 | Task pagination | P1/P2 | ✅ done, local (not pushed) | test_a32_task_paging (cursor off-by-one fixed) |
 | 12 | A33 | No duplicate task on upload failure | P1/P2 | ✅ done, local (not pushed) | NewTaskForm.test.tsx |
 | 12 | A34 | Priority sent | P2 | ✅ done, local (not pushed) | lib/api.test.ts (already fixed in UI redesign) |
 | 12 | A35 | Errors and session expiry shown | P2 | ✅ done, local (not pushed) | lib/api.test.ts + task list errors |
 | 12 | A36 | Stream dedup on reconnect | P2 | ✅ done, local (not pushed) | test_a36_stream_resume + stream page test |
 | 12 | A37 | Chat history and confirmations | P2 | ✅ done, local (not pushed) | chat refresh/confirm/early-EOF |
-| 12 | A38 | Streaming render performance | P2 | ⬜ | |
-| 12 | G13 | Frontend XSS | P3 | ⬜ | |
-| 13 | A41 | Real-stack CI journeys, safe inputs | P2 | ⬜ | |
+| 12 | A38 | Streaming render performance | P2 | ✅ | apps/web/lib/frameBatch.test.ts |
+| 12 | G13 | Frontend XSS | P3 | ✅ | apps/web/lib/safeUrl.test.ts |
+| 13 | A41 | Real-stack CI journeys, safe inputs | P2 | ✅ | CI job `real-journeys` (9/9 locally) |
 | 13 | A43 | Alert outbox, signed webhooks | P2 | ⬜ | |
 | 13 | G14 | Supply chain and licences | P3 | ⬜ | |
 | 14 | G11 | Goals → roadmap → epics end to end | P3 | ⬜ | |
@@ -725,5 +725,13 @@ Every item gets a full local CI before each push. Close heavy apps first, becaus
   - **A35:** task-list load errors show with Retry; Stop/Resume check the server's answer (Resume keeps the message on failure); a 401 anywhere sends the user to login with an expiry note and back to the page they were on.
   - **A36:** activity events are numbered; a reconnect asks for events after the last one and drops repeats; the page keeps the latest 1,000 events. Also fixed: a resumed task's live view ended at the old "stopped" event on reconnect.
   - **A37:** the open chat is kept in the address (`?chat=`) so a refresh reopens it; a confirmation counts only after the server accepts it; a stream that ends early reattaches.
-- **Next session:** check local CI (started on `5a7d9861`), run it on the latest commit, push, confirm GitHub; then A38, G13, A44 accessibility, Batches 13–14; web-search API key decision.
+- **2026-10-14: web_search uses Firecrawl (owner decision).** The DuckDuckGo scraping search (`ddgs`) is removed; `web_search` calls Firecrawl with `FIRECRAWL_API_KEY` (5 results, output capped at 6,000 characters, the key is never shown in errors; without a key it says web search is not set up). Tests use a fake client; the real service was checked once by hand. GitHub CI green on `ff522f9e`.
+- **2026-10-16: Batch 12 finished: A38, G13, A44 accessibility. DONE (local).**
+  - **A38:** streamed chat text is drawn once per frame instead of once per token; the chat scrolls only when the reader is at the bottom; long chats show the latest 200 messages with "Show earlier messages".
+  - **G13:** links from stored data (the PR link) open only when they are http(s); a test fails if a raw-HTML sink (`dangerouslySetInnerHTML`, `innerHTML`, `eval`) appears in the frontend.
+  - **A44 accessibility:** axe checks on login, tasks and chat (no serious or critical issues; 7 low-contrast texts fixed); keyboard-only login; the guided tour is a dialog that keeps focus inside and gives it back when closed.
+- **2026-10-16: Batch 13, A41. DONE (local).**
+  - The real-stack journeys from audit 12 (`apps/web/e2e-real/journeys.spec.ts`) now run in CI (job `real-journeys`) through `scripts/e2e_real_stack.sh`: throwaway database, demo data, a throwaway approver, real backend, production frontend build. Fake Anthropic key; the live-AI journeys never run there. Locally 9/9 passed, including A5 (forced password change), which had always been skipped because no account was set up for it.
+  - **Safe workflow inputs:** the load-test workflow no longer takes an API token as a run input (inputs are shown in the run log); it uses the `STAGING_API_TOKEN` secret. The staging URL reaches the shell only as an environment variable and must look like an http(s) URL, so it cannot inject commands. Its failure step now prints the right log file.
+- **Next session:** A43 (alert outbox, signed webhooks), G14 (supply chain); then Batch 14 (G11, G12). Run full local CI and push.
 

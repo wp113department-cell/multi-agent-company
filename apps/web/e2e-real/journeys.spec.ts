@@ -10,6 +10,8 @@ import { expect, test, type Page, type Response } from "@playwright/test";
  *   - a ready project (the demo seeder supplies these)
  * Journeys that need a paid LLM call (plan generation, agent execution,
  * chat answers) are not here — they are in PENDING_TESTS_API_KEYS.md.
+ * scripts/e2e_real_stack.sh sets all of this up on a throwaway database and
+ * runs this file; CI runs it in the `real-journeys` job (Sol A41).
  */
 
 const USER = process.env.E2E_USER ?? "audit12";

@@ -347,6 +347,83 @@ jobs:
           retention-days: 7
 
   # ──────────────────────────────────────────────────────────────────────
+  # Sol A41 (2026-10-16): real-stack journeys — the production Next build
+  # against a real backend and Postgres, nothing mocked. No paid AI call can
+  # happen: scripts/e2e_real_stack.sh sets a fake Anthropic key and never
+  # runs live-ai.spec.ts.
+  # ──────────────────────────────────────────────────────────────────────
+  real-journeys:
+    name: Real-stack journeys (Playwright)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: gridiron
+          POSTGRES_PASSWORD: gridiron_dev_only
+          POSTGRES_DB: gridiron_journeys
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://gridiron:gridiron_dev_only@localhost:5432/gridiron_journeys
+      REDIS_URL: "redis://localhost:6379/0"
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements*.txt
+
+      - name: Install backend dependencies
+        run: pip install -r backend/requirements.txt
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 11.9.0
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+        working-directory: apps/web
+
+      - name: Run real-stack journeys
+        run: scripts/e2e_real_stack.sh
+        env:
+          E2E_WORK_DIR: ${{ runner.temp }}/journeys
+
+      - name: Upload Playwright traces on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: real-journeys-results
+          path: apps/web/test-results/
+          retention-days: 7
+
+  # ──────────────────────────────────────────────────────────────────────
   # Security scan — pip-audit
   # ──────────────────────────────────────────────────────────────────────
   security:
