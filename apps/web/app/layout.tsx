@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
-import { Press_Start_2P, Space_Grotesk } from "next/font/google";
+import { Inter } from "next/font/google";
 import "./globals.css";
 import { Providers } from "./providers";
 import { NavBar } from "../components/NavBar";
@@ -10,8 +10,9 @@ import { ProductTour } from "../components/ProductTour";
 // runtime request to Google; works offline and with the strict CSP).
 // Arcade-style pixel font for the logo and headings, a clean modern
 // AI-platform font for all other text.
-const arcade = Press_Start_2P({ weight: "400", subsets: ["latin"], variable: "--font-arcade", display: "swap" });
-const sans = Space_Grotesk({ subsets: ["latin"], variable: "--font-sans", display: "swap" });
+// One professional UI font for everything (2026-10-19, owner: the pixel
+// "arcade" font and Space Grotesk looked like a game).
+const sans = Inter({ subsets: ["latin"], variable: "--font-sans", display: "swap" });
 
 export const metadata: Metadata = {
   title: "Multi Agentic Company — AI software team",
@@ -25,7 +26,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   // ahead of time could not).
   await headers();
   return (
-    <html lang="en" className={`${arcade.variable} ${sans.variable}`}>
+    <html lang="en" className={sans.variable}>
       <body className="min-h-screen overflow-x-hidden text-slate-900 dark:text-slate-100">
         <Providers>
           <NavBar />

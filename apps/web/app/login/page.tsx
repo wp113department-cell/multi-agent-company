@@ -120,7 +120,7 @@ export default function LoginPage() {
           <div className="flex items-center gap-3">
             <BrandMark size={40} />
             <div className="leading-tight">
-              <p className="font-arcade text-sm text-slate-900 dark:text-white">{BRAND_NAME}</p>
+              <p className="text-base font-semibold tracking-tight text-slate-900 dark:text-white">{BRAND_NAME}</p>
               <p className="text-xs font-medium text-orange-600">Your AI software team</p>
             </div>
           </div>

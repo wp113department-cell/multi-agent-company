@@ -202,7 +202,7 @@ export function NavBar() {
         <Link href="/start" className="flex shrink-0 items-center gap-2.5" aria-label={`${BRAND_NAME} home`}>
           <BrandMark size={34} />
           <span className="leading-tight">
-            <span className="font-arcade block text-[11px] text-slate-900 dark:text-white">
+            <span className="block text-sm font-semibold tracking-tight text-slate-900 dark:text-white">
               {BRAND_NAME}
             </span>
             <span className="hidden text-[11px] font-medium text-orange-600 sm:block xl:hidden 2xl:block">
