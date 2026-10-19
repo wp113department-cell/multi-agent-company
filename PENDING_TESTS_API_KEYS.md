@@ -946,3 +946,49 @@ Rules:
 **No LLM test is pending.**
 
 **L1** (schema strictness): across the 22 paid run logs, exactly **one** submission broke its declared schema: `security_architect`'s `submit_threat_model` left out the required `overall_risk` (eval_008). Today it is kept with a warning. Under strict validation the agent would be asked to resubmit. One miss in ~25 agent runs (about 4%) says strict mode is affordable, but it would cost one extra call per miss. Recommendation: strict for submit tools whose output feeds code (patches, plans), soft for reports.
+
+## O. (2026-10-19) Live-AI tests added since 2026-10-07 — WAITING for Anthropic credit
+
+**Status: skipped on purpose.** The Anthropic balance is empty; the owner will recharge, and then these run. Until then, no real AI call is made (owner rule: no Anthropic spend without the owner's OK in that session).
+
+"No LLM test is pending" (section N, 2026-10-06) was true then. Everything below was built or changed **after** 2026-10-07 and has only been tested with the model faked (`ANTHROPIC_API_KEY=sk-ant-test-not-a-real-key`).
+
+### O1. The list
+
+| # | Test | Plan item | What it proves | Backend | Est. cost |
+|---|---|---|---|---|---|
+| O1 | **Held-out eval suite + baselines**: write 5–8 new eval tasks on a real repo the agents have never seen; run `tests/evals/eval_runner.py --save-baseline`, change nothing, run again with `--compare-baseline` (no false regressions), then make one prompt worse and check the regression is reported (exit 1) | **A26** | Quality is measured on unseen work and regressions are caught | Anthropic, economy; judge on Groq | $1.00–2.00 |
+| O2 | **One real Economy task end to end** in Docker (RQ worker): plan → approval → coding in the sandbox → tests → required quality gates → delivery approval (apply to folder) | A17, A18, A19, A21, A24, A31, W2 | The whole chain works with the current code, durable progress in the worker, the spend reservation, gates that fail closed | Anthropic (Haiku) | $0.05–0.15 |
+| O3 | **One Max task with independent steps**: a plan with 2+ steps that touch different files runs them in parallel; steps that share a file run one after another | A20 | Clash-free parallel steps with a real plan | Anthropic | $0.30–0.60 |
+| O4 | **Existing project, "understand first" with AI on**: open an existing folder, run the optional AI summary on top of the free scan | W1 | The AI part of the project understanding | Anthropic (Haiku) | $0.02–0.05 |
+| O5 | **New project from zero**: empty folder → plan → code → tests → apply to folder | W5 | A new project is really built | Anthropic | $0.20–0.50 |
+| O6 | **Chat after C6**: ask a question about a project (read-only answer, live activity line, reopen from history), then "Make this a task" and check the new task's description | C6, A37, A38 | The question-only chat and its link to tasks | Anthropic (Haiku + cache) | $0.03–0.08 |
+| O7 | **A custom agent answers** (agent created in the UI) | UI redesign 2026-10-07 | User-created agents really run | Anthropic (Haiku) | $0.01–0.03 |
+| O8 | **Research agent with web search**: a question that needs the web; the answer cites Firecrawl results | Firecrawl (2026-10-14) | The agent uses the new search tool (also spends Firecrawl credits) | Anthropic + Firecrawl | $0.02–0.05 |
+| O9 | **Re-run journeys C, D, G** (`apps/web/e2e-real/live-ai.spec.ts`, `LIVE_AI=1`): check the spec still matches the C6 chat first ($0), then run | L8–L10 again | The real UI flows after this month's UI changes | Anthropic | $0.10–0.25 |
+
+**Total estimate: about $2–4.** O1 is the largest; it can run last or on its own day.
+
+### O2. Before the first paid call ($0)
+
+Same rules as N2:
+1. Dry run each item with the fake key: it must fail exactly at its first model call (401, not billed). Fix anything that fails earlier.
+2. `COST_MODE=economy` set explicitly (the test conftest defaults to quality); `COST_BUDGET_DAILY_USD` set to the owner's cap for the day with `SPEND_GUARD_REDIS=true`; prove the cap refuses a call before spending.
+3. A throwaway repo or folder for anything that writes; never this project.
+4. Background loops parked and an isolated database for the live server (see N5b).
+5. One item at a time; record each result and its measured cost in a ledger like N6. A failure stops the run; diagnose from the logs for $0, fix, re-run only that item.
+
+### O3. Not AI — waiting for keys, not credit
+
+These need the owner's keys but **no Anthropic credit**; they can run as soon as the keys are in `backend/.env` (or GitHub token in Settings):
+
+| # | Test | Plan item | Key |
+|---|---|---|---|
+| W8a | Clone a **private** GitHub repo | W8 | GitHub token |
+| W8b | **Create a new GitHub repo** from the New project page | W8 | GitHub token |
+| W8c | Push + **open a PR** after a delivery approval | W8, G5 | GitHub token |
+| W8d | PR to a repo whose default branch is **not `main`** | W6, W8 | GitHub token |
+| G5a | Slack message tool posts to a channel | G5 | `SLACK_WEBHOOK_URL` |
+| G5b | Linear tool creates an issue | G5 | `LINEAR_API_KEY` |
+
+W8c needs a task that produced code. Use a task from O2 when credit exists, or a hand-made commit on a task branch (no AI) before then.
