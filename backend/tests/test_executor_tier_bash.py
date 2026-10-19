@@ -25,6 +25,15 @@ from app.agents.tools import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _docker_present(monkeypatch: pytest.MonkeyPatch) -> None:
+    """These tests count the calls to the patched subprocess.run. The
+    sandbox's one-time `docker version` probe also goes through it unless an
+    earlier test in the same process had already cached the answer, so the
+    counts depended on test order. Answer the probe directly."""
+    monkeypatch.setattr("app.policy.sandbox._docker_available", lambda: True)
+
+
 def _fake_subprocess_result(stdout: str = "ok", returncode: int = 0) -> MagicMock:
     m = MagicMock()
     m.stdout = stdout

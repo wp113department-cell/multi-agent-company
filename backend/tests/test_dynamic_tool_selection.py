@@ -179,6 +179,7 @@ def test_real_spike_agent_tool_list_unchanged_when_handlers_complete() -> None:
 
 
 def test_real_qa_agent_tool_list_unchanged_when_handlers_complete() -> None:
+    import app.agents.qa  # noqa: F401  (registers its contract; see bug_fix below)
     from app.agents.tools import QA_TOOLS
 
     handlers = dict.fromkeys(t["name"] for t in QA_TOOLS)
@@ -187,6 +188,9 @@ def test_real_qa_agent_tool_list_unchanged_when_handlers_complete() -> None:
 
 
 def test_real_bug_fix_agent_tool_list_unchanged_when_handlers_complete() -> None:
+    # the agent registers its contract when imported; without this the test
+    # passed only when an earlier test in the same process had imported it
+    import app.agents.bug_fix  # noqa: F401
     from app.agents.tools import BUG_FIX_TOOLS
 
     handlers = dict.fromkeys(t["name"] for t in BUG_FIX_TOOLS)
