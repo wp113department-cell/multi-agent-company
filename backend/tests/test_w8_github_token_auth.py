@@ -128,3 +128,45 @@ def test_a_private_repo_is_cloned_with_the_saved_token(
 
 async def _no_saved_setting(*_a: Any, **_k: Any) -> None:
     return None
+
+
+def test_the_console_push_and_pull_send_the_repositorys_token(
+    github_task, monkeypatch: pytest.MonkeyPatch  # noqa: F811
+) -> None:
+    """The developer console's own Push / Pull buttons sent no token either."""
+    import urllib.parse
+
+    from fastapi.testclient import TestClient
+
+    from app.db.models import DevTask, Repo
+    from app.db.repository import set_setting
+    from app.main import app
+    from app.security.credential_vault import scoped_credential_key
+    from tests.test_w6_target_branch import _db
+
+    task_id, _ = github_task
+
+    async def setup(s):  # type: ignore[no-untyped-def]
+        task = await s.get(DevTask, task_id)
+        repo = await s.get(Repo, task.repo_id)
+        await set_setting(
+            s, scoped_credential_key("github_token", repo.id), "console-token"
+        )
+        await s.commit()
+        return repo.local_path
+
+    path = _db(setup)
+    seen: list[Any] = []
+
+    async def fake(*args: Any, **kw: Any) -> dict[str, Any]:
+        seen.append(kw.get("token"))
+        return {"ok": True, "stdout": "", "stderr": ""}
+
+    monkeypatch.setattr(git_service, "git_push", fake)
+    monkeypatch.setattr(git_service, "git_pull", fake)
+    monkeypatch.setattr("app.api.console._decode_path", lambda _r: path)
+    rpath = urllib.parse.quote(path, safe="")
+    with TestClient(app) as client:
+        client.post(f"/api/console/repos/{rpath}/push", json={"branch": "x"})
+        client.post(f"/api/console/repos/{rpath}/pull")
+    assert seen == ["console-token", "console-token"]

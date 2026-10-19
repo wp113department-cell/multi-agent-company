@@ -243,13 +243,51 @@ async def repo_commit(
         raise HTTPException(status_code=400, detail=str(exc))
 
 
+async def _github_token_for(path: str) -> str | None:
+    """W8 (2026-10-19): the token for a console push/pull, chosen as for task
+    delivery — the repository's own token, then Settings, then GITHUB_TOKEN.
+    Before, the console sent none and worked only where the machine itself
+    was logged in to GitHub. git_service only sends it to GitHub hosts."""
+    import os
+
+    from sqlalchemy import select
+
+    from app.config import get_settings
+    from app.db.models import Repo
+    from app.db.repository import get_setting
+    from app.db.session import get_session_factory
+    from app.security.credential_vault import scoped_credential_key
+
+    async with get_session_factory()() as db:
+        repo_id = (
+            await db.execute(
+                select(Repo.id).where(
+                    Repo.local_path.in_([path, os.path.realpath(path)])
+                )
+            )
+        ).scalar()
+        scoped = (
+            await get_setting(db, scoped_credential_key("github_token", repo_id))
+            if repo_id is not None
+            else None
+        )
+        return (
+            scoped
+            or (await get_setting(db, "github_token"))
+            or get_settings().github_token
+            or None
+        )
+
+
 @router.post("/repos/{rpath:path}/push")
 async def repo_push(
     rpath: str, req: PushRequest, _approver: str = Depends(require_approver)
 ) -> dict[str, Any]:
     path = _decode_path(rpath)
     try:
-        return await git_service.git_push(path, req.remote, req.branch)
+        return await git_service.git_push(
+            path, req.remote, req.branch, token=await _github_token_for(path)
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
@@ -284,6 +322,8 @@ async def repo_pull(
 ) -> dict[str, Any]:
     path = _decode_path(rpath)
     try:
-        return await git_service.git_pull(path, remote)
+        return await git_service.git_pull(
+            path, remote, token=await _github_token_for(path)
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))

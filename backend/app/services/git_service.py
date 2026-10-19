@@ -599,11 +599,26 @@ async def git_checkout(
     return {"ok": rc == 0, "stdout": stdout, "stderr": stderr}
 
 
-async def git_pull(repo_path: str, remote: str = "origin") -> dict[str, Any]:
-    """Pull latest from remote."""
+async def git_pull(
+    repo_path: str, remote: str = "origin", token: str | None = None
+) -> dict[str, Any]:
+    """Pull latest from remote. With `token`, authenticates to GitHub as in
+    git_push (W8)."""
     _validate_workspace(repo_path)
     # `remote` is a request parameter on a login-only route: `--upload-pack=CMD`
     # / `--rebase` etc. must never reach git as an option.
     _validate_remote_name(remote)
-    rc, stdout, stderr = await _run_git(["pull", remote], cwd=repo_path, timeout=120.0)
-    return {"ok": rc == 0, "stdout": stdout, "stderr": stderr}
+    env = None
+    if token:
+        rc_url, url_out, _ = await _run_git(
+            ["remote", "get-url", remote], cwd=repo_path
+        )
+        env = github_auth_env(url_out.strip(), token) if rc_url == 0 else None
+    rc, stdout, stderr = await _run_git(
+        ["pull", remote], cwd=repo_path, timeout=120.0, env=env
+    )
+    return {
+        "ok": rc == 0,
+        "stdout": scrub_secret(stdout, token),
+        "stderr": scrub_secret(stderr, token),
+    }
