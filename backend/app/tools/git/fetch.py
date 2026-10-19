@@ -84,6 +84,11 @@ def git_fetch_handler(repo_path: str, inp: dict[str, Any]) -> str:
             "git flag, not a remote — e.g. remote='--all' silently fetches "
             "from every configured remote instead of just the one named)."
         )
+    from app.tools.git.pull import configured_remote_error
+
+    remote_error = configured_remote_error(repo_path, remote)
+    if remote_error:
+        return remote_error
     prune = bool(inp.get("prune", False))
     cmd = ["git", "fetch", remote]
     if prune:

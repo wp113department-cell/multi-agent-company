@@ -157,7 +157,7 @@ Each batch groups items that touch the same code, so nothing is fixed twice.
 
 | Batch | Item | Title | Priority | Status | Commit / proof |
 |---|---|---|---|---|---|
-| 1 | G1 | Sweep every executing/writing/network tool | P1 | 🟡 partial | code-execution sweep done (8fddffbb); full per-tool attack sweep left |
+| 1 | G1 | Sweep every executing/writing/network tool | P1 | ✅ code execution (8fddffbb) + every write/network/browser/env tool attacked (2026-10-19, 3 holes fixed) | test_g1_dangerous_tools_sweep |
 | 1 | A01 | python_snippet and host executors → Docker | P0 | ✅ done, pushed (GitHub CI red on 3 tests, fix first) | 8fddffbb · test_a01_chat_db_tools_sandboxed |
 | 1 | A11 | Job network isolated from control plane | P1 | ✅ done, pushed (GitHub CI red on 3 tests, fix first) | 8fddffbb + 98f067fe · sandbox no network; migrations on owner-set network |
 | 1 | A31 | Execution worker with toolchain | P1 | ✅ done, pushed (GitHub CI red on 3 tests, fix first) | 98f067fe · test_a31_sandbox_runner, test_a31_capabilities |
@@ -773,5 +773,19 @@ Every item gets a full local CI before each push. Close heavy apps first, becaus
   - **UI:** a Goals panel on the Roadmap page: "Break into epics", each epic with Start, then Open (its epic page). The guided tour text mentions it.
   - Tests: 3 end-to-end with real Postgres and a fake model (`test_g11_goal_to_epics_e2e.py`); the old goals API tests updated to the new answer shape; 2 browser tests (`e2e/goals.spec.ts`). Mocked e2e 18/18, real-stack journeys 9/9. Real-AI run: O10 in `PENDING_TESTS_API_KEYS.md`.
 - **2026-10-19: GitHub CI on `e7140d40` red (1 test), my process mistake.** The green local CI covered commits up to `b58f2956`; the two G5 commits after it were pushed with only their own tests run. `test_env_example_has_no_stale_keys` failed: `.env.example` listed `SLACK_WEBHOOK_URL` / `LINEAR_API_KEY`, which config did not read. Fixed properly: both are now Settings fields (env or `backend/.env`, with the process environment as fallback), so a plain `uvicorn` run also finds them. Rule kept from now on: full local CI on the exact commit that is pushed. Also fixed `test_tool_discovery.py` leaving test agents in the shared registry, which failed the fleet's "unique capability tags" tests when run after it.
+- **2026-10-19: G1 dangerous-tools sweep finished. DONE (local).**
+  - Every tool in the manifest that writes files, reaches the network, uses the browser or reads the environment, and does not execute code, is attacked through its **real handler**. That is 73 tools and about 300 attacks. Code-executing tools were already sandboxed (A01/A31).
+  - Attacks:
+    - path escapes (`../`, absolute paths, a symlink out of the workspace, `/etc/passwd`, `.env`);
+    - internal URLs (localhost, `[::1]`, a hex IP, cloud metadata, `file://`), with a real local listener that records any connection;
+    - patches writing outside the workspace;
+    - git option injection (`--exec=`, `--upload-pack=`);
+    - secret environment variables.
+  - **3 real holes found and fixed:**
+    1. `check_target_repo_license_compliance` read any file on the host (its file name was never checked), and returned its lines as "package names". Now it uses the same workspace rule as the file tools.
+    2. `git_fetch` / `git_pull` accepted any URL as `remote`, so git connected to localhost and internal addresses. `remote` must now name a remote configured in the repository.
+    3. `read_env_var` returned `DATABASE_URL` with the database password. The shared secret masking now hides the user and password part of any URL value.
+  - Everything else held: no file written outside, no patch escaped, no git injection ran, no other tool connected to a local address.
+  - Tests: `tests/test_g1_dangerous_tools_sweep.py` (77 tests, 15 s): one per tool, plus checks that normal use still works. On the old code, the 4 affected tools fail.
 - **Next session:** push and confirm GitHub CI; then G11 (goals → roadmap → executive → epics end to end, mocked model); Slack/Linear checks when the keys are in `.env`.
 

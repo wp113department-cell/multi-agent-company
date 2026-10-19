@@ -47,7 +47,15 @@ def check_target_repo_license_compliance_handler(
         scan_target_repo_dependency_licenses,
     )
 
+    from app.policy.engine import check_path_in_worktree
+
     requirements_filename = str(inp.get("requirements_filename", "requirements.txt"))
+    # G1 (2026-10-19): the name was joined to the repo path unchecked, so
+    # "../x", an absolute path or a symlink read any file on the host and
+    # returned its lines as "package names". Same rule as the file tools.
+    allowed = check_path_in_worktree(requirements_filename, repo_path)
+    if not allowed.allowed:
+        return f"[POLICY DENIED] {allowed.reason}"
     try:
         report = scan_target_repo_dependency_licenses(repo_path, requirements_filename)
     except Exception as e:

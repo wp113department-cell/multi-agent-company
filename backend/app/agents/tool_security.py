@@ -503,6 +503,15 @@ def _mask_secret_value(name: str, value: str) -> str:
         )
     if not value:
         return value
+    # G1 (2026-10-19): a connection URL carries its password in the
+    # user-info part (DATABASE_URL=postgresql://user:pass@db/x); neither the
+    # name nor the value shape above caught it, so read_env_var returned the
+    # database password. Hide the user-info, keep where it points.
+    import re as _re
+
+    url = _re.match(r"^([a-zA-Z][a-zA-Z0-9+.\-]*://)[^/@\s]+@(.*)$", value)
+    if url:
+        return f"{url.group(1)}***REDACTED@{url.group(2)}"
     looks_secret = bool(_SECRET_NAME_RE.search(name)) or bool(
         _SECRET_VALUE_RE.match(value)
     )

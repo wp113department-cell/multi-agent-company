@@ -5409,7 +5409,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def git_pull(inp: dict[str, Any]) -> str:
         remote = str(inp.get("remote", "origin"))
         branch = str(inp.get("branch", ""))
-        pull_error = validate_git_pull_inputs(remote, branch)
+        pull_error = validate_git_pull_inputs(remote, branch, repo_path)
         if pull_error:
             return pull_error
         rebase = bool(inp.get("rebase", False))

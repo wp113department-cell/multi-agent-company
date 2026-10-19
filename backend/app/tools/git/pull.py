@@ -82,7 +82,32 @@ GIT_PULL_TOOL = {
 }
 
 
-def validate_git_pull_inputs(remote: str, branch: str) -> str | None:
+def configured_remote_error(repo_path: str, remote: str) -> str | None:
+    """G1 (2026-10-19): `remote` must name a remote already configured in
+    this repository. A URL or path was passed straight to git, so an agent
+    could make git connect to any address — localhost, the private network,
+    the cloud metadata service — found by the dangerous-tools sweep."""
+    import subprocess
+
+    try:
+        r = subprocess.run(
+            ["git", "remote"], cwd=repo_path, capture_output=True, text=True, timeout=15
+        )
+        names = set(r.stdout.split())
+    except Exception:
+        names = set()
+    if remote in names:
+        return None
+    return (
+        f"[ERROR] Unknown remote {remote!r} — use the name of a remote configured in "
+        f"this repository ({', '.join(sorted(names)) or 'none configured'}); URLs and "
+        "paths are not allowed."
+    )
+
+
+def validate_git_pull_inputs(
+    remote: str, branch: str, repo_path: str | None = None
+) -> str | None:
     """Returns an [ERROR] string if `remote`/`branch` are unsafe, else
     None. Shared by both real call sites."""
     if remote.startswith("-"):
@@ -97,4 +122,6 @@ def validate_git_pull_inputs(remote: str, branch: str) -> str | None:
             "start with '-' (this would be interpreted as an additional "
             "git flag, not a branch name)."
         )
+    if repo_path is not None:
+        return configured_remote_error(repo_path, remote)
     return None

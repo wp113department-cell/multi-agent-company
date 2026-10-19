@@ -1820,7 +1820,7 @@ class ChatAgent:
         if tool_name == "git_pull":
             gp_remote = str(inp.get("remote", "origin"))
             gp_branch = str(inp.get("branch", ""))
-            gp_error = validate_git_pull_inputs(gp_remote, gp_branch)
+            gp_error = validate_git_pull_inputs(gp_remote, gp_branch, repo)
             if gp_error:
                 return gp_error
             gp_rebase = bool(inp.get("rebase", False))
