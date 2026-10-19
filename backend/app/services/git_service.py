@@ -287,6 +287,22 @@ def _auth_env(url: str, token: str) -> dict[str, str]:
     }
 
 
+def github_auth_env(url: str, token: str | None) -> dict[str, str] | None:
+    """W8 (2026-10-19): `_auth_env` for a saved GitHub token, but only when
+    `url` is on GitHub (github.com, or the GitHub Enterprise host of
+    GITHUB_API_BASE_URL) — a GitHub token is never sent to another host."""
+    if not token:
+        return None
+    from app.config import get_settings
+
+    api_host = urlparse(get_settings().github_api_base_url).hostname or ""
+    github_hosts = {"github.com", api_host, api_host.removeprefix("api.")}
+    parsed = urlparse(url)
+    if parsed.scheme != "https" or (parsed.hostname or "") not in github_hosts:
+        return None
+    return _auth_env(url, token)
+
+
 def scrub_secret(text: str, token: str | None) -> str:
     """Remove a token (and its Basic-auth encoding) from text bound for
     logs, DB rows or API responses."""
@@ -526,9 +542,14 @@ async def git_revert(
 
 
 async def git_push(
-    repo_path: str, remote: str = "origin", branch: str = ""
+    repo_path: str, remote: str = "origin", branch: str = "", token: str | None = None
 ) -> dict[str, Any]:
-    """Push to remote. Remote URL must be on allowlist (checked via git remote get-url)."""
+    """Push to remote. Remote URL must be on allowlist (checked via git remote get-url).
+
+    W8 (2026-10-19): with `token` the push authenticates as the app's GitHub
+    token (host-scoped header, other credential helpers off). Without it the
+    push relied on whatever login the machine had — it worked on a developer
+    machine logged in with `gh`, and failed on every server and in Docker."""
     _validate_workspace(repo_path)
     # remote/branch used to be passed to git unvalidated, so branch="--force"
     # became a force-push and remote="--receive-pack=CMD" executed a command.
@@ -539,11 +560,16 @@ async def git_push(
     rc_url, url_out, _ = await _run_git(["remote", "get-url", remote], cwd=repo_path)
     if rc_url == 0 and url_out.strip():
         _validate_remote_url(url_out.strip())
+    env = github_auth_env(url_out.strip(), token) if rc_url == 0 else None
     args = ["push", remote]
     if branch:
         args.append(branch)
-    rc, stdout, stderr = await _run_git(args, cwd=repo_path, timeout=120.0)
-    return {"ok": rc == 0, "stdout": stdout, "stderr": stderr}
+    rc, stdout, stderr = await _run_git(args, cwd=repo_path, timeout=120.0, env=env)
+    return {
+        "ok": rc == 0,
+        "stdout": scrub_secret(stdout, token),
+        "stderr": scrub_secret(stderr, token),
+    }
 
 
 async def git_branch_list(repo_path: str) -> dict[str, Any]:

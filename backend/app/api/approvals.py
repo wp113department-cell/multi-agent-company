@@ -231,7 +231,15 @@ async def dispatch_git_push_decision(task_id: int, approved: bool) -> None:
             await update_task_pr(db, task_id, None, "failed")
             return
 
-        token = (await get_setting(db, "github_token")) or get_settings().github_token
+        # W8 (2026-10-19): the repository's own token (entered for a private
+        # repo) first, then the one saved in Settings, then GITHUB_TOKEN
+        from app.security.credential_vault import scoped_credential_key
+
+        token = (
+            (await get_setting(db, scoped_credential_key("github_token", task.repo.id)))
+            or (await get_setting(db, "github_token"))
+            or get_settings().github_token
+        )
 
         from app.tools.git_push_tool import push_and_create_pr, resolve_target_branch
 

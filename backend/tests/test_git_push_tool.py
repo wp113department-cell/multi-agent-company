@@ -289,8 +289,9 @@ class TestPushAndCreatePr:
             pr_number=7,
             error=None,
         )
+        # W8: the push authenticates with the app's token (it sent none before)
         mock_push.assert_called_once_with(
-            "/repo", remote="origin", branch="agent/task-42"
+            "/repo", remote="origin", branch="agent/task-42", token="tok"
         )
         mock_msg.assert_called_once()
         mock_body.assert_called_once()

@@ -256,7 +256,7 @@ async def push_and_create_pr(
     settings = get_settings()
     branch = f"agent/task-{task_id}"
 
-    push_result = await git_push(repo_path, remote="origin", branch=branch)
+    push_result = await git_push(repo_path, remote="origin", branch=branch, token=token)
     if not push_result["ok"]:
         return PushResult(
             pushed=False, pr_url=None, pr_number=None, error=push_result["stderr"][:500]

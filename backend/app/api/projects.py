@@ -398,6 +398,17 @@ async def create_project(
                 _extract_name(url),
             )
         token = (body.github_token or "").strip() or None
+        # W8 (2026-10-19): with no token typed here, a private GitHub repo is
+        # cloned with the token saved in Settings / GITHUB_TOKEN (only ever
+        # sent to GitHub). Before, the clone sent none and worked only where
+        # the machine itself was logged in to GitHub.
+        clone_token = token
+        if clone_token is None:
+            from app.services.git_service import github_auth_env
+
+            saved = await _github_token(db, None)
+            if github_auth_env(url, saved):
+                clone_token = saved
         repo_id = await _clone_for_project(
             db,
             background_tasks,
@@ -405,7 +416,7 @@ async def create_project(
             url=url,
             dest=dest,
             branch=(body.branch or "").strip() or None,
-            token=token,
+            token=clone_token,
             full_history=body.full_history,
         )
         repo = await db.get(Repo, repo_id)
