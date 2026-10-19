@@ -965,9 +965,10 @@ Rules:
 | O6 | **Chat after C6**: ask a question about a project (read-only answer, live activity line, reopen from history), then "Make this a task" and check the new task's description | C6, A37, A38 | The question-only chat and its link to tasks | Anthropic (Haiku + cache) | $0.03–0.08 |
 | O7 | **A custom agent answers** (agent created in the UI) | UI redesign 2026-10-07 | User-created agents really run | Anthropic (Haiku) | $0.01–0.03 |
 | O8 | **Research agent with web search**: a question that needs the web; the answer cites Firecrawl results | Firecrawl (2026-10-14) | The agent uses the new search tool (also spends Firecrawl credits) | Anthropic + Firecrawl | $0.02–0.05 |
+| O10 | **Goal → epics with the real executive**: on the Roadmap page, break a goal into epics (economy), check the epics make sense and belong to the project, start one, and follow it through plan approval | G11 | The AI part of the goal breakdown and a goal epic really running | Anthropic (Haiku) | $0.05–0.30 |
 | O9 | **Re-run journeys C, D, G** (`apps/web/e2e-real/live-ai.spec.ts`, `LIVE_AI=1`): check the spec still matches the C6 chat first ($0), then run | L8–L10 again | The real UI flows after this month's UI changes | Anthropic | $0.10–0.25 |
 
-**Total estimate: about $2–4.** O1 is the largest; it can run last or on its own day.
+**Total estimate: about $2–4.5.** O1 is the largest; it can run last or on its own day.
 
 ### O2. Before the first paid call ($0)
 

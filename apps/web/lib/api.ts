@@ -552,17 +552,28 @@ export async function approveCost(
 // Goals (Phase 7) — plain-language goals → epics via Executive Agent
 // ---------------------------------------------------------------------------
 
+// G11 (2026-10-19): a goal belongs to a project; the AI breaks it into
+// "proposed" epics of that project, each started by the user.
+export interface GoalEpic {
+  epicId: string;
+  title: string;
+  description: string;
+  status: string;
+}
+
 export interface Goal {
   goalId: string;
   text: string;
   status: string;
-  epicIds: string[];
   summary: string | null;
+  projectId: number | null;
+  epicIds: string[];
+  epics: GoalEpic[];
 }
 
-export async function fetchGoals(): Promise<Goal[]> {
-  const res = await apiFetch("/api/goals", { cache: "no-store" });
-  if (!res.ok) return [];
+export async function fetchGoals(projectId?: number): Promise<Goal[]> {
+  const q = projectId != null ? `?project_id=${projectId}` : "";
+  const res = await apiFetch(`/api/goals${q}`, { cache: "no-store" });
   return handleResponse<Goal[]>(res);
 }
 
@@ -571,13 +582,20 @@ export async function fetchGoal(goalId: string): Promise<Goal> {
   return handleResponse<Goal>(res);
 }
 
-export async function createGoal(text: string): Promise<Goal> {
+export async function createGoal(text: string, projectId?: number): Promise<Goal> {
   const res = await apiFetch("/api/goals", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ text, project_id: projectId ?? null }),
   });
   return handleResponse<Goal>(res);
+}
+
+export async function startEpic(
+  epicId: string,
+): Promise<{ epicId: string; status: string; costEstimate: number }> {
+  const res = await apiFetch(`/api/epics/${epicId}/start`, { method: "POST" });
+  return handleResponse(res);
 }
 
 // ---------------------------------------------------------------------------

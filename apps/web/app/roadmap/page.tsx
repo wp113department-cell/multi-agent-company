@@ -10,6 +10,7 @@ import {
   type Project,
   type RoadmapItem,
 } from "../../lib/api";
+import { GoalsPanel } from "../../components/GoalsPanel";
 
 // #498/#484 (2026-09-24, "Roadmap tracked, sequenced, and re-sequenced
 // against real progress") — GET /api/roadmap and PATCH
@@ -116,7 +117,8 @@ export default function RoadmapPage() {
         <div>
           <h1 className="text-lg text-slate-900 dark:text-slate-100">Roadmap</h1>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-            The planned initiatives for a project and how far along each one is.
+            The goals of a project, their epics, and the planned initiatives with how far
+            along each one is.
           </p>
         </div>
         {readyProjects.length > 0 && (
@@ -134,6 +136,8 @@ export default function RoadmapPage() {
           </select>
         )}
       </div>
+
+      {project && <GoalsPanel projectId={project.id} />}
 
       {repoId === null ? (
         <p className="text-sm text-slate-400">No project yet. Create one in Start first.</p>

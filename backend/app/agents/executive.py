@@ -104,11 +104,19 @@ def _parse_json(text: str) -> dict[str, Any]:
 async def run_executive(
     goal_text: str,
     db: AsyncSession,
+    project_id: int | None = None,
+    repo_id: int | None = None,
 ) -> tuple[str, list[str], str | None]:
     """Convert a plain-language goal into epics and a business-language summary.
 
     Returns (goal_id, epic_ids, error). On success error is None.
     Goal and Epic ORM rows are written to db and flushed (caller owns the transaction).
+
+    G11 (2026-10-19): the goal and its epics belong to `project_id` (and the
+    epics to the project's code folder, `repo_id`), so they show in that
+    project. Before, they belonged to nothing and could never run. Epics are
+    "proposed": nothing runs until the user starts one
+    (POST /api/epics/{id}/start).
     """
     settings = get_settings()
     max_epics = settings.executive_max_epics_per_goal
@@ -173,7 +181,9 @@ async def run_executive(
             epic_id=epic_id,
             title=ep.get("title", "Untitled epic")[:500],
             description=ep.get("description", ""),
-            status="pending",
+            status="proposed",
+            project_id=project_id,
+            repo_id=repo_id,
         )
         db.add(epic)
         epic_ids.append(epic_id)
@@ -181,9 +191,10 @@ async def run_executive(
     goal = Goal(
         goal_id=goal_id,
         text=goal_text,
-        status="processing",
+        status="proposed",
         epic_ids=epic_ids,
         summary=summary,
+        project_id=project_id,
     )
     db.add(goal)
     await db.flush()

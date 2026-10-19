@@ -57,7 +57,7 @@ const STEPS: Step[] = [
     target: "/roadmap",
     icon: "map",
     title: "Roadmap",
-    text: "The bigger picture: planned initiatives and their progress.",
+    text: "The bigger picture: break a goal into epics, start them, and follow planned initiatives.",
   },
   {
     target: "/settings",

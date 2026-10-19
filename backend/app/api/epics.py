@@ -178,6 +178,55 @@ async def list_epics(
 
 # Production audit 12: must stay above get_epic() — its path parameter
 # matched "/batch-review" (500: invalid UUID) first, so this endpoint was unreachable.
+@router.post("/{epic_id}/start", dependencies=[Depends(require_daily_budget)])
+async def start_epic(
+    epic_id: EpicId,
+    db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_approver),
+) -> dict[str, Any]:
+    """G11 (2026-10-19): start an epic proposed by a goal breakdown
+    (POST /api/goals) — the same epic manager pipeline POST /api/epics
+    starts. Only a "proposed" epic of a project with a code folder can start,
+    and only once."""
+    from sqlalchemy import update
+
+    epic = await db.get(Epic, epic_id)
+    if epic is None:
+        raise HTTPException(status_code=404, detail="Epic not found")
+    if epic.status != "proposed":
+        raise HTTPException(
+            status_code=409, detail=f"This epic has already started ({epic.status})."
+        )
+    if epic.repo_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail="This epic's project has no code folder yet, so it cannot run.",
+        )
+    estimate = await estimate_epic_cost(subtask_count=5, db=db)
+    claimed = await db.execute(
+        update(Epic)
+        .where(Epic.epic_id == epic_id, Epic.status == "proposed")
+        .values(
+            status="pending",
+            cost_estimate=Decimal(str(estimate.estimated_cost_usd)),
+            created_by=epic.created_by or _actor,
+        )
+    )
+    await db.commit()
+    if claimed.rowcount != 1:  # type: ignore[attr-defined]
+        raise HTTPException(status_code=409, detail="This epic has already started.")
+
+    goal = f"{epic.title}\n\n{epic.description}".strip()
+    asyncio.create_task(_launch_epic_manager(epic_id, goal))
+    return {
+        "epicId": epic_id,
+        "status": "pending",
+        "costEstimate": float(estimate.estimated_cost_usd),
+        "requiresCostApproval": estimate.requires_approval,
+        "message": "Epic started. Manager pipeline starting.",
+    }
+
+
 @router.get("/batch-review", summary="List epics and tasks awaiting review in bulk")
 async def batch_review(
     db: AsyncSession = Depends(get_db),

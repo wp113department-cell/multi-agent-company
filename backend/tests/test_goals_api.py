@@ -1,4 +1,9 @@
-"""Tests for Goals API (POST /api/goals, GET /api/goals, GET /api/goals/{id})."""
+"""Tests for Goals API (POST /api/goals, GET /api/goals, GET /api/goals/{id}).
+
+G11 (2026-10-19): responses are camelCase (what apps/web/lib/api.ts always
+expected), goal ids are UUIDs (a bad id is a 422), and the executive gets the
+goal's project. The end-to-end flow with real Postgres is in
+test_g11_goal_to_epics_e2e.py."""
 
 from __future__ import annotations
 
@@ -12,14 +17,17 @@ from fastapi.testclient import TestClient
 from app.api.goals import router
 from app.db.session import get_db
 
+G = [f"00000000-0000-0000-0000-00000000000{i}" for i in range(4)]
 
-def _make_goal(goal_id: str = "g-1", text: str = "Do stuff") -> SimpleNamespace:
+
+def _make_goal(goal_id: str = G[1], text: str = "Do stuff") -> SimpleNamespace:
     return SimpleNamespace(
         goal_id=goal_id,
         text=text,
-        status="processing",
-        epic_ids=["e-1", "e-2"],
+        status="proposed",
+        epic_ids=[],
         summary="We will do stuff.",
+        project_id=None,
     )
 
 
@@ -43,8 +51,10 @@ class TestCreateGoal:
         db.commit = AsyncMock()
         db.get = AsyncMock(return_value=goal)
 
-        async def _exec(text: str, db_: object) -> tuple[str, list[str], None]:
-            return "g-1", ["e-1", "e-2"], None
+        async def _exec(
+            text: str, db_: object, **_kw: object
+        ) -> tuple[str, list[str], None]:
+            return G[1], ["e-1", "e-2"], None
 
         mock_exec.side_effect = _exec
 
@@ -54,8 +64,8 @@ class TestCreateGoal:
 
         assert resp.status_code == 201
         data = resp.json()
-        assert data["goal_id"] == "g-1"
-        assert data["epic_ids"] == ["e-1", "e-2"]
+        assert data["goalId"] == G[1]
+        assert data["status"] == "proposed"
 
     def test_empty_text_returns_400(self) -> None:
         db = AsyncMock()
@@ -70,7 +80,9 @@ class TestCreateGoal:
     def test_executive_error_returns_500(self, mock_exec: MagicMock) -> None:
         db = AsyncMock()
 
-        async def _exec(text: str, db_: object) -> tuple[str, list[str], str]:
+        async def _exec(
+            text: str, db_: object, **_kw: object
+        ) -> tuple[str, list[str], str]:
             return "", [], "LLM exploded"
 
         mock_exec.side_effect = _exec
@@ -91,7 +103,9 @@ class TestCreateGoal:
         db.commit = AsyncMock()
         db.get = AsyncMock(return_value=None)
 
-        async def _exec(text: str, db_: object) -> tuple[str, list[str], None]:
+        async def _exec(
+            text: str, db_: object, **_kw: object
+        ) -> tuple[str, list[str], None]:
             return "g-1", ["e-1"], None
 
         mock_exec.side_effect = _exec
@@ -107,9 +121,9 @@ class TestListGoals:
     def test_returns_list(self) -> None:
         db = AsyncMock()
         result = MagicMock()
-        result.scalars.return_value.all.return_value = [
-            _make_goal("g-1"),
-            _make_goal("g-2"),
+        result.scalars.return_value = [
+            _make_goal(G[1]),
+            _make_goal(G[2]),
         ]
         db.execute = AsyncMock(return_value=result)
 
@@ -123,7 +137,7 @@ class TestListGoals:
     def test_empty_list(self) -> None:
         db = AsyncMock()
         result = MagicMock()
-        result.scalars.return_value.all.return_value = []
+        result.scalars.return_value = []
         db.execute = AsyncMock(return_value=result)
 
         app = _make_test_app(db)
@@ -135,9 +149,9 @@ class TestListGoals:
 
     def test_goals_ordered_newest_first(self) -> None:
         db = AsyncMock()
-        goals = [_make_goal(f"g-{i}") for i in range(3)]
+        goals = [_make_goal(G[i]) for i in range(3)]
         result = MagicMock()
-        result.scalars.return_value.all.return_value = goals
+        result.scalars.return_value = goals
         db.execute = AsyncMock(return_value=result)
 
         app = _make_test_app(db)
@@ -145,21 +159,21 @@ class TestListGoals:
             resp = client.get("/api/goals")
 
         assert resp.status_code == 200
-        ids = [g["goal_id"] for g in resp.json()]
-        assert ids == ["g-0", "g-1", "g-2"]
+        ids = [g["goalId"] for g in resp.json()]
+        assert ids == G[:3]
 
 
 class TestGetGoal:
     def test_returns_goal(self) -> None:
         db = AsyncMock()
-        db.get = AsyncMock(return_value=_make_goal("g-abc"))
+        db.get = AsyncMock(return_value=_make_goal(G[2]))
 
         app = _make_test_app(db)
         with TestClient(app) as client:
-            resp = client.get("/api/goals/g-abc")
+            resp = client.get(f"/api/goals/{G[2]}")
 
         assert resp.status_code == 200
-        assert resp.json()["goal_id"] == "g-abc"
+        assert resp.json()["goalId"] == G[2]
 
     def test_not_found_returns_404(self) -> None:
         db = AsyncMock()
@@ -167,17 +181,17 @@ class TestGetGoal:
 
         app = _make_test_app(db)
         with TestClient(app) as client:
-            resp = client.get("/api/goals/does-not-exist")
+            resp = client.get(f"/api/goals/{G[3]}")
 
         assert resp.status_code == 404
 
     def test_summary_in_response(self) -> None:
         db = AsyncMock()
-        goal = _make_goal("g-xyz")
+        goal = _make_goal(G[3])
         db.get = AsyncMock(return_value=goal)
 
         app = _make_test_app(db)
         with TestClient(app) as client:
-            resp = client.get("/api/goals/g-xyz")
+            resp = client.get(f"/api/goals/{G[3]}")
 
         assert resp.json()["summary"] == "We will do stuff."

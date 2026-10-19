@@ -212,7 +212,7 @@ Each batch groups items that touch the same code, so nothing is fixed twice.
 | 13 | A41 | Real-stack CI journeys, safe inputs | P2 | ✅ | CI job `real-journeys` (9/9 locally) |
 | 13 | A43 | Alert outbox, signed webhooks | P2 | ✅ outgoing (outbox, retries, dead letters, signed); incoming receiver waits for W8/G5 | backend/tests/test_a43_alert_outbox.py |
 | 13 | G14 | Supply chain and licences | P3 | ✅ | CI job `supply-chain`; backend/tests/test_g14_supply_chain.py |
-| 14 | G11 | Goals → roadmap → epics end to end | P3 | ⬜ | |
+| 14 | G11 | Goals → roadmap → epics end to end | P3 | ✅ connected (owner: "Connect it"); real-AI run pending (O10) | test_g11_goal_to_epics_e2e, e2e/goals.spec.ts |
 | 14 | G12 | MCP server | P3 | ✅ | backend/tests/test_g12_mcp_stdio_client.py |
 | 15 | G5 | Live GitHub/Slack/Linear | P2 | ✅ GitHub (W8), Slack, Linear live-checked 2026-10-19; new-repo creation not run (needs a whole-account token) | test_w8_github_token_auth, test_g5_prod_compose_integration_keys |
 
@@ -762,5 +762,15 @@ Every item gets a full local CI before each push. Close heavy apps first, becaus
   - The split exposed 3 tests that passed only after other tests in the same process (agent registration, a cached docker probe). They also failed alone on `ff522f9e`, so they were older than this work. Fixed in `b58f2956`.
   - All other steps green: ruff, black, mypy, pip-audit, pnpm audit, licences/SBOM, typecheck, lint, vitest, build, e2e 16/16, real-stack journeys 9/9.
 - **2026-10-19: G5 Slack live check. DONE (no AI).** A real message reached the owner's test workspace (`#all-crr2906-test`) through `send_slack_message`; a wrong webhook returns a clear `[ERROR] Slack webhook 404`. **Real gap:** the Slack and Linear tools read `SLACK_WEBHOOK_URL` / `LINEAR_API_KEY` from the environment, but the production compose file never passed them (as with the alert settings in A43), and `.env.example` did not list them. Fixed for backend and worker; `tests/test_g5_prod_compose_integration_keys.py` (fails on the old files). **Linear live check DONE:** issue `CRR-5` created in the owner's test team (`CRR`) through `create_linear_issue`; an unknown team and a wrong key both return clear `[ERROR]` messages.
+- **2026-10-19: G11 goal → epics connected. DONE (local, fake model).** Owner chose "Connect it".
+  - **Found:** the AI goal breakdown (`POST /api/goals` → executive) created epics that belonged to no project and no code folder, so they never showed anywhere and could never run. Nothing ever started them, the goal stayed "processing" for ever, no page used the API, and the web client's `Goal` type (camelCase) never matched the API's snake_case answer.
+  - **Now:**
+    - A goal belongs to a project; its epics belong to the project and its code folder and are "proposed".
+    - `POST /api/epics/{id}/start` starts one (only a proposed epic with a code folder, only once) through the same epic manager pipeline as `POST /api/epics`.
+    - The goal's status follows its epics (proposed → in progress → done), also on the project page.
+    - `GET /api/goals?project_id=` lists a project's goals; a bad goal id is a 422.
+    - Economy mode already turns the executive's planning, reflection and lesson calls off.
+  - **UI:** a Goals panel on the Roadmap page: "Break into epics", each epic with Start, then Open (its epic page). The guided tour text mentions it.
+  - Tests: 3 end-to-end with real Postgres and a fake model (`test_g11_goal_to_epics_e2e.py`); the old goals API tests updated to the new answer shape; 2 browser tests (`e2e/goals.spec.ts`). Mocked e2e 18/18, real-stack journeys 9/9. Real-AI run: O10 in `PENDING_TESTS_API_KEYS.md`.
 - **Next session:** push and confirm GitHub CI; then G11 (goals → roadmap → executive → epics end to end, mocked model); Slack/Linear checks when the keys are in `.env`.
 

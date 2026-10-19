@@ -510,13 +510,24 @@ async def get_project(
             )
         ).scalars()
     )
+    from app.api.goals import goal_status
+
+    epics_by_id = {e.epic_id: e for e in epics}
     counts: dict[str, int] = {}
     for t in tasks:
         counts[t.status] = counts.get(t.status, 0) + 1
     return {
         **_project_dict(p, repo, counts),
+        # G11: a broken-down goal's status follows its epics
         "goals": [
-            {"id": g.goal_id, "title": g.text, "status": g.status} for g in goals
+            {
+                "id": g.goal_id,
+                "title": g.text,
+                "status": goal_status(
+                    g, [epics_by_id[i] for i in (g.epic_ids or []) if i in epics_by_id]
+                ),
+            }
+            for g in goals
         ],
         "epics": [
             {"id": e.epic_id, "title": e.title, "status": e.status} for e in epics
