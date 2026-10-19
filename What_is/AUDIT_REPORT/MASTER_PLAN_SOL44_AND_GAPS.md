@@ -757,5 +757,9 @@ Every item gets a full local CI before each push. Close heavy apps first, becaus
   - **Results after the fix:** private clone ✅; push + draft PR ✅ (`crr2906-test-private` PR #1); PR into the `develop` default branch ✅ (`crr2906-test-develop` PR #1, base `develop`). Creating a new repo: a token limited to selected repos cannot create repos (GitHub rule), and the app shows a clear message. Real creation needs a whole-account token: not run.
   - Not changed: the developer console's manual push (`app/api/console.py`) also sends no token.
   - Tests: 9 in `tests/test_w8_github_token_auth.py` (all fail on the old code); one push-tool test now expects the token.
-- **Next session:** rerun full local CI and push; then G11 (goals → roadmap → executive → epics end to end, mocked model).
+- **2026-10-19: full local CI GREEN on `4d0a01fb` + `b58f2956`.**
+  - **Cause of the earlier red runs:** the machine (15 GB) ran out of memory during the single ~9,500-test pytest process, and the kernel killed Docker Desktop's VM (`oom-kill` in the system log), taking `ci-postgres` with it. The local CI now runs pytest in 3 processes (same tests): 4,264 + 2,767 + 2,483 passed, and Docker stayed up.
+  - The split exposed 3 tests that passed only after other tests in the same process (agent registration, a cached docker probe). They also failed alone on `ff522f9e`, so they were older than this work. Fixed in `b58f2956`.
+  - All other steps green: ruff, black, mypy, pip-audit, pnpm audit, licences/SBOM, typecheck, lint, vitest, build, e2e 16/16, real-stack journeys 9/9.
+- **Next session:** push and confirm GitHub CI; then G11 (goals → roadmap → executive → epics end to end, mocked model); Slack/Linear checks when the keys are in `.env`.
 
