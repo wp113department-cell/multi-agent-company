@@ -2649,7 +2649,9 @@ class ChatAgent:
             # — same risk category as create_pr/github_comment/
             # github_create_issue — so this mirrors their confirmation
             # pattern.
-            lci_api_key = os.environ.get("LINEAR_API_KEY", "")
+            from app.tools.integrations.linear_create_issue import linear_api_key
+
+            lci_api_key = linear_api_key()
             if not lci_api_key:
                 return "[ERROR] LINEAR_API_KEY not set"
             lci_title = str(inp["title"])
@@ -2708,7 +2710,9 @@ class ChatAgent:
             # members — same risk category as create_pr/github_comment/
             # github_create_issue/linear_create_issue — so this mirrors
             # their confirmation pattern.
-            ssm_webhook_url = os.environ.get("SLACK_WEBHOOK_URL", "")
+            from app.tools.integrations.slack_send_message import slack_webhook_url
+
+            ssm_webhook_url = slack_webhook_url()
             if not ssm_webhook_url:
                 return "[ERROR] SLACK_WEBHOOK_URL not set"
             ssm_text = str(inp["text"])

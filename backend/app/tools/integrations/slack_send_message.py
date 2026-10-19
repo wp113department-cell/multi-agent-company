@@ -102,3 +102,13 @@ def send_slack_message(webhook_url: str, text: str) -> str:
         return f"[ERROR] Slack webhook {e.code}: {e.read().decode()[:200]}"
     except Exception as e:
         return f"[ERROR] {e}"
+
+
+def slack_webhook_url() -> str:
+    """G5: SLACK_WEBHOOK_URL from Settings (env or backend/.env), else the
+    process environment."""
+    import os
+
+    from app.config import get_settings
+
+    return get_settings().slack_webhook_url or os.environ.get("SLACK_WEBHOOK_URL", "")

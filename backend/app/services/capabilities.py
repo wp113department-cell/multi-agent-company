@@ -172,7 +172,6 @@ def _github_status(token: str | None, verify: bool) -> tuple[str, str]:
 def connections(
     github_token: str | None, ai_key: str | None, verify: bool = False
 ) -> list[dict[str, str]]:
-    import os
 
     from app.config import get_settings
 
@@ -180,6 +179,9 @@ def connections(
     sandbox = check()
     docker_ok = bool(sandbox.get("sandbox"))
     gh_status, gh_detail = _github_status(github_token, verify)
+    from app.tools.integrations.linear_create_issue import linear_api_key
+    from app.tools.integrations.slack_send_message import slack_webhook_url
+
     rows = [
         (
             "docker",
@@ -201,13 +203,13 @@ def connections(
         (
             "slack",
             "Slack messages",
-            "ready" if os.environ.get("SLACK_WEBHOOK_URL") else "not_configured",
+            "ready" if slack_webhook_url() else "not_configured",
             "Set SLACK_WEBHOOK_URL to send messages.",
         ),
         (
             "linear",
             "Linear issues",
-            "ready" if os.environ.get("LINEAR_API_KEY") else "not_configured",
+            "ready" if linear_api_key() else "not_configured",
             "Set LINEAR_API_KEY to create issues.",
         ),
         (

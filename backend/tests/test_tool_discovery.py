@@ -7,14 +7,31 @@ already, and don't leak overlay-registered tools into other tests.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+
+import pytest
+
 from app.fleet.capability_registry import AgentCapability, get_capability_registry
 from app.fleet.tool_discovery import ToolDiscovery, ToolSpec, get_tool_discovery
 from app.fleet.tool_manifest import TOOL_MANIFEST, is_high_risk
+
+_REGISTERED: list[str] = []
+
+
+@pytest.fixture(autouse=True)
+def _remove_test_agents() -> Iterator[None]:
+    """The test agents (two share the tag td_test_cap) used to stay in the
+    process-wide registry, so the fleet's "capability tags are unique" tests
+    failed whenever they ran after this file."""
+    yield
+    while _REGISTERED:
+        get_capability_registry().deregister(_REGISTERED.pop())
 
 
 def _register_test_agent(
     name: str, tools: list[str], capabilities: list[str], risk_level: str = "low"
 ) -> None:
+    _REGISTERED.append(name)
     get_capability_registry().register(
         AgentCapability(
             name=name,

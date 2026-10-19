@@ -1215,6 +1215,16 @@ class Settings(BaseSettings):
         default="",
         description="GitHub personal access token for creating PRs via the REST API. Prefer setting via the UI (stored in the DB) over this env var.",
     )
+    # G5 (2026-10-19): read through Settings so a plain `uvicorn` run picks
+    # them up from backend/.env too (they used to be os.environ only).
+    slack_webhook_url: str = Field(
+        default="",
+        description="Slack incoming-webhook URL for the slack_send_message tool. Empty = not set up.",
+    )
+    linear_api_key: str = Field(
+        default="",
+        description="Linear personal API key for the linear_create_issue tool. Empty = not set up.",
+    )
     firecrawl_api_key: str = Field(
         default="",
         description="Firecrawl API key for the web_search tool (https://firecrawl.dev). Empty = web search reports that it is not set up.",

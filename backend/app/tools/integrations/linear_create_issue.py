@@ -121,3 +121,13 @@ def create_linear_issue(
         return f"[ERROR] Linear API {e.code}: {e.read().decode()[:200]}"
     except Exception as e:
         return f"[ERROR] {e}"
+
+
+def linear_api_key() -> str:
+    """G5: LINEAR_API_KEY from Settings (env or backend/.env), else the
+    process environment."""
+    import os
+
+    from app.config import get_settings
+
+    return get_settings().linear_api_key or os.environ.get("LINEAR_API_KEY", "")

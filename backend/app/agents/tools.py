@@ -6608,7 +6608,6 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     # =========================================================================
 
     import subprocess as _sp_mcp
-    import os as _os_mcp
 
     # moved to app/tools/git/github_create_issue.py — command-building now shared via github_create_issue_command()
     def github_create_issue_h(inp: dict[str, Any]) -> str:
@@ -6656,7 +6655,11 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
 
     # moved to app/tools/integrations/linear_create_issue.py — this now calls the shared create_linear_issue()
     def linear_create_issue_h(inp: dict[str, Any]) -> str:
-        api_key = _os_mcp.environ.get("LINEAR_API_KEY", "")
+        from app.tools.integrations.linear_create_issue import (
+            linear_api_key as _linear_api_key,
+        )
+
+        api_key = _linear_api_key()
         if not api_key:
             return "[ERROR] LINEAR_API_KEY not set"
         title = str(inp["title"])
@@ -6670,7 +6673,11 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     # send_slack_message() itself; see that function's own module
     # docstring.
     def slack_send_message_h(inp: dict[str, Any]) -> str:
-        webhook_url = _os_mcp.environ.get("SLACK_WEBHOOK_URL", "")
+        from app.tools.integrations.slack_send_message import (
+            slack_webhook_url as _slack_webhook_url,
+        )
+
+        webhook_url = _slack_webhook_url()
         if not webhook_url:
             return "[ERROR] SLACK_WEBHOOK_URL not set"
         return send_slack_message(webhook_url, str(inp["text"]))
