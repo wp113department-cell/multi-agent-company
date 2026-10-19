@@ -993,4 +993,4 @@ These need the owner's keys but **no Anthropic credit**; they can run as soon as
 
 W8c needs a task that produced code. Use a task from O2 when credit exists, or a hand-made commit on a task branch (no AI) before then.
 
-**2026-10-19 results (W8, fine-grained token on two test repos):** W8a ✅, W8c ✅, W8d ✅ after fixing two real bugs (push and private clone sent no token; see the plan log). W8b not run: a token limited to selected repos cannot create repos; the app's error message was checked instead. G5a/G5b still need `SLACK_WEBHOOK_URL` / `LINEAR_API_KEY`.
+**2026-10-19 results (W8, fine-grained token on two test repos):** W8a ✅, W8c ✅, W8d ✅ after fixing two real bugs (push and private clone sent no token; see the plan log). W8b not run: a token limited to selected repos cannot create repos; the app's error message was checked instead. G5a Slack ✅ (2026-10-19, real message sent; production compose now passes the key). G5b Linear: waiting for `LINEAR_API_KEY`.

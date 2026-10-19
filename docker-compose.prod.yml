@@ -154,6 +154,10 @@ services:
       ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
       ALERT_WEBHOOK_SECRET: ${ALERT_WEBHOOK_SECRET:-}
       ALERT_ON_BLOCKED: ${ALERT_ON_BLOCKED:-true}
+      # G5 (2026-10-19): the Slack and Linear tools read these from the
+      # environment; they were never passed, so the tools could not be enabled
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+      LINEAR_API_KEY: ${LINEAR_API_KEY:-}
       CORS_ORIGINS: '${CORS_ORIGINS:?CORS_ORIGINS is required in production — comma-separated list of your real frontend origin(s)}'
       SENTRY_DSN: ${SENTRY_DSN:-}
       # Real, already-enforced by Settings' _require_secure_production_auth
@@ -224,6 +228,10 @@ services:
       ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
       ALERT_WEBHOOK_SECRET: ${ALERT_WEBHOOK_SECRET:-}
       ALERT_ON_BLOCKED: ${ALERT_ON_BLOCKED:-true}
+      # G5 (2026-10-19): the Slack and Linear tools read these from the
+      # environment; they were never passed, so the tools could not be enabled
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+      LINEAR_API_KEY: ${LINEAR_API_KEY:-}
       JWT_SECRET_KEY: '${JWT_SECRET_KEY:?JWT_SECRET_KEY is required in production}'
       JWT_AUTH_ENABLED: "true"
       RBAC_ENABLED: "true"
