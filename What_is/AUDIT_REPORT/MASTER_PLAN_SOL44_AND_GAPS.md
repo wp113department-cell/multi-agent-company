@@ -214,7 +214,7 @@ Each batch groups items that touch the same code, so nothing is fixed twice.
 | 13 | G14 | Supply chain and licences | P3 | ✅ | CI job `supply-chain`; backend/tests/test_g14_supply_chain.py |
 | 14 | G11 | Goals → roadmap → epics end to end | P3 | ⬜ | |
 | 14 | G12 | MCP server | P3 | ✅ | backend/tests/test_g12_mcp_stdio_client.py |
-| 15 | G5 | Live GitHub/Slack/Linear | P2 | ⬜ | needs D5 |
+| 15 | G5 | Live GitHub/Slack/Linear | P2 | ✅ GitHub (W8), Slack, Linear live-checked 2026-10-19; new-repo creation not run (needs a whole-account token) | test_w8_github_token_auth, test_g5_prod_compose_integration_keys |
 
 **Totals:** 58 items: 1 done, 3 partial, 54 pending.
 
@@ -761,6 +761,6 @@ Every item gets a full local CI before each push. Close heavy apps first, becaus
   - **Cause of the earlier red runs:** the machine (15 GB) ran out of memory during the single ~9,500-test pytest process, and the kernel killed Docker Desktop's VM (`oom-kill` in the system log), taking `ci-postgres` with it. The local CI now runs pytest in 3 processes (same tests): 4,264 + 2,767 + 2,483 passed, and Docker stayed up.
   - The split exposed 3 tests that passed only after other tests in the same process (agent registration, a cached docker probe). They also failed alone on `ff522f9e`, so they were older than this work. Fixed in `b58f2956`.
   - All other steps green: ruff, black, mypy, pip-audit, pnpm audit, licences/SBOM, typecheck, lint, vitest, build, e2e 16/16, real-stack journeys 9/9.
-- **2026-10-19: G5 Slack live check. DONE (no AI).** A real message reached the owner's test workspace (`#all-crr2906-test`) through `send_slack_message`; a wrong webhook returns a clear `[ERROR] Slack webhook 404`. **Real gap:** the Slack and Linear tools read `SLACK_WEBHOOK_URL` / `LINEAR_API_KEY` from the environment, but the production compose file never passed them (as with the alert settings in A43), and `.env.example` did not list them. Fixed for backend and worker; `tests/test_g5_prod_compose_integration_keys.py` (fails on the old files). Linear: waiting for the owner's key.
+- **2026-10-19: G5 Slack live check. DONE (no AI).** A real message reached the owner's test workspace (`#all-crr2906-test`) through `send_slack_message`; a wrong webhook returns a clear `[ERROR] Slack webhook 404`. **Real gap:** the Slack and Linear tools read `SLACK_WEBHOOK_URL` / `LINEAR_API_KEY` from the environment, but the production compose file never passed them (as with the alert settings in A43), and `.env.example` did not list them. Fixed for backend and worker; `tests/test_g5_prod_compose_integration_keys.py` (fails on the old files). **Linear live check DONE:** issue `CRR-5` created in the owner's test team (`CRR`) through `create_linear_issue`; an unknown team and a wrong key both return clear `[ERROR]` messages.
 - **Next session:** push and confirm GitHub CI; then G11 (goals → roadmap → executive → epics end to end, mocked model); Slack/Linear checks when the keys are in `.env`.
 
