@@ -200,3 +200,8 @@ def _retrospectives_to_tmp(
         "_REPORTS_DIR",
         tmp_path_factory.mktemp("retrospectives"),
     )
+
+
+# 2026-11-05: local redirect server for the SSRF redirect tests
+# (replaces httpbin.org, which now refuses internal redirect targets).
+from tests._redirect_server import redirector  # noqa: E402, F401

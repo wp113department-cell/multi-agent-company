@@ -788,5 +788,13 @@ Every item gets a full local CI before each push. Close heavy apps first, becaus
   - Everything else held: no file written outside, no patch escaped, no git injection ran, no other tool connected to a local address.
   - Tests: `tests/test_g1_dangerous_tools_sweep.py` (77 tests, 15 s): one per tool, plus checks that normal use still works. On the old code, the 4 affected tools fail.
 - **2026-11-05: npm security update.** `pnpm audit` (a CI gate) reported 20 new advisories published since the last push: 1 critical and 1 high in `next` (remote code execution in image optimisation with SVG; a Server Actions DoS), plus `undici` (via jsdom), `vite` and `@vitest/mocker` (via vitest), `minimatch` and `zod`. Fixed: `next` / `eslint-config-next` 15.5.29, `vitest` 4.1.12, `vite` ^8.3.6 as a direct dev dependency (an override alone left vitest's copy at 8.2.0), and new minimums for `undici` and `minimatch`. `zod` was declared but never imported, so it was removed. `pnpm audit` is clean. Typecheck, lint, vitest 71/71, build and e2e 18/18 pass. Also: the local CI script found Python inside a versioned VS Code snap folder (`snap/code/258`) that disappeared on a VS Code update; it now uses `snap/code/current`.
+- **2026-11-05: Python security update and redirect tests.**
+  - `pip-audit` (a CI gate) reported new advisories:
+    - Pillow 12.3.0 (about 15 CVEs) → 13.0.0;
+    - `langgraph-checkpoint-postgres` 3.1.1 → 3.1.3;
+    - OpenTelemetry 1.44.0 → 1.45.2 (semantic conventions 0.66b2).
+  - `pip check` reports no broken requirements, and `pip-audit` is clean. The image/PDF tests (151) and the tracing/checkpoint tests (183) pass.
+  - **Redirect tests:** the 6 SSRF redirect tests used https://httpbin.org/redirect-to, which now refuses redirects to internal addresses itself (403). Our own guard was no longer reached, so the tests failed; GitHub CI would have failed too. They now use a local redirect server (`tests/_redirect_server.py`, fixture `redirector`). Only the test host `redirect.test` is let through to it; every other address, including the 169.254.169.254 target, still goes through the real `resolve_checked()`.
+  - The local CI falls back to `GITHUB_TOKEN` from `backend/.env` when `gh` is logged out.
 - **Next session:** push and confirm GitHub CI; then G11 (goals → roadmap → executive → epics end to end, mocked model); Slack/Linear checks when the keys are in `.env`.
 

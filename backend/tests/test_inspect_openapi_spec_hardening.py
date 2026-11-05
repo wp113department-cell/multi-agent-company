@@ -72,33 +72,38 @@ def test_old_module_level_wrapper_still_importable_and_delegates() -> None:
 # ---------------------------------------------------------------------------
 
 
+# 2026-11-05: local redirect server instead of httpbin.org, which now refuses
+# internal redirect targets itself (tests/_redirect_server.py).
+from tests._redirect_server import Redirector  # noqa: E402
+
+
 class TestSsrfRedirectBypassBlocked:
-    def test_direct_handler_redirect_to_cloud_metadata_blocked(self) -> None:
+    def test_direct_handler_redirect_to_cloud_metadata_blocked(
+        self, redirector: Redirector
+    ) -> None:
         out = inspect_openapi_spec_handler(
-            {
-                "url": "https://httpbin.org/redirect-to?url=http%3A%2F%2F169.254.169.254%2Fspec.json"
-            }
+            {"url": redirector.to("http://169.254.169.254/spec.json")}
         )
         assert "POLICY DENIED" in out
 
-    def test_make_chat_handlers_redirect_to_cloud_metadata_blocked(self) -> None:
+    def test_make_chat_handlers_redirect_to_cloud_metadata_blocked(
+        self, redirector: Redirector
+    ) -> None:
         handlers = make_chat_handlers(".")
         out = handlers["inspect_openapi_spec"](
-            {
-                "url": "https://httpbin.org/redirect-to?url=http%3A%2F%2F169.254.169.254%2Fspec.json"
-            }
+            {"url": redirector.to("http://169.254.169.254/spec.json")}
         )
         assert "POLICY DENIED" in out
 
-    def test_chat_agent_dispatch_redirect_to_cloud_metadata_blocked(self) -> None:
+    def test_chat_agent_dispatch_redirect_to_cloud_metadata_blocked(
+        self, redirector: Redirector
+    ) -> None:
         agent = _agent(".")
 
         async def _run() -> str:
             return await agent._execute_tool(
                 "inspect_openapi_spec",
-                {
-                    "url": "https://httpbin.org/redirect-to?url=http%3A%2F%2F169.254.169.254%2Fspec.json"
-                },
+                {"url": redirector.to("http://169.254.169.254/spec.json")},
             )
 
         out = asyncio.run(_run())
@@ -138,10 +143,10 @@ class TestLegitimateUsageRegression:
         out = asyncio.run(_run())
         assert "listWidgets" in out
 
-    def test_direct_handler_follows_legit_external_redirect(self) -> None:
-        out = inspect_openapi_spec_handler(
-            {"url": "https://httpbin.org/redirect-to?url=https%3A%2F%2Fexample.com"}
-        )
+    def test_direct_handler_follows_legit_external_redirect(
+        self, redirector: Redirector
+    ) -> None:
+        out = inspect_openapi_spec_handler({"url": redirector.legit})
         # example.com's HTML is not a valid OpenAPI spec, but the fetch
         # itself must have genuinely followed the redirect (no POLICY
         # DENIED) to reach the parse-failure stage.

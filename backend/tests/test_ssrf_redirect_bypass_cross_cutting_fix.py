@@ -39,22 +39,21 @@ from __future__ import annotations
 from app.tools.execution.check_url_status import check_url_status_handler
 from app.tools.execution.fetch_url import fetch_url_handler
 from app.tools.integrations.http_request import http_request_handler
+from tests._redirect_server import Redirector
 
-_MALICIOUS_REDIRECT = (
-    "https://httpbin.org/redirect-to?url=http%3A%2F%2F169.254.169.254"
-    "%2Flatest%2Fmeta-data%2F"
-)
-_LEGIT_REDIRECT = "https://httpbin.org/redirect-to?url=https%3A%2F%2Fexample.com"
+# 2026-11-05: these used https://httpbin.org/redirect-to, which now refuses
+# redirects to internal addresses itself — the guard was no longer reached.
+# A local redirect server (tests/_redirect_server.py) does the same job.
 
 
 class TestFetchUrlRedirectBypassFixed:
-    def test_malicious_redirect_blocked(self) -> None:
-        out = fetch_url_handler({"url": _MALICIOUS_REDIRECT})
+    def test_malicious_redirect_blocked(self, redirector: Redirector) -> None:
+        out = fetch_url_handler({"url": redirector.malicious})
         assert "POLICY DENIED" in out
         assert "169.254.169.254" in out
 
-    def test_legit_redirect_still_followed(self) -> None:
-        out = fetch_url_handler({"url": _LEGIT_REDIRECT})
+    def test_legit_redirect_still_followed(self, redirector: Redirector) -> None:
+        out = fetch_url_handler({"url": redirector.legit})
         assert "Example Domain" in out
         assert "POLICY DENIED" not in out
 
@@ -64,13 +63,13 @@ class TestFetchUrlRedirectBypassFixed:
 
 
 class TestCheckUrlStatusRedirectBypassFixed:
-    def test_malicious_redirect_blocked(self) -> None:
-        out = check_url_status_handler({"url": _MALICIOUS_REDIRECT})
+    def test_malicious_redirect_blocked(self, redirector: Redirector) -> None:
+        out = check_url_status_handler({"url": redirector.malicious})
         assert "Redirect blocked" in out
         assert "169.254.169.254" in out
 
-    def test_legit_redirect_still_followed(self) -> None:
-        out = check_url_status_handler({"url": _LEGIT_REDIRECT})
+    def test_legit_redirect_still_followed(self, redirector: Redirector) -> None:
+        out = check_url_status_handler({"url": redirector.legit})
         assert "HTTP 200" in out
 
     def test_direct_url_to_private_address_still_blocked(self) -> None:
@@ -79,13 +78,13 @@ class TestCheckUrlStatusRedirectBypassFixed:
 
 
 class TestHttpRequestRedirectBypassFixed:
-    def test_malicious_redirect_blocked(self) -> None:
-        out = http_request_handler({"method": "GET", "url": _MALICIOUS_REDIRECT})
+    def test_malicious_redirect_blocked(self, redirector: Redirector) -> None:
+        out = http_request_handler({"method": "GET", "url": redirector.malicious})
         assert "Redirect blocked" in out
         assert "169.254.169.254" in out
 
-    def test_legit_redirect_still_followed(self) -> None:
-        out = http_request_handler({"method": "GET", "url": _LEGIT_REDIRECT})
+    def test_legit_redirect_still_followed(self, redirector: Redirector) -> None:
+        out = http_request_handler({"method": "GET", "url": redirector.legit})
         assert "Example Domain" in out
 
     def test_direct_url_to_private_address_still_blocked(self) -> None:
