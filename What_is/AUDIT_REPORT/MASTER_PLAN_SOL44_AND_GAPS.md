@@ -796,5 +796,6 @@ Every item gets a full local CI before each push. Close heavy apps first, becaus
   - `pip check` reports no broken requirements, and `pip-audit` is clean. The image/PDF tests (151) and the tracing/checkpoint tests (183) pass.
   - **Redirect tests:** the 6 SSRF redirect tests used https://httpbin.org/redirect-to, which now refuses redirects to internal addresses itself (403). Our own guard was no longer reached, so the tests failed; GitHub CI would have failed too. They now use a local redirect server (`tests/_redirect_server.py`, fixture `redirector`). Only the test host `redirect.test` is let through to it; every other address, including the 169.254.169.254 target, still goes through the real `resolve_checked()`.
   - The local CI falls back to `GITHUB_TOKEN` from `backend/.env` when `gh` is logged out.
+- **2026-11-05: pushed `c9c970bc`; GitHub CI 6/7 green, real-stack journeys 8/9.** Journey A4 (logout) raced on GitHub's faster runner. After the API logout, the page still open (/start) redirected itself to /login?expired=1 (A35, correct behaviour) and interrupted the test's own navigation to /tasks. Test fix: leave that page (about:blank) first. Local real-stack journeys 9/9.
 - **Next session:** push and confirm GitHub CI; then G11 (goals → roadmap → executive → epics end to end, mocked model); Slack/Linear checks when the keys are in `.env`.
 

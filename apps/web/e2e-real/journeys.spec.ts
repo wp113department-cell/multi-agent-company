@@ -235,6 +235,10 @@ test("A4 — logout ends the session; protected pages redirect to /login", async
   const r = await page.request.post("/api/auth/logout");
   expect(r.status()).toBe(204);
   expect((await page.request.get("/api/tasks?limit=1")).status()).toBe(401);
+  // The page still open (/start) notices the ended session and redirects
+  // itself to /login?expired=1 (A35). Leave it first, or that redirect can
+  // interrupt the navigation below (it did on GitHub's faster runner).
+  await page.goto("about:blank");
   await page.goto("/tasks");
   await expect(page).toHaveURL(/\/login/);
 });
