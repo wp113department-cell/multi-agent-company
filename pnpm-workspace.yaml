@@ -12,9 +12,10 @@ allowBuilds:
   unrs-resolver: true
 overrides:
   esbuild: ">=0.25.0"
-  minimatch: ">=9.0.7"
-  vite: ">=6.4.3"
+  minimatch: ">=11.0.1" # 2026-11-05: GHSA-g3hv-75wg-m249 (globparts DoS) <11.0.1
+  vite: "^8.3.6" # 2026-11-05 (fixed in >=8.2.4): GHSA-9jrq-w75r-8gcw and 4 more, vite 8.2.0-8.2.3
   sharp: ">=0.35.0"
+  undici: ">=8.12.2" # 2026-11-05: 8 advisories <8.12.2 (via jsdom)
   # postcss is also bundled *inside* next@15.5.21 itself (its own internal
   # build pipeline dep, not just apps/web's direct devDependency) — without
   # this override that inner copy stays pinned to next's old postcss@8.4.31.
@@ -23,10 +24,10 @@ overrides:
   # !!omap resolution, fixed in 4.3.1. Transitive via eslint's own
   # @eslint/eslintrc dependency (`pnpm why js-yaml` — resolved to 4.3.0
   # everywhere, no direct dependency on it anywhere in this workspace).
-  js-yaml: ">=5.4.1"  # 2026-10-05: was >=4.3.1 (already resolving v5); merge-key CPU advisory <=5.4.0
+  js-yaml: ">=5.4.1" # 2026-10-05: was >=4.3.1 (already resolving v5); merge-key CPU advisory <=5.4.0
   "brace-expansion@1": ">=1.1.17"
   "brace-expansion@2": ">=2.1.2"
-  "brace-expansion@5": ">=5.0.12"  # 2026-10-05: 3 advisories <5.0.12 (pnpm audit before push)
+  "brace-expansion@5": ">=5.0.12" # 2026-10-05: 3 advisories <5.0.12 (pnpm audit before push)
   # 2026-10-06 (pnpm audit before push): GHSA-68fv-2mgg-jv7q (high, next>postcss)
   # and GHSA-rj75-hqrm-r3gf (moderate, tailwindcss) — fixed only in these versions.
   source-map-js: ">=1.2.2"
@@ -42,3 +43,6 @@ overrides:
 auditConfig:
   ignoreGhsas:
     - GHSA-vfj7-8cjw-p6xm
+
+minimumReleaseAgeExclude:
+  - vite@8.3.6
