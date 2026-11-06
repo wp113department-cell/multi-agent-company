@@ -1,0 +1,58 @@
+# Weekly security scan (2026-11-06).
+#
+# The same two dependency audits CI runs on every push, but on a schedule:
+# advisories are published between pushes (on 2026-11-05, 35+ had built up
+# unnoticed — 20 npm, including a critical Next.js RCE, and ~17 Python).
+# A red run here means "update a dependency" even when nobody has pushed.
+# The ignore lists must match ci.yml (tests/test_security_scan_workflow.py).
+name: Weekly security scan
+
+on:
+  schedule:
+    - cron: "0 4 * * 1"  # Mondays 04:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: Python dependencies (pip-audit)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Install pip-audit
+        run: pip install pip-audit
+
+      - name: Audit dependencies
+        run: pip-audit -r requirements.txt --ignore-vuln GHSA-jfh8-c2jp-5
+
+  node:
+    name: npm dependencies (pnpm audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 11.9.0
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      - name: Audit dependencies
+        # reads pnpm-lock.yaml; per-advisory exceptions live in
+        # pnpm-workspace.yaml (auditConfig), same as the CI gate
+        run: pnpm audit

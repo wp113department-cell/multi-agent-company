@@ -797,5 +797,11 @@ Every item gets a full local CI before each push. Close heavy apps first, becaus
   - **Redirect tests:** the 6 SSRF redirect tests used https://httpbin.org/redirect-to, which now refuses redirects to internal addresses itself (403). Our own guard was no longer reached, so the tests failed; GitHub CI would have failed too. They now use a local redirect server (`tests/_redirect_server.py`, fixture `redirector`). Only the test host `redirect.test` is let through to it; every other address, including the 169.254.169.254 target, still goes through the real `resolve_checked()`.
   - The local CI falls back to `GITHUB_TOKEN` from `backend/.env` when `gh` is logged out.
 - **2026-11-05: pushed `c9c970bc`; GitHub CI 6/7 green, real-stack journeys 8/9.** Journey A4 (logout) raced on GitHub's faster runner. After the API logout, the page still open (/start) redirected itself to /login?expired=1 (A35, correct behaviour) and interrupted the test's own navigation to /tasks. Test fix: leave that page (about:blank) first. Local real-stack journeys 9/9.
+- **2026-11-06: GitHub CI green on `5feb74a4` (7/7).**
+- **2026-11-06: weekly security scan and dependency pull requests.**
+  - Advisories are published between pushes; 35+ had built up unnoticed by 2026-11-05.
+  - New workflow `.github/workflows/security-scan.yml`: pip-audit and pnpm audit every Monday (and on demand). A red run means a dependency needs updating even when nobody pushed.
+  - Dependabot now also opens one grouped weekly pull request each for npm and pip (minor and patch only; majors stay a deliberate upgrade). CI and both audits run on each pull request.
+  - `tests/test_security_scan_workflow.py` keeps the scan's pip-audit exceptions identical to the CI gate's.
 - **Next session:** push and confirm GitHub CI; then G11 (goals → roadmap → executive → epics end to end, mocked model); Slack/Linear checks when the keys are in `.env`.
 

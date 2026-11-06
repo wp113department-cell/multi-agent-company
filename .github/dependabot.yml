@@ -2,6 +2,7 @@
 # build always gets the exact image that was tested. Dependabot opens a pull
 # request once a month when a newer image is published for the same tag, so
 # the pins still pick up security fixes; CI checks each one before merge.
+# npm and pip updates are below (2026-11-06).
 version: 2
 updates:
   - package-ecosystem: docker
@@ -15,3 +16,29 @@ updates:
     directory: /
     schedule:
       interval: monthly
+  # 2026-11-06: npm and Python packages too. One grouped pull request per
+  # ecosystem per week with the minor and patch updates (majors are left
+  # for a deliberate upgrade), so security fixes arrive ready to review;
+  # CI (including both audits) runs on each pull request.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      npm-minor-and-patch:
+        update-types: ["minor", "patch"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+  - package-ecosystem: pip
+    directory: /backend
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      pip-minor-and-patch:
+        update-types: ["minor", "patch"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
